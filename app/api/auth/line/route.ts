@@ -27,7 +27,7 @@ export async function GET() {
     client_id: channelId,
     redirect_uri: redirectUri,
     state,
-    scope: 'profile openid',
+    scope: 'profile', // openid を削除してメアド要求のハードルを下げる
   })
 
   const authUrl = `https://access.line.me/oauth2/v2.1/authorize?${params.toString()}`
