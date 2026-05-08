@@ -121,8 +121,15 @@ export async function GET(request: NextRequest) {
     }
 
     // --- セッション発行 ---
-    await setUserSession(userId)
+    // Next.jsの仕様により、cookies().set() ではなく NextResponse に直接セットする
     const response = NextResponse.redirect(`${siteUrl}/groups`)
+    response.cookies.set('gw_user_session', userId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 30, // 30日
+      path: '/',
+    })
     response.cookies.delete('line_oauth_state')
     return response
 
