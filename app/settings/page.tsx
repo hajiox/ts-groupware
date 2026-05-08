@@ -1,141 +1,81 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { CURRENT_USER } from "@/lib/mock-data";
+import { useState, useEffect } from "react";
 
+type User = {
+  id: string;
+  display_name: string;
+  picture_url: string | null;
+  role: string;
+};
+
+/**
+ * 設定ページ
+ *
+ * プロフィール表示 + 通知設定 + ログアウト
+ */
 export default function SettingsPage() {
-  const router = useRouter();
-  const [pushEnabled, setPushEnabled] = useState(true);
-  const [mentionEnabled, setMentionEnabled] = useState(true);
-  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => data && setUser(data.user))
+      .catch(() => {});
+  }, []);
 
   function handleLogout() {
-    router.push("/login");
+    window.location.href = "/api/auth/logout";
   }
 
   return (
-    <div className="page-content">
-      <div className="settings-page">
+    <>
+      <header className="top-header" role="banner">
+        <h1 className="top-header__title">設定</h1>
+      </header>
+
+      <div className="settings-page page-content">
         {/* Profile */}
         <section className="settings-profile" aria-label="プロフィール">
-          <div
-            className="avatar-placeholder"
-            style={{
-              width: 72,
-              height: 72,
-              background: CURRENT_USER.color,
-              fontSize: 28,
-              borderRadius: "50%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 700,
-              color: "#fff",
-            }}
-            aria-hidden="true"
-          >
-            {CURRENT_USER.initials}
+          {user?.picture_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={user.picture_url}
+              alt={user.display_name}
+              className="avatar"
+              width={72}
+              height={72}
+            />
+          ) : (
+            <div
+              className="avatar-placeholder"
+              style={{ width: 72, height: 72, fontSize: 30, background: "#3b82f6" }}
+            >
+              {user?.display_name?.charAt(0) || "?"}
+            </div>
+          )}
+          <div className="settings-profile__name">
+            {user?.display_name || "読み込み中..."}
           </div>
-          <div className="settings-profile__name">{CURRENT_USER.name}</div>
-          <div className="settings-profile__sub">LINEアカウント連携済み</div>
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              background: "#0d3f2a",
-              color: "#06C755",
-              fontSize: 12,
-              fontWeight: 600,
-              padding: "4px 12px",
-              borderRadius: 999,
-            }}
-          >
-            <span aria-hidden="true">✓</span> LINE連携
+          <div className="settings-profile__sub">
+            {user?.role === "admin" ? "管理者" : "メンバー"}
           </div>
         </section>
 
         {/* Notification settings */}
-        <section className="settings-section" aria-labelledby="notif-title">
-          <div className="settings-section__title" id="notif-title">
-            通知設定
-          </div>
-
+        <section className="settings-section" aria-label="通知設定">
+          <h2 className="settings-section__title">通知</h2>
           <div className="settings-row">
             <div>
-              <div className="settings-row__label">Web プッシュ通知</div>
-              <div className="settings-row__sub">ブラウザ通知を受け取る</div>
+              <div className="settings-row__label">Web Push 通知</div>
+              <div className="settings-row__sub">
+                新しい投稿やメッセージを通知
+              </div>
             </div>
-            <label className="toggle" aria-label="Webプッシュ通知">
-              <input
-                type="checkbox"
-                checked={pushEnabled}
-                onChange={(e) => setPushEnabled(e.target.checked)}
-                role="switch"
-                aria-checked={pushEnabled}
-              />
+            <label className="toggle">
+              <input type="checkbox" defaultChecked />
               <span className="toggle__track" />
             </label>
-          </div>
-
-          <div className="settings-row">
-            <div>
-              <div className="settings-row__label">メンション通知</div>
-              <div className="settings-row__sub">自分宛のメンションのみ</div>
-            </div>
-            <label className="toggle" aria-label="メンション通知">
-              <input
-                type="checkbox"
-                checked={mentionEnabled}
-                onChange={(e) => setMentionEnabled(e.target.checked)}
-                role="switch"
-                aria-checked={mentionEnabled}
-              />
-              <span className="toggle__track" />
-            </label>
-          </div>
-
-          <div className="settings-row">
-            <div>
-              <div className="settings-row__label">通知音</div>
-              <div className="settings-row__sub">メッセージ受信時にサウンドを鳴らす</div>
-            </div>
-            <label className="toggle" aria-label="通知音">
-              <input
-                type="checkbox"
-                checked={soundEnabled}
-                onChange={(e) => setSoundEnabled(e.target.checked)}
-                role="switch"
-                aria-checked={soundEnabled}
-              />
-              <span className="toggle__track" />
-            </label>
-          </div>
-        </section>
-
-        {/* Account section */}
-        <section className="settings-section" aria-labelledby="account-title">
-          <div className="settings-section__title" id="account-title">
-            アカウント
-          </div>
-          <div className="settings-row">
-            <div>
-              <div className="settings-row__label">アプリバージョン</div>
-            </div>
-            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>v1.0.0</span>
-          </div>
-          <div className="settings-row">
-            <div>
-              <div className="settings-row__label">利用規約</div>
-            </div>
-            <span style={{ fontSize: 18, color: "var(--text-muted)" }}>›</span>
-          </div>
-          <div className="settings-row">
-            <div>
-              <div className="settings-row__label">プライバシーポリシー</div>
-            </div>
-            <span style={{ fontSize: 18, color: "var(--text-muted)" }}>›</span>
           </div>
         </section>
 
@@ -149,6 +89,6 @@ export default function SettingsPage() {
           ログアウト
         </button>
       </div>
-    </div>
+    </>
   );
 }

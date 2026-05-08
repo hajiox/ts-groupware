@@ -1,13 +1,15 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+/**
+ * ログインページ
+ *
+ * 「LINEでログイン」ボタンで /api/auth/line に遷移し、LINE OAuth フローを開始する。
+ */
 
 export default function LoginPage() {
-  const router = useRouter();
-
   function handleLineLogin() {
-    // Placeholder: real LINE OAuth flow goes here
-    router.push("/groups");
+    // LINE OAuth フロー開始
+    window.location.href = "/api/auth/line";
   }
 
   return (
