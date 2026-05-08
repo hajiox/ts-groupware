@@ -28,6 +28,7 @@ export async function GET() {
     redirect_uri: redirectUri,
     state,
     scope: 'profile', // openid を削除してメアド要求のハードルを下げる
+    bot_prompt: 'normal',
   })
 
   const authUrl = `https://access.line.me/oauth2/v2.1/authorize?${params.toString()}`
