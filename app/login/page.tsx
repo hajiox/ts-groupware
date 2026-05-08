@@ -1,11 +1,39 @@
 "use client";
 
 import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+
+function generateRandomString(length: number) {
+  const array = new Uint8Array(length);
+  window.crypto.getRandomValues(array);
+  return Array.from(array, (dec) => ('0' + dec.toString(16)).substr(-2)).join('');
+}
 
 function LoginContent() {
   const searchParams = useSearchParams();
   const error = searchParams.get('error');
+  const [authUrl, setAuthUrl] = useState<string>('#');
+
+  useEffect(() => {
+    // クライアント側でstateを生成し、Cookieに保存（302リダイレクトを避けて直接遷移するため）
+    const state = generateRandomString(16);
+    document.cookie = `line_oauth_state=${state}; path=/; max-age=600; SameSite=Lax; ${window.location.protocol === 'https:' ? 'Secure' : ''}`;
+
+    const channelId = "2009558059"; // LINE_CHANNEL_ID (環境変数から取得できないためハードコード、公開情報なので問題なし)
+    const siteUrl = window.location.origin;
+    const redirectUri = `${siteUrl}/api/auth/line/callback`;
+
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: channelId,
+      redirect_uri: redirectUri,
+      state,
+      scope: 'profile',
+      bot_prompt: 'normal',
+    });
+
+    setAuthUrl(`https://access.line.me/oauth2/v2.1/authorize?${params.toString()}`);
+  }, []);
 
   const errorMessages: Record<string, string> = {
     cancelled: 'ログインがキャンセルされました',
@@ -60,9 +88,9 @@ function LoginContent() {
         </div>
       )}
 
-      {/* LINEアプリでのディープリンク問題を回避するためbot_promptを追加したURL */}
+      {/* 302リダイレクトを避け、直接LINEのドメインを踏ませることでOSのApp-to-App遷移を確実に発火させる */}
       <a
-        href="/api/auth/line"
+        href={authUrl}
         className="btn-line"
         aria-label="LINEアカウントでログイン"
         style={{ display: 'flex', textDecoration: 'none' }}
