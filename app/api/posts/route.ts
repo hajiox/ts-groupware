@@ -126,6 +126,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error?.message || '投稿失敗' }, { status: 500 })
   }
 
+  // グループ名を取得（通知用）
+  const { data: group } = await adminClient
+    .from('gw_groups')
+    .select('name')
+    .eq('id', group_id)
+    .single()
+
+  // 非同期で通知を送信（APIレスポンスをブロックしない）
+  const { sendPushNotificationToGroup } = await import('@/lib/web-push')
+  const authorName = user.display_name || 'メンバー'
+  const messageBody = content?.trim() ? content.trim().substring(0, 50) : 'ファイルを送信しました'
+  
+  sendPushNotificationToGroup(group_id, user.id, {
+    title: group?.name ? `${group.name} - ${authorName}` : authorName,
+    body: messageBody,
+    url: `/board/${group_id}`,
+  }).catch(e => console.error('[Push Error]', e))
+
   // グループの updated_at を更新
   await adminClient
     .from('gw_groups')

@@ -63,9 +63,9 @@ export default function BoardPage() {
 
   const [groupName, setGroupName] = useState("掲示板");
   const [posts, setPosts] = useState<Post[]>([]);
-  const [text, setText] = useState("");
-  const [loading, setLoading] = useState(true);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // グループ名取得
@@ -90,18 +90,55 @@ export default function BoardPage() {
   }
 
   async function handlePost() {
-    if (!text.trim()) return;
+    if (!text.trim() && !selectedFile) return;
+
+    let attachments = [];
+    
+    if (selectedFile) {
+      setIsUploading(true);
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          attachments.push({
+            type: data.type,
+            url: data.viewUrl || data.url, // プレビュー用URLを優先
+            name: data.name
+          });
+        } else {
+          alert('ファイルのアップロードに失敗しました');
+          setIsUploading(false);
+          return;
+        }
+      } catch (err) {
+        console.error(err);
+        alert('ファイルのアップロードでエラーが発生しました');
+        setIsUploading(false);
+        return;
+      }
+    }
 
     const res = await fetch("/api/posts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ group_id: id, content: text.trim() }),
+      body: JSON.stringify({ group_id: id, content: text.trim(), attachments }),
     });
 
     if (res.ok) {
       setText("");
+      setSelectedFile(null);
+      setIsUploading(false);
       if (textareaRef.current) textareaRef.current.style.height = "38px";
       loadPosts();
+    } else {
+      setIsUploading(false);
     }
   }
 
@@ -181,7 +218,7 @@ export default function BoardPage() {
 
               {/* Attachments */}
               {post.attachments?.length > 0 && (
-                <div style={{ padding: "0 14px" }}>
+                <div style={{ padding: "10px 14px" }}>
                   {post.attachments.map((att, i) =>
                     att.type?.startsWith("image") ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -194,12 +231,15 @@ export default function BoardPage() {
                         rel="noopener noreferrer"
                         style={{
                           display: "block",
-                          padding: "8px 12px",
-                          background: "var(--bg)",
+                          padding: "10px 14px",
+                          background: "rgba(59, 130, 246, 0.1)",
+                          border: "1px solid rgba(59, 130, 246, 0.2)",
                           borderRadius: 8,
                           marginBottom: 8,
                           color: "var(--accent)",
-                          fontSize: 13,
+                          fontSize: 14,
+                          fontWeight: 500,
+                          textDecoration: "none"
                         }}
                       >
                         📎 {att.name}
@@ -246,32 +286,74 @@ export default function BoardPage() {
       </section>
 
       {/* Post input bar */}
-      <form
-        className="post-input-bar"
-        onSubmit={(e) => { e.preventDefault(); handlePost(); }}
-        aria-label="新規投稿"
-      >
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={autoResize}
-          onKeyDown={handleKeyDown}
-          placeholder="投稿内容を入力… (Ctrl+Enter で送信)"
-          rows={1}
-          aria-label="投稿テキスト"
-        />
-        <button type="button" className="icon-btn" aria-label="画像を添付">
-          📎
-        </button>
-        <button
-          type="submit"
-          className="send-btn"
-          aria-label="投稿を送信"
-          disabled={!text.trim()}
+      <div style={{ position: "fixed", bottom: "var(--nav-height)", left: 0, right: 0, zIndex: 90 }}>
+        {/* Selected file preview */}
+        {selectedFile && (
+          <div style={{ 
+            background: "var(--card-hover)", 
+            padding: "8px 12px", 
+            borderTop: "1px solid var(--border)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            fontSize: 12,
+            color: "var(--text)"
+          }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              📎 {selectedFile.name}
+            </span>
+            <button 
+              type="button" 
+              onClick={() => setSelectedFile(null)}
+              style={{ color: "var(--text-sub)", fontSize: 16, padding: "0 4px" }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+        
+        <form
+          className="post-input-bar"
+          style={{ position: "static", borderTop: selectedFile ? "none" : "1px solid var(--border)" }}
+          onSubmit={(e) => { e.preventDefault(); handlePost(); }}
+          aria-label="新規投稿"
         >
-          ↑
-        </button>
-      </form>
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={autoResize}
+            onKeyDown={handleKeyDown}
+            placeholder="投稿内容を入力… (Ctrl+Enter で送信)"
+            rows={1}
+            aria-label="投稿テキスト"
+            disabled={isUploading}
+          />
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={(e) => e.target.files && setSelectedFile(e.target.files[0])}
+            style={{ display: "none" }} 
+            disabled={isUploading}
+          />
+          <button 
+            type="button" 
+            className="icon-btn" 
+            aria-label="ファイルを添付"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+          >
+            📎
+          </button>
+          <button
+            type="submit"
+            className="send-btn"
+            aria-label="投稿を送信"
+            disabled={(!text.trim() && !selectedFile) || isUploading}
+          >
+            {isUploading ? "..." : "↑"}
+          </button>
+        </form>
+      </div>
     </>
   );
 }
