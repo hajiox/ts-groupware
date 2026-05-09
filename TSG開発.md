@@ -623,3 +623,14 @@
   - 未登録ユーザーがLINEログインすると、TSG側では `gw_users.status = pending` の承認待ちユーザーとして作成される想定。
   - 管理者アカウントで `/admin` を開き、承認待ちユーザーを「承認」するとログイン可能になる。
   - 既存管理者はすでに `approved` のため、そのままログイン可能。
+
+### 2026-05-09 TSG LINEログイン成功と内職管理システムへの影響範囲確認
+- **確認内容**:
+  - TSG専用LINEログインチャネル公開後、LINEログイン成功を確認。
+  - Vercel CLIの対象プロジェクトは `.vercel/project.json` 上で `ts-groupware`。
+  - 今回差し替えた `LINE_CHANNEL_ID` / `LINE_CHANNEL_SECRET` はVercelの `ts-groupware` プロジェクト環境変数のみ。
+  - LINE Developers側では新規作成した「TS Groupware」LINEログインチャネルを使っており、既存の「会津ブランド館内職ログイン」チャネル自体は変更していない。
+  - Supabaseは内職管理システムと共用DBだが、TSG側の追加/更新対象は `gw_` prefixのテーブル。
+- **判断**:
+  - 現時点で、内職管理システムのVercel環境変数や既存LINEログインチャネルへ直接影響する操作は行っていない。
+  - 共有DBについては、今後もTSG用テーブルは `gw_` prefixに限定する。
