@@ -92,6 +92,7 @@ export default function BoardPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -247,11 +248,25 @@ export default function BoardPage() {
               {/* Attachments */}
               {post.attachments?.length > 0 && (
                 <div style={{ padding: "10px 14px" }}>
-                  {post.attachments.map((att, i) =>
-                    att.type?.startsWith("image") ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img key={i} src={getAttachmentImageUrl(att.url)} alt={att.name} className="post-card__image" />
-                    ) : (
+                  {post.attachments.map((att, i) => {
+                    if (att.type?.startsWith("image")) {
+                      const imageUrl = getAttachmentImageUrl(att.url);
+
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          className="post-card__image-button"
+                          onClick={() => setPreviewImage({ url: imageUrl, name: att.name })}
+                          aria-label={`${att.name}を拡大表示`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={imageUrl} alt={att.name} className="post-card__image" />
+                        </button>
+                      );
+                    }
+
+                    return (
                       <a
                         key={i}
                         href={att.url}
@@ -272,8 +287,8 @@ export default function BoardPage() {
                       >
                         📎 {att.name}
                       </a>
-                    )
-                  )}
+                    );
+                  })}
                 </div>
               )}
 
@@ -395,6 +410,32 @@ export default function BoardPage() {
           </button>
         </form>
       </div>
+
+      {previewImage && (
+        <div
+          className="image-preview-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={previewImage.name}
+          onClick={() => setPreviewImage(null)}
+        >
+          <button
+            type="button"
+            className="image-preview-close"
+            onClick={() => setPreviewImage(null)}
+            aria-label="拡大表示を閉じる"
+          >
+            ×
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewImage.url}
+            alt={previewImage.name}
+            className="image-preview-img"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </>
   );
 }

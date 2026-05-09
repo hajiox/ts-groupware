@@ -452,10 +452,54 @@ img {
   color: var(--text);
   line-height: 1.6;
 }
+.post-card__image-button {
+  width: 100%;
+  display: block;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: zoom-in;
+}
 .post-card__image {
   width: 100%;
-  aspect-ratio: 16/9;
-  object-fit: cover;
+  max-height: 520px;
+  object-fit: contain;
+  background: var(--bg);
+}
+
+.image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(2, 6, 23, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  cursor: zoom-out;
+}
+.image-preview-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  cursor: default;
+}
+.image-preview-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 301;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 24px;
+  line-height: 1;
 }
 
 .post-card__reactions {
