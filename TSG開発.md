@@ -457,6 +457,21 @@
   - チャネルを公開する、またはテストユーザー2名をTesterとして追加する。
   - Callback URLにTSG本番URL `https://v0-line-blush.vercel.app/api/auth/line/callback` を追加する。
 
+### 2026-05-09 TSG用LINEチャネル未作成の確認
+- **確認結果**:
+  - LINE Developers Console上にTSG専用チャネルは存在しない。
+  - 既存チャネルは「会津ブランド館内職管理」（Messaging API）と「会津ブランド館内職ログイン」（LINEログイン）。
+  - 「会津ブランド館内職ログイン」はステータスが「開発中」。
+- **判断**:
+  - TSGは現状、内職管理のLINEログインチャネルを共用している。
+  - 管理者本人がログインできるのは、そのLINEログインチャネルのAdmin権限を持っているため。
+  - 内職管理システムでユーザー追加できている事象は、Messaging APIの友だち追加/作業者番号連携やAdmin/Tester利用であり、LINEログインチャネルが一般ユーザーに公開されていることとは別。
+- **推奨対応**:
+  - 運用を分けるため、TSG専用のLINEログインチャネルを新規作成する。
+  - TSG専用チャネルのCallback URLに `https://v0-line-blush.vercel.app/api/auth/line/callback` を登録する。
+  - TSGのVercel環境変数 `LINE_CHANNEL_ID` / `LINE_CHANNEL_SECRET` をTSG専用チャネルの値へ差し替える。
+  - テスト中はテストユーザーをTesterに追加し、本運用時はチャネルを公開する。
+
 ### 2026-05-09 添付ファイル上限を100MBへ変更
 - **要望**: 動画なども想定し、アップロード可能なファイルサイズ上限を一旦100MBまで広げる。
 - **修正**:
