@@ -51,7 +51,7 @@ function getDriveClient() {
 
 export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mimeType: string) {
   const drive = getDriveClient()
-  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID
+  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim()
 
   if (!folderId) {
     throw new Error('GOOGLE_DRIVE_FOLDER_ID is not set. Service accounts cannot upload to their own My Drive; set a shared drive folder ID.')

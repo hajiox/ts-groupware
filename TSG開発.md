@@ -218,6 +218,7 @@
 - **方針**: Supabase Storageは使わず、Google Driveの共有ドライブ配下フォルダへアップロードする。
 - **修正**:
   - `lib/drive.ts` で `GOOGLE_DRIVE_FOLDER_ID` を必須化。
+  - Vercel CLI入力時に末尾空白が混入しても動くよう、`GOOGLE_DRIVE_FOLDER_ID` は `.trim()` して使用。
   - Drive APIの `files.create` / `permissions.create` に `supportsAllDrives: true` を追加。
 - **本番設定が必要な項目**:
   - Google共有ドライブにTSG用アップロードフォルダを作成
