@@ -339,6 +339,9 @@ img {
 .top-login-btn {
   margin-top: 24px;
 }
+.login-qr {
+  margin-bottom: 24px;
+}
 
 /* ─── Groups page ─── */
 .groups-header {

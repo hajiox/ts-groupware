@@ -406,6 +406,15 @@
   - `app/page.tsx`
   - `app/login/page.tsx`
 
+### 2026-05-09 ログインページにもLINEログインQRを追加
+- **要望**: `/login` にもTOPページと同じ、LINEログインへ進むQRを表示する。
+- **修正**:
+  - `/login` に `openExternalBrowser=1` 付きLINEログインURLのQRコードを追加。
+  - ログインボタンも同じ絶対URLを使うように統一。
+- **関連ファイル**:
+  - `app/login/page.tsx`
+  - `app/globals.css`
+
 ### 2026-05-09 添付ファイル上限を100MBへ変更
 - **要望**: 動画なども想定し、アップロード可能なファイルサイズ上限を一旦100MBまで広げる。
 - **修正**:
