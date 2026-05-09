@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
+import { verifyLineOAuthState } from '@/lib/line-oauth-state'
 
 /**
  * GET /api/auth/line/callback
@@ -34,7 +35,10 @@ export async function GET(request: NextRequest) {
 
     // --- CSRF state 検証 ---
     const savedState = request.cookies.get('line_oauth_state')?.value
-    if (!savedState || savedState !== state) {
+    const channelSecret = process.env.LINE_CHANNEL_SECRET!
+    const isCookieStateValid = !!savedState && savedState === state
+    const isSignedStateValid = verifyLineOAuthState(state, channelSecret)
+    if (!isCookieStateValid && !isSignedStateValid) {
       console.error('[LINE callback] State mismatch')
       return NextResponse.redirect(`${siteUrl}/login?error=state_mismatch`)
     }

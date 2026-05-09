@@ -93,7 +93,7 @@ function LoginContent() {
       )}
 
       <a
-        href="/api/auth/line"
+        href="/api/auth/line?openExternalBrowser=1"
         className="btn-line"
         aria-label="LINEアカウントでログイン"
         style={{ display: 'flex', textDecoration: 'none' }}

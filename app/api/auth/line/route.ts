@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import crypto from 'crypto'
+import { createLineOAuthState } from '@/lib/line-oauth-state'
 
 /**
  * GET /api/auth/line
@@ -12,15 +12,16 @@ import crypto from 'crypto'
 
 export async function GET(request: NextRequest) {
   const channelId = process.env.LINE_CHANNEL_ID
-  if (!channelId) {
-    return NextResponse.json({ error: 'LINE_CHANNEL_ID が未設定です' }, { status: 500 })
+  const channelSecret = process.env.LINE_CHANNEL_SECRET
+  if (!channelId || !channelSecret) {
+    return NextResponse.json({ error: 'LINE_CHANNEL_ID または LINE_CHANNEL_SECRET が未設定です' }, { status: 500 })
   }
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || request.nextUrl.origin
   const redirectUri = `${siteUrl}/api/auth/line/callback`
 
-  // CSRF 防止用のランダム state
-  const state = crypto.randomBytes(16).toString('hex')
+  // CSRF 防止用の署名付き state。iOS SafariとLINEアプリの往復でCookieが失われても検証できる。
+  const state = createLineOAuthState(channelSecret)
 
   const params = new URLSearchParams({
     response_type: 'code',

@@ -393,6 +393,8 @@
   - `/api/auth/logout` のリダイレクト先もアクセス元originを使用。
   - `NEXT_PUBLIC_SITE_URL` は `.trim()` して使用し、Vercel CLI入力時の末尾空白・改行混入に備える。
   - Vercel Productionの `NEXT_PUBLIC_SITE_URL` を `https://v0-line-blush.vercel.app` に再設定済み。
+  - 内職管理システムのLINE関連実装を確認し、LINEアプリ内から開くURLで使っていた `openExternalBrowser=1` をTSGのTOP QRとログインボタンにも追加。
+  - iOS Safari/LINEアプリ往復で一時Cookieが失われてもstate検証できるよう、署名付きstateを追加。
 - **影響範囲**:
   - LINE認証開始、LINE callback、ログアウトのみ。
   - 掲示板関連ファイルは未変更。
@@ -400,6 +402,9 @@
   - `app/api/auth/line/route.ts`
   - `app/api/auth/line/callback/route.ts`
   - `app/api/auth/logout/route.ts`
+  - `lib/line-oauth-state.ts`
+  - `app/page.tsx`
+  - `app/login/page.tsx`
 
 ### 2026-05-09 添付ファイル上限を100MBへ変更
 - **要望**: 動画なども想定し、アップロード可能なファイルサイズ上限を一旦100MBまで広げる。
