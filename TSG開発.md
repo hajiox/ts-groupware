@@ -211,6 +211,22 @@
   - `app/board/[id]/page.tsx`
 - **確認**: `npm.cmd run build` 成功。
 
+### 2026-05-09 Google Driveアップロード先を共有ドライブ前提に修正
+
+- **症状**: JSON正規化後、本番環境で `Service Accounts do not have storage quota` エラーが表示された。
+- **原因**: サービスアカウントは自身のマイドライブ容量を持たないため、`GOOGLE_DRIVE_FOLDER_ID` 未設定のままサービスアカウントのルートへアップロードできない。
+- **方針**: Supabase Storageは使わず、Google Driveの共有ドライブ配下フォルダへアップロードする。
+- **修正**:
+  - `lib/drive.ts` で `GOOGLE_DRIVE_FOLDER_ID` を必須化。
+  - Drive APIの `files.create` / `permissions.create` に `supportsAllDrives: true` を追加。
+- **本番設定が必要な項目**:
+  - Google共有ドライブにTSG用アップロードフォルダを作成
+  - サービスアカウント `tsai-doc-scanner@tsai-460605.iam.gserviceaccount.com` を共有ドライブまたはフォルダに追加
+  - Vercel Production環境変数 `GOOGLE_DRIVE_FOLDER_ID` にそのフォルダIDを設定
+  - 環境変数追加後に再デプロイ
+- **関連ファイル**:
+  - `lib/drive.ts`
+
 ### 8-1. LINEアプリ直接起動
 - スマホブラウザからLINE認証URLにアクセスした際、LINEアプリが直接起動せずWebブラウザ内でログイン画面が開く場合がある
 - Vercelの共有ドメイン（`*.vercel.app`）ではOS側のUniversal Linksが信頼度が低い可能性

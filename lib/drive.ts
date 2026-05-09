@@ -53,23 +53,26 @@ export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mi
   const drive = getDriveClient()
   const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID
 
+  if (!folderId) {
+    throw new Error('GOOGLE_DRIVE_FOLDER_ID is not set. Service accounts cannot upload to their own My Drive; set a shared drive folder ID.')
+  }
+
   // Node.js 組み込みの Readable で Buffer を stream に変換
   const stream = new Readable()
   stream.push(fileBuffer)
   stream.push(null)
 
-  const requestBody: Record<string, unknown> = { name: fileName }
-  if (folderId) {
-    requestBody.parents = [folderId]
-  }
-
   const response = await drive.files.create({
-    requestBody,
+    requestBody: {
+      name: fileName,
+      parents: [folderId],
+    },
     media: {
       mimeType,
       body: stream,
     },
     fields: 'id, webViewLink, webContentLink',
+    supportsAllDrives: true,
   })
 
   // 作成したファイルに「リンクを知っている全員が閲覧可」の権限を付与
@@ -80,6 +83,7 @@ export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mi
         role: 'reader',
         type: 'anyone',
       },
+      supportsAllDrives: true,
     })
   }
 
