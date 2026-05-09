@@ -520,6 +520,13 @@ img {
   color: #fca5a5;
 }
 
+.members-page {
+  padding: 16px 16px calc(16px + var(--nav-height));
+}
+.member-directory__list--page {
+  grid-template-columns: 1fr;
+}
+
 .group-card {
   background: var(--card);
   border-radius: var(--radius);
@@ -1495,6 +1502,7 @@ img {
   .post-list,
   .chat-messages,
   .groups-list,
+  .members-page,
   .settings-page,
   .admin-page {
     max-width: 600px;

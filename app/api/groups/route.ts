@@ -37,9 +37,7 @@ export async function GET() {
   }
 
   const { data: rawGroups } = await groupsQuery
-  const groups = user.role === 'admin'
-    ? (rawGroups || []).filter(group => !isDirectChat(group) || explicitGroupIds.includes(group.id))
-    : (rawGroups || [])
+  const groups = (rawGroups || []).filter(group => !isDirectChat(group))
   const groupIds = groups.map(group => group.id)
 
   if (groupIds.length === 0) {

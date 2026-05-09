@@ -25,6 +25,7 @@ function BottomNav() {
 
   const items = [
     { href: "/groups", label: "ホーム", icon: "🏠" },
+    { href: "/members", label: "メンバー", icon: "👥" },
     ...(isAdmin ? [{ href: "/admin", label: "管理", icon: "🛡️" }] : []),
     { href: "/settings", label: "設定", icon: "⚙️" },
   ];

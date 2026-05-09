@@ -15,15 +15,9 @@ type Group = {
   type: "board" | "chat";
   icon: string;
   description: string | null;
-  isDirect?: boolean;
-  directUser?: User | null;
   lastMessage: string;
   lastMessageAt: string;
   unread: number;
-};
-
-type DirectChatUser = User & {
-  role: string;
 };
 
 function AvatarPlaceholder({
@@ -163,13 +157,9 @@ function formatTime(dateStr: string) {
 export default function GroupsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [members, setMembers] = useState<DirectChatUser[]>([]);
   const [loading, setLoading] = useState(true);
-  const [membersLoading, setMembersLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [creatingChatUserId, setCreatingChatUserId] = useState("");
-  const [memberError, setMemberError] = useState("");
 
   function loadData() {
     fetch("/api/auth/me")
@@ -182,37 +172,11 @@ export default function GroupsPage() {
       .then((data) => setGroups(data.groups))
       .catch(() => {})
       .finally(() => setLoading(false));
-
-    fetch("/api/chat/direct")
-      .then(r => r.ok ? r.json() : Promise.reject(new Error("メンバー一覧を取得できませんでした")))
-      .then(data => setMembers(data.users || []))
-      .catch(err => setMemberError(err instanceof Error ? err.message : "メンバー一覧を取得できませんでした"))
-      .finally(() => setMembersLoading(false));
   }
 
   useEffect(() => {
     loadData();
   }, []);
-
-  async function startDirectChat(targetUserId: string) {
-    setCreatingChatUserId(targetUserId);
-    setMemberError("");
-
-    const res = await fetch("/api/chat/direct", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target_user_id: targetUserId }),
-    });
-    const data = await res.json().catch(() => ({}));
-
-    if (res.ok && data.group?.id) {
-      window.location.href = `/chat/${data.group.id}`;
-      return;
-    }
-
-    setMemberError(data.error || "個人Chatの開始に失敗しました");
-    setCreatingChatUserId("");
-  }
 
   return (
     <>
@@ -270,44 +234,6 @@ export default function GroupsPage() {
         aria-label="グループ一覧"
         style={{ paddingTop: 16 }}
       >
-        <div className="member-directory">
-          <div className="member-directory__header">
-            <h2>メンバー</h2>
-            <span>{members.length}名</span>
-          </div>
-          {membersLoading ? (
-            <p className="member-directory__empty">読み込み中...</p>
-          ) : memberError ? (
-            <p className="member-directory__error">{memberError}</p>
-          ) : members.length === 0 ? (
-            <p className="member-directory__empty">表示できるメンバーがいません</p>
-          ) : (
-            <div className="member-directory__list">
-              {members.map(member => (
-                <button
-                  key={member.id}
-                  type="button"
-                  className="member-directory__item"
-                  onClick={() => startDirectChat(member.id)}
-                  disabled={Boolean(creatingChatUserId)}
-                  title={`${member.display_name} とChat`}
-                >
-                  {member.picture_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={member.picture_url} alt="" className="avatar" width={34} height={34} />
-                  ) : (
-                    <AvatarPlaceholder initials={member.display_name.charAt(0)} color="#3b82f6" size={34} />
-                  )}
-                  <span>{member.display_name}</span>
-                  <span className="member-directory__chat">
-                    {creatingChatUserId === member.id ? "開始中..." : "Chat"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
         {loading ? (
           <p style={{ textAlign: "center", color: "var(--text-sub)", padding: "40px 0" }}>
             読み込み中...
@@ -336,7 +262,7 @@ export default function GroupsPage() {
                       <span
                         className={`group-card__type-tag group-card__type-tag--${group.type}`}
                       >
-                        {group.isDirect ? "個人Chat" : group.type === "board" ? "掲示板" : "チャット"}
+                        {group.type === "board" ? "掲示板" : "チャット"}
                       </span>
                       {group.lastMessage}
                     </div>
@@ -358,7 +284,6 @@ export default function GroupsPage() {
           })
         )}
       </section>
-
     </>
   );
 }

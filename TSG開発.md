@@ -606,6 +606,22 @@
   - `app/api/groups/route.ts`
   - `app/api/chat/route.ts`
   - `app/globals.css`
+
+### 2026-05-09 ホームとメンバー画面の分離
+- **要望**: ホーム画面には個人Chatを表示しない。ホームには掲示板とグループChatだけを更新順で表示し、個人Chatは下部ナビの「メンバー」から実行する。
+- **修正**:
+  - `/api/groups` で個人Chat（`description` が `direct:` で始まるChat）を返さないようにした。
+  - `/groups` からメンバー一覧表示を削除し、掲示板/グループChat一覧専用に戻した。
+  - `/members` ページを追加し、承認済みメンバー一覧と個人Chat開始を配置。
+  - 下部ナビに「メンバー」を追加。
+- **確認**:
+  - `npm.cmd run build` 成功。
+- **関連ファイル**:
+  - `app/members/page.tsx`
+  - `app/layout.tsx`
+  - `app/groups/page.tsx`
+  - `app/api/groups/route.ts`
+  - `app/globals.css`
 ### 2026-05-09 TSG専用LINEログインチャネル基本設定確認
 - **確認内容**:
   - LINE Developers Console上で、プロバイダー「内職管理システム」配下にTSG専用のLINEログインチャネル「TS Groupware」が作成されていることを確認。
