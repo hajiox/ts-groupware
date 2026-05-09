@@ -23,9 +23,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'ファイルが必要です' }, { status: 400 })
     }
 
-    // ファイルサイズ制限 (10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      return NextResponse.json({ error: 'ファイルサイズは10MB以内にしてください' }, { status: 400 })
+    // ファイルサイズ制限 (100MB)
+    if (file.size > 100 * 1024 * 1024) {
+      return NextResponse.json({ error: 'ファイルサイズは100MB以内にしてください' }, { status: 400 })
     }
 
     const arrayBuffer = await file.arrayBuffer()
