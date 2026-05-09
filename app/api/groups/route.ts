@@ -32,9 +32,33 @@ export async function GET() {
     .in('id', groupIds)
     .order('updated_at', { ascending: false })
 
+  const { data: groupMembers } = await adminClient
+    .from('gw_group_members')
+    .select('group_id, user_id')
+    .in('group_id', groupIds)
+
+  const directOtherUserIds = (groups || [])
+    .filter(group => group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:'))
+    .map(group => (groupMembers || []).find(member => member.group_id === group.id && member.user_id !== user.id)?.user_id)
+    .filter(Boolean)
+
+  const { data: directUsers } = directOtherUserIds.length > 0
+    ? await adminClient
+      .from('gw_users')
+      .select('id, display_name, picture_url')
+      .in('id', directOtherUserIds)
+    : { data: [] }
+
+  const directUserMap = Object.fromEntries((directUsers || []).map(directUser => [directUser.id, directUser]))
+
   // 各グループの最新投稿と未読数を取得
   const enrichedGroups = await Promise.all(
     (groups || []).map(async (group) => {
+      const directOtherUserId = group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:')
+        ? (groupMembers || []).find(member => member.group_id === group.id && member.user_id !== user.id)?.user_id
+        : null
+      const directUser = directOtherUserId ? directUserMap[directOtherUserId] : null
+
       // 最新投稿
       const { data: latestPost } = await adminClient
         .from('gw_posts')
@@ -66,6 +90,9 @@ export async function GET() {
 
       return {
         ...group,
+        name: directUser?.display_name || group.name,
+        isDirect: Boolean(directUser),
+        directUser: directUser || null,
         lastMessage: latestPost?.content?.slice(0, 50) || '',
         lastMessageAt: latestPost?.created_at || group.created_at,
         unread: unreadCount,

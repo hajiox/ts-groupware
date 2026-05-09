@@ -513,3 +513,22 @@
 - **関連ファイル**:
   - `app/admin/page.tsx`
   - `app/globals.css`
+
+### 2026-05-09 個人Chatとチャット吹き出し横アバター対応
+- **要望**: Chatを個人間でも使えるようにする。吹き出しの脇にユーザー写真を表示し、写真ホバーで登録名を確認できるようにする。
+- **実装**:
+  - 個人Chatは `gw_groups.type = chat` の2人専用Chatとして扱う。
+  - `/api/chat/direct` を追加し、承認済みユーザー一覧取得と、相手を指定した個人Chat作成/既存Chat再利用に対応。
+  - 個人Chatの識別には `gw_groups.description` に `direct:{userId}:{userId}` を保存し、同じ2人のChat重複作成を避ける。
+  - グループ一覧に「＋ 個人Chat」ボタンを追加し、相手選択後に対象Chatへ遷移。
+  - 個人Chatは一覧上で相手の登録名を表示し、種別タグは「個人Chat」と表示。
+  - `/chat/[id]` の全メッセージで吹き出し脇に投稿者アバターを表示。
+  - アバター画像/プレースホルダーに `title` を付与し、ホバーで登録名を表示。
+- **確認**:
+  - `npm.cmd run build` 成功。
+- **関連ファイル**:
+  - `app/api/chat/direct/route.ts`
+  - `app/api/groups/route.ts`
+  - `app/groups/page.tsx`
+  - `app/chat/[id]/page.tsx`
+  - `app/globals.css`

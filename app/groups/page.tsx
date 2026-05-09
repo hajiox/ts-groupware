@@ -15,9 +15,15 @@ type Group = {
   type: "board" | "chat";
   icon: string;
   description: string | null;
+  isDirect?: boolean;
+  directUser?: User | null;
   lastMessage: string;
   lastMessageAt: string;
   unread: number;
+};
+
+type DirectChatUser = User & {
+  role: string;
 };
 
 function AvatarPlaceholder({
@@ -148,6 +154,96 @@ function CreateGroupModal({
   );
 }
 
+function DirectChatModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [users, setUsers] = useState<DirectChatUser[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [creatingUserId, setCreatingUserId] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+
+    setLoading(true);
+    setError("");
+    fetch("/api/chat/direct")
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("ユーザー一覧を取得できませんでした")))
+      .then(data => setUsers(data.users || []))
+      .catch(err => setError(err instanceof Error ? err.message : "ユーザー一覧を取得できませんでした"))
+      .finally(() => setLoading(false));
+  }, [open]);
+
+  if (!open) return null;
+
+  async function startDirectChat(targetUserId: string) {
+    setCreatingUserId(targetUserId);
+    setError("");
+
+    const res = await fetch("/api/chat/direct", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_user_id: targetUserId }),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok && data.group?.id) {
+      window.location.href = `/chat/${data.group.id}`;
+      return;
+    }
+
+    setError(data.error || "個人Chatの作成に失敗しました");
+    setCreatingUserId("");
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <h2 className="modal-title">個人Chat</h2>
+        {loading ? (
+          <p className="modal-empty">読み込み中...</p>
+        ) : error ? (
+          <p className="modal-error">{error}</p>
+        ) : users.length === 0 ? (
+          <p className="modal-empty">Chatできるユーザーがいません</p>
+        ) : (
+          <div className="direct-chat-list">
+            {users.map(targetUser => (
+              <button
+                key={targetUser.id}
+                type="button"
+                className="direct-chat-user"
+                onClick={() => startDirectChat(targetUser.id)}
+                disabled={Boolean(creatingUserId)}
+              >
+                {targetUser.picture_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={targetUser.picture_url} alt="" className="avatar" width={38} height={38} />
+                ) : (
+                  <AvatarPlaceholder initials={targetUser.display_name.charAt(0)} color="#3b82f6" size={38} />
+                )}
+                <span>{targetUser.display_name}</span>
+                <span className="direct-chat-user__action">
+                  {creatingUserId === targetUser.id ? "作成中..." : "Chat"}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn-cancel" onClick={onClose}>
+            閉じる
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function formatTime(dateStr: string) {
   if (!dateStr) return "";
   const d = new Date(dateStr);
@@ -159,6 +255,7 @@ export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [showDirectChat, setShowDirectChat] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   function loadData() {
@@ -234,6 +331,12 @@ export default function GroupsPage() {
         aria-label="グループ一覧"
         style={{ paddingTop: 16 }}
       >
+        <div className="groups-actions">
+          <button type="button" className="groups-action-btn groups-action-btn--chat" onClick={() => setShowDirectChat(true)}>
+            ＋ 個人Chat
+          </button>
+        </div>
+
         {loading ? (
           <p style={{ textAlign: "center", color: "var(--text-sub)", padding: "40px 0" }}>
             読み込み中...
@@ -262,7 +365,7 @@ export default function GroupsPage() {
                       <span
                         className={`group-card__type-tag group-card__type-tag--${group.type}`}
                       >
-                        {group.type === "board" ? "掲示板" : "チャット"}
+                        {group.isDirect ? "個人Chat" : group.type === "board" ? "掲示板" : "チャット"}
                       </span>
                       {group.lastMessage}
                     </div>
@@ -284,6 +387,11 @@ export default function GroupsPage() {
           })
         )}
       </section>
+
+      <DirectChatModal
+        open={showDirectChat}
+        onClose={() => setShowDirectChat(false)}
+      />
     </>
   );
 }

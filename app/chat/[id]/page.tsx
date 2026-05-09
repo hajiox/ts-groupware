@@ -39,11 +39,15 @@ type ChatGroup = {
 function Avatar({ user, size = 30 }: { user: ChatUser; size?: number }) {
   if (user.picture_url) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={user.picture_url} alt="" className="avatar" width={size} height={size} />;
+    return <img src={user.picture_url} alt="" title={user.display_name} className="avatar" width={size} height={size} />;
   }
 
   return (
-    <div className="avatar-placeholder" style={{ width: size, height: size, fontSize: size * 0.4 }}>
+    <div
+      className="avatar-placeholder"
+      title={user.display_name}
+      style={{ width: size, height: size, fontSize: size * 0.4 }}
+    >
       {user.display_name?.charAt(0) || "?"}
     </div>
   );
@@ -251,11 +255,9 @@ export default function ChatPage() {
 
         {messages.map(message => (
           <div key={message.id} className={`msg msg--${message.isOwn ? "own" : "other"}`}>
-            {!message.isOwn && (
-              <div className="msg__avatar-col">
-                <Avatar user={message.author} />
-              </div>
-            )}
+            <div className="msg__avatar-col">
+              <Avatar user={message.author} />
+            </div>
 
             <div className="msg__body">
               {!message.isOwn && <span className="msg__name">{message.author.display_name}</span>}
