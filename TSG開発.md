@@ -697,6 +697,9 @@
   - `npm run build` 成功。
   - ローカル `http://localhost:3000/` でTOPページの初期表示にQRが常時表示されないことを確認。
   - ローカル `http://localhost:3000/login?error=cancelled` でログインページの初期表示にQRが常時表示されず、折りたたみを開くとQRが表示されることを確認。
+  - Productionへデプロイ済み。
+  - Production `https://v0-line-blush.vercel.app/` で「スマホで開くQR」の折りたたみ導線があることを確認。
+  - Production `https://v0-line-blush.vercel.app/login?error=cancelled` でQRが初期非表示になっていることを確認。
 - **関連ファイル**:
   - `app/page.tsx`
   - `app/login/page.tsx`
