@@ -572,3 +572,19 @@
   - `app/groups/page.tsx`
   - `app/chat/[id]/page.tsx`
   - `app/globals.css`
+### 2026-05-09 TSG専用LINEログインチャネル基本設定確認
+- **確認内容**:
+  - LINE Developers Console上で、プロバイダー「内職管理システム」配下にTSG専用のLINEログインチャネル「TS Groupware」が作成されていることを確認。
+  - チャネルIDは `2010023803`。
+  - チャネル基本設定上は、アプリタイプがWebアプリ、権限が `PROFILE` / `OPENID_CONNECT` になっており、TSGの現在の認証実装に必要な土台は揃っている。
+  - OpenID Connectのメールアドレス権限は未申請だが、現在のTSGはLINE OAuthでメールアドレスを要求していないため必須ではない。
+- **未確認/必須設定**:
+  - 「LINEログイン設定」タブで、コールバックURLに `https://v0-line-blush.vercel.app/api/auth/line/callback` を登録する必要がある。
+  - チャネルが「開発中」の間はAdmin/Tester以外はログインできないため、テストユーザー2名を「権限設定」でTester追加するか、運用時はチャネルを公開する必要がある。
+  - Vercel Production環境変数をTSG専用チャネルへ差し替える必要がある。
+    - `LINE_CHANNEL_ID=2010023803`
+    - `LINE_CHANNEL_SECRET=<TS Groupwareチャネルのシークレット>`
+  - 環境変数差し替え後はProduction再デプロイが必要。
+- **判断**:
+  - 画像の基本設定タブだけで見る限り、TSG専用LINEログインチャネルの作成方向はOK。
+  - ただし現時点の本番アプリは、Vercel環境変数を差し替えるまで旧チャネルを使い続ける。
