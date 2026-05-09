@@ -622,6 +622,18 @@
   - `app/groups/page.tsx`
   - `app/api/groups/route.ts`
   - `app/globals.css`
+
+### 2026-05-09 iPhone通知設定の判定順修正
+- **症状**: iPhone Safariで設定画面を開くと「この環境はWeb Push通知に対応していません」と表示され、通知ONの導線が分かりにくかった。
+- **原因**: iPhone Safari通常表示では、ホーム画面追加前に `PushManager` が利用できないため、iPhone向けのホーム画面追加案内より先に非対応判定へ入っていた。
+- **修正**:
+  - iPhone/iPad判定を先に行い、ホーム画面追加前は「ホーム画面に追加したTSGアプリから通知を有効にしてください」と案内するように変更。
+  - iPhoneで通知トグルを押した場合、設定ガイドを自動表示し、ホーム画面追加手順を案内。
+  - iPadOSのMac風User-AgentもiPhone/iPad扱いにするよう補強。
+- **確認**:
+  - `npm.cmd run build` 成功。
+- **関連ファイル**:
+  - `app/settings/page.tsx`
 ### 2026-05-09 TSG専用LINEログインチャネル基本設定確認
 - **確認内容**:
   - LINE Developers Console上で、プロバイダー「内職管理システム」配下にTSG専用のLINEログインチャネル「TS Groupware」が作成されていることを確認。

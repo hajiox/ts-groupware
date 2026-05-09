@@ -28,7 +28,9 @@ const PUBLIC_VAPID_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "BKGxnPaH_M
 function detectDevice(): DeviceType {
   if (typeof navigator === "undefined") return "pc";
   const ua = navigator.userAgent;
-  if (/iPad|iPhone|iPod/.test(ua)) return "iphone";
+  const isIOS = /iPad|iPhone|iPod/.test(ua)
+    || (ua.includes("Macintosh") && navigator.maxTouchPoints > 1);
+  if (isIOS) return "iphone";
   if (/Android/.test(ua)) return "android";
   return "pc";
 }
@@ -58,14 +60,19 @@ export default function SettingsPage() {
   }, []);
 
   async function checkPushStatus() {
+    const device = detectDevice();
+    if (device === "iphone" && !isIOSStandalone()) {
+      setPushMessage("iPhoneはホーム画面に追加したTSGアプリから通知を有効にしてください");
+      setLoadingPush(false);
+      return;
+    }
+
     if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
       setPushMessage("この環境はWeb Push通知に対応していません");
       setLoadingPush(false);
       return;
     }
-    if (detectDevice() === "iphone" && !isIOSStandalone()) {
-      setPushMessage("iPhoneはSafariでホーム画面に追加したアプリから通知を有効にしてください");
-    }
+
     try {
       const registration = await navigator.serviceWorker.getRegistration('/sw.js');
       const subscription = registration ? await registration.pushManager.getSubscription() : null;
@@ -87,20 +94,31 @@ export default function SettingsPage() {
   }
 
   async function togglePush(checked: boolean) {
-    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
     setLoadingPush(true);
     setPushMessage("");
 
     try {
+      const device = detectDevice();
+      if (checked && device === "iphone" && !isIOSStandalone()) {
+        setGuideDevice("iphone");
+        setGuideOpen(true);
+        setPushEnabled(false);
+        setPushMessage("iPhoneはSafariで共有ボタンからホーム画面に追加し、そのアイコンから開いて通知をONにしてください");
+        setLoadingPush(false);
+        return;
+      }
+
+      if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+        setPushEnabled(false);
+        setPushMessage("この環境はWeb Push通知に対応していません");
+        setLoadingPush(false);
+        return;
+      }
+
       const registration = await navigator.serviceWorker.register('/sw.js');
       await navigator.serviceWorker.ready;
       
       if (checked) {
-        if (detectDevice() === "iphone" && !isIOSStandalone()) {
-          setPushMessage("iPhoneはSafariでホーム画面に追加後、そのアイコンから開いて通知を有効にしてください");
-          setLoadingPush(false);
-          return;
-        }
         // 購読する
         const permission = await Notification.requestPermission();
         if (permission !== 'granted') {
