@@ -614,3 +614,12 @@
   - `https://v0-line-blush.vercel.app/api/auth/line` のリダイレクト先が `client_id=2010023803` になっていることを確認。
 - **残注意**:
   - LINE Developers側のチャネルが開発中の場合、Admin/Tester以外はログインできない。
+
+### 2026-05-09 TSG専用LINEログインチャネル公開
+- **確認内容**:
+  - LINE Developers Console上で、TSG専用LINEログインチャネル「TS Groupware」が公開済みになったことを確認。
+  - これによりAdmin/Tester限定の制約は解除され、一般LINEユーザーもLINEログインフローへ進める状態になった。
+- **次の確認**:
+  - 未登録ユーザーがLINEログインすると、TSG側では `gw_users.status = pending` の承認待ちユーザーとして作成される想定。
+  - 管理者アカウントで `/admin` を開き、承認待ちユーザーを「承認」するとログイン可能になる。
+  - 既存管理者はすでに `approved` のため、そのままログイン可能。
