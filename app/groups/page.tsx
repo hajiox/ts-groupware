@@ -159,6 +159,7 @@ export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   function loadData() {
     fetch("/api/auth/me")
@@ -182,25 +183,47 @@ export default function GroupsPage() {
       {/* Header */}
       <header className="groups-header" role="banner">
         <span className="groups-header__logo">TS Groupware</span>
-        <div className="groups-header__user">
-          <span style={{ fontSize: 14, color: "var(--text-sub)" }}>
-            {user?.display_name || ""}
-          </span>
-          {user?.picture_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={user.picture_url}
-              alt={user.display_name}
-              className="avatar"
-              width={34}
-              height={34}
-            />
-          ) : (
-            <AvatarPlaceholder
-              initials={user?.display_name?.charAt(0) || "?"}
-              color="#3b82f6"
-              size={34}
-            />
+        <div className="groups-header__user-wrap">
+          <button
+            type="button"
+            className="groups-header__user"
+            onClick={() => setShowUserMenu((current) => !current)}
+            aria-expanded={showUserMenu}
+            aria-haspopup="menu"
+          >
+            <span style={{ fontSize: 14, color: "var(--text-sub)" }}>
+              {user?.display_name || ""}
+            </span>
+            {user?.picture_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={user.picture_url}
+                alt={user.display_name}
+                className="avatar"
+                width={34}
+                height={34}
+              />
+            ) : (
+              <AvatarPlaceholder
+                initials={user?.display_name?.charAt(0) || "?"}
+                color="#3b82f6"
+                size={34}
+              />
+            )}
+          </button>
+          {showUserMenu && (
+            <div className="user-menu" role="menu">
+              <button
+                type="button"
+                className="user-menu__item user-menu__item--danger"
+                role="menuitem"
+                onClick={() => {
+                  window.location.href = "/api/auth/logout";
+                }}
+              >
+                ログアウト
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -264,4 +287,3 @@ export default function GroupsPage() {
     </>
   );
 }
-

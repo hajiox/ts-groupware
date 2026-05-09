@@ -6,7 +6,7 @@ import { getUserSession } from '@/lib/session'
  * 管理者用 API
  *
  * GET  /api/admin/users — 全ユーザー一覧
- * PUT  /api/admin/users — ユーザーのロール変更
+ * PUT  /api/admin/users — ユーザーのロール・承認状態変更
  * DELETE /api/admin/users — ユーザー削除
  */
 
@@ -23,7 +23,7 @@ export async function GET() {
 
   const { data: users, error: dbError } = await adminClient
     .from('gw_users')
-    .select('id, display_name, picture_url, role, line_user_id, created_at, updated_at')
+    .select('id, display_name, picture_url, role, status, line_user_id, created_at, updated_at')
     .order('created_at', { ascending: true })
 
   if (dbError) {
@@ -34,23 +34,45 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
-  const { error, status } = await requireAdmin()
+  const { error, status, user } = await requireAdmin()
   if (error) return NextResponse.json({ error }, { status })
 
   const body = await request.json()
-  const { user_id, role } = body
+  const { user_id, role, status: userStatus } = body
 
-  if (!user_id || !role) {
-    return NextResponse.json({ error: 'user_id と role が必要です' }, { status: 400 })
+  if (!user_id) {
+    return NextResponse.json({ error: 'user_id が必要です' }, { status: 400 })
   }
 
-  if (!['admin', 'member'].includes(role)) {
+  if (!role && !userStatus) {
+    return NextResponse.json({ error: 'role または status が必要です' }, { status: 400 })
+  }
+
+  if (role && !['admin', 'member'].includes(role)) {
     return NextResponse.json({ error: 'role は admin または member です' }, { status: 400 })
   }
 
+  if (userStatus && !['pending', 'approved', 'suspended'].includes(userStatus)) {
+    return NextResponse.json({ error: 'status は pending, approved, suspended のいずれかです' }, { status: 400 })
+  }
+
+  if (user_id === user!.id && userStatus && userStatus !== 'approved') {
+    return NextResponse.json({ error: '自分自身を未承認または停止にはできません' }, { status: 400 })
+  }
+
+  if (user_id === user!.id && role && role !== 'admin') {
+    return NextResponse.json({ error: '自分自身の管理者権限は外せません' }, { status: 400 })
+  }
+
+  const updates: Record<string, string> = {
+    updated_at: new Date().toISOString(),
+  }
+  if (role) updates.role = role
+  if (userStatus) updates.status = userStatus
+
   const { error: dbError } = await adminClient
     .from('gw_users')
-    .update({ role, updated_at: new Date().toISOString() })
+    .update(updates)
     .eq('id', user_id)
 
   if (dbError) {

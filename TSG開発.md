@@ -313,3 +313,83 @@
   - `app/api/posts/route.ts`
   - `app/board/[id]/page.tsx`
   - `app/globals.css`
+
+### 2026-05-09 Next.js 16 Proxy移行
+- **症状**: `npm run build` は成功するが、Next.js 16で `middleware.ts` のファイル規約が非推奨という警告が出ていた。
+- **原因**: Next.js 16から Middleware は Proxy に名称変更され、ルートの `middleware.ts` ではなく `proxy.ts` が推奨になった。
+- **修正**:
+  - 既存の認証チェック処理を `middleware.ts` から `proxy.ts` へ移行。
+  - exported function名を `middleware` から `proxy` に変更。
+  - 認証不要パス、セッションCookie確認、リダイレクト条件、matcherは変更なし。
+- **確認**:
+  - `npm.cmd run build` 成功。
+  - 開発サーバー再起動後、`/login` が 200、未ログインの `/groups` が `/login` へ 307 リダイレクトすることを確認。
+- **関連ファイル**:
+  - `proxy.ts`
+  - `middleware.ts`（削除）
+
+### 2026-05-09 ユーザー承認制・ログイン保持改善
+- **問題**:
+  - LINE認証に成功した新規ユーザーが即時ログインでき、管理者の承認を挟めなかった。
+  - 既にセッションCookieがある状態でも `/login` を開くとログインボタンが表示され、毎回ログインが必要に見えていた。
+- **修正**:
+  - `gw_users.status` を追加し、`pending` / `approved` / `suspended` で承認状態を管理。
+  - 新規LINEログインユーザーは `pending` で登録し、セッションCookieは発行しない。
+  - `approved` のユーザーだけセッションを有効扱いにする。
+  - 管理画面のユーザー管理に「承認」「停止」「再開」を追加。
+  - 未承認・停止中ユーザーはグループメンバー追加候補から除外し、API側でも追加を拒否。
+  - `/login` 表示時に既存セッションを確認し、ログイン済みなら `/groups` へ自動遷移。
+- **DB反映**:
+  - 共用Supabase DB（oem-btob / zfhswguzqyagmhhlpksq）に `sql/002_user_approval_status.sql` を適用済み。
+  - 既存ユーザーは `approved` として移行される。
+  - 適用後確認: `gw_users.status` カラムあり、既存ユーザー1件は `approved`。
+- **確認**:
+  - `npm.cmd run build` 成功。
+  - 掲示板関連ファイルは未変更。
+- **関連ファイル**:
+  - `sql/002_user_approval_status.sql`
+  - `app/api/auth/line/callback/route.ts`
+  - `lib/session.ts`
+  - `app/api/admin/users/route.ts`
+  - `app/api/admin/members/route.ts`
+  - `app/admin/page.tsx`
+  - `app/login/page.tsx`
+  - `app/globals.css`
+
+### 2026-05-09 グループ一覧ヘッダーからログアウト対応
+- **要望**: グループ一覧右上のユーザー名・写真からログアウトできるようにする。
+- **修正**:
+  - グループ一覧ヘッダーのユーザー領域をクリック可能に変更。
+  - クリック時にユーザーメニューを表示し、「ログアウト」から既存の `/api/auth/logout` に遷移するようにした。
+- **影響範囲**:
+  - グループ一覧ヘッダーのみ。
+  - 掲示板関連ファイルは未変更。
+- **関連ファイル**:
+  - `app/groups/page.tsx`
+  - `app/globals.css`
+
+### 2026-05-09 添付ファイル上限を100MBへ変更
+- **要望**: 動画なども想定し、アップロード可能なファイルサイズ上限を一旦100MBまで広げる。
+- **修正**:
+  - `/api/upload` のアプリ側ファイルサイズ制限を10MBから100MBへ変更。
+  - エラーメッセージも100MB表記に更新。
+- **注意**:
+  - 100MBはアプリ側の制限値。Google Drive自体の容量制限ではない。
+  - 現在の実装は一度Vercel側でファイルを受けてからDriveへ送るため、大きい動画では通信時間やServerless実行時間の影響を受ける可能性がある。
+- **関連ファイル**:
+  - `app/api/upload/route.ts`
+
+### 2026-05-09 投稿削除時のGoogle Drive添付ファイル連動削除
+- **要望**: 掲示板の投稿を削除した場合、投稿に添付された画像・動画・PDF・ExcelなどのGoogle Drive上の実ファイルも削除する。
+- **修正**:
+  - `lib/drive.ts` にGoogle Driveファイル削除処理を追加。
+  - `/api/posts` の `DELETE` で、削除対象の親投稿とコメント投稿に含まれる添付ファイルを集め、DB削除と合わせてDriveファイル削除も実行。
+  - 今後の投稿では添付情報に `driveId` と `webViewLink` も保存するようにした。
+  - 既存投稿についても `drive.google.com/thumbnail?id=...` や `uc?...id=...` のURLからDrive IDを抽出して削除対象にできるようにした。
+- **注意**:
+  - Driveファイル削除に失敗した場合はサーバーログとAPIレスポンスの `attachmentDeleteErrors` に残す。
+  - Google Drive API権限上、アプリ/OAuthユーザーが削除可能なファイルが対象。
+- **関連ファイル**:
+  - `lib/drive.ts`
+  - `app/api/posts/route.ts`
+  - `app/board/[id]/page.tsx`

@@ -37,7 +37,8 @@ export async function GET(request: NextRequest) {
   // 全ユーザー
   const { data: allUsers } = await adminClient
     .from('gw_users')
-    .select('id, display_name, picture_url, role')
+    .select('id, display_name, picture_url, role, status')
+    .eq('status', 'approved')
     .order('display_name', { ascending: true })
 
   // メンバーに含まれるユーザー / 含まれないユーザー
@@ -62,6 +63,17 @@ export async function POST(request: NextRequest) {
 
   if (!group_id || !user_ids?.length) {
     return NextResponse.json({ error: 'group_id と user_ids が必要です' }, { status: 400 })
+  }
+
+  const { data: approvedUsers } = await adminClient
+    .from('gw_users')
+    .select('id')
+    .in('id', user_ids)
+    .eq('status', 'approved')
+
+  const approvedUserIds = new Set((approvedUsers || []).map(u => u.id))
+  if (approvedUserIds.size !== user_ids.length) {
+    return NextResponse.json({ error: '未承認または停止中のユーザーはメンバーに追加できません' }, { status: 400 })
   }
 
   const inserts = user_ids.map((uid: string) => ({

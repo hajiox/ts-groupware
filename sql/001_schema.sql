@@ -11,6 +11,7 @@ CREATE TABLE gw_users (
     display_name TEXT NOT NULL,
     picture_url TEXT,
     role TEXT DEFAULT 'member' CHECK (role IN ('admin', 'moderator', 'member')),
+    status TEXT DEFAULT 'approved' CHECK (status IN ('pending', 'approved', 'suspended')),
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -87,6 +88,7 @@ CREATE INDEX idx_gw_posts_created_at ON gw_posts(created_at DESC);
 CREATE INDEX idx_gw_reactions_post_id ON gw_reactions(post_id);
 CREATE INDEX idx_gw_group_members_user_id ON gw_group_members(user_id);
 CREATE INDEX idx_gw_users_line_user_id ON gw_users(line_user_id);
+CREATE INDEX idx_gw_users_status ON gw_users(status);
 
 -- =============================================
 -- RLS ポリシー（service_role でバイパスするため最小限）

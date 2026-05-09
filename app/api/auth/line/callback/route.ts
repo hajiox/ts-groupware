@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
-import { setUserSession } from '@/lib/session'
 
 /**
  * GET /api/auth/line/callback
@@ -9,8 +8,8 @@ import { setUserSession } from '@/lib/session'
  * 1. state 検証（CSRF防止）
  * 2. 認可コードをアクセストークンに交換
  * 3. LINE プロフィール取得
- * 4. gw_users テーブルで line_user_id を検索 → 既存 or 新規登録
- * 5. セッション Cookie を発行
+ * 4. gw_users テーブルで line_user_id を検索 → 既存 or 承認待ち登録
+ * 5. 承認済みユーザーのみセッション Cookie を発行
  * 6. グループ一覧へリダイレクト
  */
 
@@ -87,10 +86,12 @@ export async function GET(request: NextRequest) {
       .single()
 
     let userId: string
+    let userStatus = 'pending'
 
     if (existingUser) {
       // 既存ユーザー → プロフィール更新
       userId = existingUser.id
+      userStatus = existingUser.status || 'approved'
       await supabase
         .from('gw_users')
         .update({
@@ -100,7 +101,7 @@ export async function GET(request: NextRequest) {
         })
         .eq('id', userId)
     } else {
-      // 新規ユーザー登録
+      // 新規ユーザー登録。管理者が承認するまでログインセッションは発行しない。
       const { data: newUser, error: insertError } = await supabase
         .from('gw_users')
         .insert({
@@ -108,6 +109,7 @@ export async function GET(request: NextRequest) {
           display_name: displayName,
           picture_url: pictureUrl,
           role: 'member',
+          status: 'pending',
         })
         .select()
         .single()
@@ -118,6 +120,21 @@ export async function GET(request: NextRequest) {
       }
 
       userId = newUser.id
+      userStatus = newUser.status || 'pending'
+    }
+
+    if (userStatus === 'pending') {
+      const response = NextResponse.redirect(`${siteUrl}/login?error=approval_pending`)
+      response.cookies.delete('line_oauth_state')
+      response.cookies.delete('gw_user_session')
+      return response
+    }
+
+    if (userStatus === 'suspended') {
+      const response = NextResponse.redirect(`${siteUrl}/login?error=account_suspended`)
+      response.cookies.delete('line_oauth_state')
+      response.cookies.delete('gw_user_session')
+      return response
     }
 
     // --- セッション発行 ---

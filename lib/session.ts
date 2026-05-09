@@ -40,7 +40,10 @@ export async function getUserSession() {
     .eq('id', session.value)
     .single()
 
-  return user || null
+  if (!user) return null
+  if ((user.status || 'approved') !== 'approved') return null
+
+  return user
 }
 
 export async function clearUserSession() {

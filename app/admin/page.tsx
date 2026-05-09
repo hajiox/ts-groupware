@@ -8,6 +8,7 @@ type User = {
   display_name: string;
   picture_url: string | null;
   role: string;
+  status: "pending" | "approved" | "suspended";
   created_at: string;
 };
 
@@ -66,6 +67,19 @@ function UsersTab() {
     else alert("ロールの変更に失敗しました");
   }
 
+  async function handleStatusChange(userId: string, newStatus: User["status"]) {
+    const res = await fetch("/api/admin/users", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, status: newStatus }),
+    });
+    if (res.ok) loadUsers();
+    else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "承認状態の変更に失敗しました");
+    }
+  }
+
   async function handleDelete(user: User) {
     if (!confirm(`${user.display_name} を削除しますか？この操作は取り消せません。`)) return;
     const res = await fetch("/api/admin/users", {
@@ -91,9 +105,39 @@ function UsersTab() {
             <div className="admin-item__name">{user.display_name}</div>
             <div className="admin-item__sub">
               {new Date(user.created_at).toLocaleDateString("ja-JP")} 登録
+              <span className={`admin-status admin-status--${user.status || "approved"}`}>
+                {user.status === "pending" ? "承認待ち" : user.status === "suspended" ? "停止中" : "承認済み"}
+              </span>
             </div>
           </div>
           <div className="admin-item__actions">
+            {user.status === "pending" && (
+              <button
+                type="button"
+                className="admin-btn-accent"
+                onClick={() => handleStatusChange(user.id, "approved")}
+              >
+                承認
+              </button>
+            )}
+            {user.status === "approved" && (
+              <button
+                type="button"
+                className="admin-btn-outline"
+                onClick={() => handleStatusChange(user.id, "suspended")}
+              >
+                停止
+              </button>
+            )}
+            {user.status === "suspended" && (
+              <button
+                type="button"
+                className="admin-btn-accent"
+                onClick={() => handleStatusChange(user.id, "approved")}
+              >
+                再開
+              </button>
+            )}
             <select
               value={user.role}
               onChange={e => handleRoleChange(user.id, e.target.value)}

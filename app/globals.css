@@ -326,9 +326,48 @@ img {
   color: var(--text);
 }
 .groups-header__user {
+  border-radius: 999px;
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 4px 6px 4px 10px;
+  transition: background 0.15s;
+}
+.groups-header__user:hover {
+  background: var(--card-hover);
+}
+.groups-header__user-wrap {
+  position: relative;
+}
+.user-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 150;
+  min-width: 144px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+.user-menu__item {
+  width: 100%;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 10px;
+  text-align: left;
+}
+.user-menu__item:hover {
+  background: var(--card-hover);
+}
+.user-menu__item--danger {
+  color: #fca5a5;
+}
+.user-menu__item--danger:hover {
+  background: rgba(239, 68, 68, 0.12);
 }
 
 .groups-list {
@@ -1246,12 +1285,35 @@ img {
   color: var(--text-muted);
   margin-top: 1px;
 }
+.admin-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 8px;
+  padding: 2px 7px;
+}
+.admin-status--approved {
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
+}
+.admin-status--pending {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+}
+.admin-status--suspended {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+}
 
 .admin-item__actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .admin-select {

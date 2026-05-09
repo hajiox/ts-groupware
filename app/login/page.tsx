@@ -1,11 +1,13 @@
 "use client";
 
-import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
 
 function LoginContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const error = searchParams.get('error');
+  const [checkingSession, setCheckingSession] = useState(!error);
 
   const errorMessages: Record<string, string> = {
     cancelled: 'ログインがキャンセルされました',
@@ -14,10 +16,40 @@ function LoginContent() {
     token_failed: 'LINE認証に失敗しました。もう一度お試しください',
     profile_failed: 'プロフィール取得に失敗しました。もう一度お試しください',
     registration_failed: '登録に失敗しました。管理者にお問い合わせください',
+    approval_pending: 'ログイン申請を受け付けました。管理者の承認後に利用できます',
+    account_suspended: 'このアカウントは停止中です。管理者にお問い合わせください',
     unexpected: '予期せぬエラーが発生しました。もう一度お試しください',
   };
 
   const errorMessage = error ? errorMessages[error] || `エラーが発生しました (${error})` : null;
+
+  useEffect(() => {
+    if (error) return;
+
+    let cancelled = false;
+    fetch('/api/auth/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!cancelled && data?.user) router.replace('/groups');
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingSession(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [error, router]);
+
+  if (checkingSession) {
+    return (
+      <main className="login-page" role="main">
+        <div style={{ textAlign: "center", padding: "40px 0", color: "var(--text-sub)" }}>
+          ログイン状態を確認中...
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="login-page" role="main">

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 /**
- * Middleware: 認証チェック
+ * Proxy: 認証チェック
  *
  * ログインページ・API・静的ファイル以外のアクセスで
  * セッション Cookie が無ければログインページにリダイレクト
  */
-
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // 認証不要なパス
