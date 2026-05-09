@@ -250,6 +250,19 @@
   - `scripts/google-drive-oauth-token.mjs`
   - `.env.local.example`
 
+### 2026-05-09 Google Drive画像添付のサムネイル表示修正
+
+- **症状**: 掲示板の画像添付は投稿できるが、本文内でサムネイル表示されず、ファイル名だけが壊れた画像として表示される。
+- **原因**: 投稿に保存していた `https://drive.google.com/uc?id=...` 形式のURLが、ブラウザの`<img>`直埋め表示で安定しない。
+- **修正**:
+  - `/api/upload` の画像レスポンスで `viewUrl` として `https://drive.google.com/thumbnail?id={fileId}&sz=w1200` を返すように変更。
+  - 掲示板画面側で既存投稿の `drive.google.com/uc?id=...` や `/file/d/...` URLも表示時にthumbnail URLへ変換するようにした。
+- **影響**:
+  - 新規投稿画像だけでなく、既存投稿の壊れた画像も再読み込み後に表示改善される。
+- **関連ファイル**:
+  - `app/api/upload/route.ts`
+  - `app/board/[id]/page.tsx`
+
 ### 8-1. LINEアプリ直接起動
 - スマホブラウザからLINE認証URLにアクセスした際、LINEアプリが直接起動せずWebブラウザ内でログイン画面が開く場合がある
 - Vercelの共有ドメイン（`*.vercel.app`）ではOS側のUniversal Linksが信頼度が低い可能性

@@ -57,6 +57,30 @@ function formatDate(dateStr: string) {
   return d.toLocaleDateString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function getDriveFileId(url: string) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === "drive.google.com") {
+      const id = parsed.searchParams.get("id");
+      if (id) return id;
+
+      const filePathMatch = parsed.pathname.match(/\/file\/d\/([^/]+)/);
+      if (filePathMatch?.[1]) return filePathMatch[1];
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function getAttachmentImageUrl(url: string) {
+  const driveId = getDriveFileId(url);
+  if (!driveId) return url;
+
+  return `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200`;
+}
+
 export default function BoardPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -226,7 +250,7 @@ export default function BoardPage() {
                   {post.attachments.map((att, i) =>
                     att.type?.startsWith("image") ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img key={i} src={att.url} alt={att.name} className="post-card__image" />
+                      <img key={i} src={getAttachmentImageUrl(att.url)} alt={att.name} className="post-card__image" />
                     ) : (
                       <a
                         key={i}

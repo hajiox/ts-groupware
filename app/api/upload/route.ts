@@ -33,13 +33,16 @@ export async function POST(request: NextRequest) {
 
     const driveFile = await uploadFileToDrive(buffer, file.name, file.type)
 
-    // Google Drive の直接表示URL
     const fileUrl = driveFile.id
-      ? `https://drive.google.com/uc?id=${driveFile.id}`
+      ? `https://drive.google.com/uc?export=download&id=${driveFile.id}`
       : driveFile.webViewLink || ''
+    const thumbnailUrl = driveFile.id
+      ? `https://drive.google.com/thumbnail?id=${driveFile.id}&sz=w1200`
+      : fileUrl
 
     return NextResponse.json({
       url: fileUrl,
+      viewUrl: file.type.startsWith('image/') ? thumbnailUrl : fileUrl,
       name: file.name,
       type: file.type,
       driveId: driveFile.id,
