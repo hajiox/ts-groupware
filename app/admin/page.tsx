@@ -263,6 +263,12 @@ function GroupsTab() {
 
   const icons = ["📢", "💻", "💬", "📋", "🎯", "🏠", "📦", "🔧", "📊", "🎨"];
 
+  function openCreateForm(type: "board" | "chat") {
+    setNewGroupType(type);
+    setNewGroupIcon(type === "chat" ? "💬" : "📢");
+    setShowCreate(true);
+  }
+
   if (loading) return <p className="admin-empty">読み込み中...</p>;
 
   // メンバー管理画面
@@ -356,18 +362,26 @@ function GroupsTab() {
   // グループ一覧
   return (
     <div>
-      <button type="button" className="admin-create-btn" onClick={() => setShowCreate(!showCreate)}>
-        ＋ グループを作成
-      </button>
+      <div className="admin-create-actions">
+        <button type="button" className="admin-create-btn" onClick={() => openCreateForm("board")}>
+          ＋ 掲示板を作成
+        </button>
+        <button type="button" className="admin-create-btn admin-create-btn--chat" onClick={() => openCreateForm("chat")}>
+          ＋ Chatを作成
+        </button>
+      </div>
 
       {showCreate && (
         <form className="admin-create-form" onSubmit={handleCreateGroup}>
+          <div className="admin-create-form__title">
+            {newGroupType === "chat" ? "新規Chat作成" : "新規掲示板作成"}
+          </div>
           <input
             type="text"
             className="form-input"
             value={newGroupName}
             onChange={e => setNewGroupName(e.target.value)}
-            placeholder="グループ名"
+            placeholder={newGroupType === "chat" ? "Chat名" : "掲示板名"}
             autoFocus
           />
           <div className="type-selector" style={{ marginTop: 8 }}>

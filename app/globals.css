@@ -1611,6 +1611,13 @@ img {
   font-size: 13px;
 }
 
+.admin-create-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .admin-create-btn {
   width: 100%;
   padding: 12px;
@@ -1622,11 +1629,19 @@ img {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
-  margin-bottom: 8px;
 }
 .admin-create-btn:hover {
   background: rgba(59, 130, 246, 0.15);
   border-color: var(--accent);
+}
+.admin-create-btn--chat {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: #4ade80;
+}
+.admin-create-btn--chat:hover {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: #4ade80;
 }
 
 .admin-create-form {
@@ -1635,5 +1650,11 @@ img {
   border-radius: var(--radius);
   padding: 16px;
   margin-bottom: 8px;
+}
+.admin-create-form__title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 10px;
 }
 
