@@ -600,3 +600,17 @@
     - `LINE_CHANNEL_SECRET=<TS Groupwareチャネルのシークレット>`
   - 差し替え後にProductionを再デプロイする。
   - チャネルが開発中の間は、ログイン確認する一般ユーザーをTesterへ追加するか、チャネル公開後に確認する。
+
+### 2026-05-09 Vercel LINE環境変数をTSG専用チャネルへ差し替え
+- **実施内容**:
+  - Vercel `ts-groupware` プロジェクトの `LINE_CHANNEL_ID` / `LINE_CHANNEL_SECRET` をTSG専用LINEログインチャネルへ差し替え。
+  - 対象環境はProduction / Preview。
+  - `LINE_CHANNEL_ID` は `2010023803`。
+  - `LINE_CHANNEL_SECRET` はTS Groupwareチャネルの値を登録済み。シークレット値はドキュメントに残さない。
+- **デプロイ**:
+  - `npx vercel --prod --yes` でProduction再デプロイ済み。
+  - Production alias: `https://v0-line-blush.vercel.app`
+- **確認**:
+  - `https://v0-line-blush.vercel.app/api/auth/line` のリダイレクト先が `client_id=2010023803` になっていることを確認。
+- **残注意**:
+  - LINE Developers側のチャネルが開発中の場合、Admin/Tester以外はログインできない。
