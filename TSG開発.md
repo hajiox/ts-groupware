@@ -445,6 +445,18 @@
   - 公開前に試す場合は、テストするLINEアカウントをチャネルのTesterに追加する。
   - callback URLに `https://v0-line-blush.vercel.app/api/auth/line/callback` が登録されていることも確認。
 
+### 2026-05-09 LINE Developersチャネル共用の確認
+- **確認結果**:
+  - LINE Developers Console上にはプロバイダー「内職管理システム」のみ存在。
+  - TSGは内職管理システムと同じLINE Loginチャネル（`LINE_CHANNEL_ID=2009558059`）を共用している。
+- **判断**:
+  - 管理者本人がログインできるのは、対象プロバイダー/チャネルのAdmin権限を持つLINEアカウントだからと考えられる。
+  - 他ユーザーがcallbackへ戻らず失敗する場合、チャネルが「開発中」でAdmin/Tester以外が利用できない状態の可能性が高い。
+- **対応方針**:
+  - LINE Developers Consoleで「内職管理システム」プロバイダー配下のLINE Loginチャネルを開く。
+  - チャネルを公開する、またはテストユーザー2名をTesterとして追加する。
+  - Callback URLにTSG本番URL `https://v0-line-blush.vercel.app/api/auth/line/callback` を追加する。
+
 ### 2026-05-09 添付ファイル上限を100MBへ変更
 - **要望**: 動画なども想定し、アップロード可能なファイルサイズ上限を一旦100MBまで広げる。
 - **修正**:
