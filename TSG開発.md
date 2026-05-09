@@ -432,6 +432,19 @@
   - `app/api/auth/line/route.ts`
   - `app/api/auth/line/callback/route.ts`
 
+### 2026-05-09 LINEログイン失敗ログ確認
+- **確認結果**:
+  - 管理者アカウントは `line_callback_received` → `line_callback_state_ok` → `line_callback_token_ok` → `line_callback_profile_ok` → `line_callback_existing_user` → `line_callback_approved_redirect` まで完走。
+  - 未登録ユーザーのiPhoneでは `line_start_redirect` のみ記録され、`line_callback_received` が一度も記録されていない。
+  - `gw_users` は管理者1件のみで、未登録ユーザーの `pending` レコードは未作成。
+- **判断**:
+  - 承認判定で弾かれているのではなく、LINEからTSGのcallback URLへ戻る前に止まっている。
+  - LINE Developers側でチャネルが「開発中」の場合、Admin/Tester以外はLINEログインを利用できないため、この挙動と一致する可能性が高い。
+- **次の確認**:
+  - LINE Developers Consoleで対象LINE Loginチャネルのステータスが「公開済み」か確認。
+  - 公開前に試す場合は、テストするLINEアカウントをチャネルのTesterに追加する。
+  - callback URLに `https://v0-line-blush.vercel.app/api/auth/line/callback` が登録されていることも確認。
+
 ### 2026-05-09 添付ファイル上限を100MBへ変更
 - **要望**: 動画なども想定し、アップロード可能なファイルサイズ上限を一旦100MBまで広げる。
 - **修正**:
