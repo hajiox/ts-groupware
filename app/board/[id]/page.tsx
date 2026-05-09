@@ -26,6 +26,11 @@ type Post = {
   commentCount: number;
 };
 
+type CurrentUser = {
+  id: string;
+  role: string;
+};
+
 function Avatar({ user, size = 38 }: { user: Author; size?: number }) {
   if (user.picture_url) {
     return (
@@ -159,6 +164,9 @@ export default function BoardPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadOriginal, setUploadOriginal] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -168,6 +176,15 @@ export default function BoardPage() {
       .then(data => {
         const g = data.groups?.find((g: { id: string; name: string }) => g.id === id);
         if (g) setGroupName(g.name);
+      })
+      .catch(() => {});
+
+    fetch("/api/auth/me")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.user) {
+          setCurrentUser({ id: data.user.id, role: data.user.role });
+        }
       })
       .catch(() => {});
 
@@ -292,6 +309,58 @@ export default function BoardPage() {
     setUploadOriginal(false);
   }
 
+  function canEditPost(post: Post) {
+    return currentUser?.id === post.user_id;
+  }
+
+  function canDeletePost(post: Post) {
+    return currentUser?.id === post.user_id || currentUser?.role === "admin";
+  }
+
+  function startEditing(post: Post) {
+    setEditingPostId(post.id);
+    setEditingText(post.content || "");
+  }
+
+  async function saveEdit(post: Post) {
+    const res = await fetch("/api/posts", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ post_id: post.id, content: editingText }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      alert(data?.error || "投稿の更新に失敗しました");
+      return;
+    }
+
+    const data = await res.json();
+    setPosts(current => current.map(item => (
+      item.id === post.id ? { ...item, content: data.post.content } : item
+    )));
+    setEditingPostId(null);
+    setEditingText("");
+  }
+
+  async function deletePost(post: Post) {
+    if (!confirm("この投稿を削除しますか？")) return;
+
+    const res = await fetch(`/api/posts?post_id=${post.id}`, {
+      method: "DELETE",
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      alert(data?.error || "投稿の削除に失敗しました");
+      return;
+    }
+
+    const data = await res.json().catch(() => null);
+    const deletedIds = new Set<string>(data?.deletedIds || [post.id]);
+    setPosts(current => current.filter(item => !deletedIds.has(item.id)));
+  }
+
   return (
     <>
       {/* Header */}
@@ -335,10 +404,61 @@ export default function BoardPage() {
                   <div className="post-card__username">{post.author.display_name}</div>
                   <div className="post-card__time">{formatDate(post.created_at)}</div>
                 </div>
+                {(canEditPost(post) || canDeletePost(post)) && (
+                  <div className="post-card__actions" aria-label="投稿操作">
+                    {canEditPost(post) && (
+                      <button
+                        type="button"
+                        className="post-card__action-btn"
+                        onClick={() => startEditing(post)}
+                      >
+                        編集
+                      </button>
+                    )}
+                    {canDeletePost(post) && (
+                      <button
+                        type="button"
+                        className="post-card__action-btn post-card__action-btn--danger"
+                        onClick={() => deletePost(post)}
+                      >
+                        削除
+                      </button>
+                    )}
+                  </div>
+                )}
               </header>
 
               {/* Body */}
-              {post.content && (
+              {editingPostId === post.id ? (
+                <div className="post-card__edit">
+                  <textarea
+                    className="post-card__edit-textarea"
+                    value={editingText}
+                    onChange={(e) => setEditingText(e.target.value)}
+                    rows={3}
+                    aria-label="投稿編集"
+                  />
+                  <div className="post-card__edit-actions">
+                    <button
+                      type="button"
+                      className="post-card__edit-btn"
+                      onClick={() => saveEdit(post)}
+                    >
+                      保存
+                    </button>
+                    <button
+                      type="button"
+                      className="post-card__edit-btn post-card__edit-btn--sub"
+                      onClick={() => {
+                        setEditingPostId(null);
+                        setEditingText("");
+                      }}
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                </div>
+              ) : post.content && (
                 <div className="post-card__body" style={{ whiteSpace: "pre-wrap" }}>
                   {post.content}
                 </div>

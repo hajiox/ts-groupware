@@ -114,15 +114,18 @@ img {
 /* ─── Bottom navigation ─── */
 .bottom-nav {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  bottom: 10px;
+  left: 12px;
+  right: 12px;
   z-index: 100;
-  height: var(--nav-height);
+  height: 56px;
   background: var(--card);
-  border-top: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: 14px;
   display: flex;
   align-items: stretch;
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(2, 6, 23, 0.35);
 }
 
 .bottom-nav__item {
@@ -410,7 +413,7 @@ img {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px 12px calc(80px + var(--nav-height));
+  padding: 12px 12px calc(112px + var(--nav-height));
 }
 
 .post-card {
@@ -445,12 +448,76 @@ img {
   color: var(--text-muted);
   margin-top: 1px;
 }
+.post-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.post-card__action-btn {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-sub);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 9px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.post-card__action-btn:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+.post-card__action-btn--danger {
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.25);
+}
+.post-card__action-btn--danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fecaca;
+}
 
 .post-card__body {
   padding: 10px 14px;
   font-size: 14px;
   color: var(--text);
   line-height: 1.6;
+}
+.post-card__edit {
+  padding: 10px 14px;
+}
+.post-card__edit-textarea {
+  width: 100%;
+  min-height: 96px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  line-height: 1.6;
+  outline: none;
+  padding: 10px 12px;
+  resize: vertical;
+}
+.post-card__edit-textarea:focus {
+  border-color: var(--accent);
+}
+.post-card__edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.post-card__edit-btn {
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 12px;
+}
+.post-card__edit-btn--sub {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-sub);
 }
 .post-card__image-button {
   width: 100%;
@@ -553,7 +620,7 @@ img {
 /* Post input bar */
 .post-input-bar {
   position: fixed;
-  bottom: var(--nav-height);
+  bottom: calc(var(--nav-height) + 22px);
   left: 12px;
   right: 12px;
   z-index: 90;
@@ -1080,13 +1147,12 @@ img {
     margin: 0 auto;
   }
   .chat-input-bar,
-  .bottom-nav,
-  .fab {
-    max-width: 600px;
+  .bottom-nav {
+    max-width: 576px;
     left: 50%;
     transform: translateX(-50%);
     right: auto;
-    width: 100%;
+    width: calc(100% - 24px);
   }
   .post-input-bar {
     max-width: 576px;
@@ -1097,7 +1163,7 @@ img {
   }
   .fab {
     left: auto;
-    right: calc(50% - 300px + 20px);
+    right: calc(50% - 288px + 20px);
     transform: none;
   }
 }

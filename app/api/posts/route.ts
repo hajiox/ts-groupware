@@ -178,3 +178,107 @@ export async function POST(request: NextRequest) {
     },
   }, { status: 201 })
 }
+
+export async function PATCH(request: NextRequest) {
+  const user = await getUserSession()
+  if (!user) {
+    return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
+  }
+
+  const body = await request.json()
+  const { post_id, content } = body
+  const trimmedContent = typeof content === 'string' ? content.trim() : ''
+
+  if (!post_id) {
+    return NextResponse.json({ error: 'post_id が必要です' }, { status: 400 })
+  }
+
+  const { data: existing, error: fetchError } = await adminClient
+    .from('gw_posts')
+    .select('id, user_id, attachments')
+    .eq('id', post_id)
+    .single()
+
+  if (fetchError || !existing) {
+    return NextResponse.json({ error: '投稿が見つかりません' }, { status: 404 })
+  }
+
+  if (existing.user_id !== user.id) {
+    return NextResponse.json({ error: '自分の投稿のみ編集できます' }, { status: 403 })
+  }
+
+  if (!trimmedContent && (!existing.attachments || existing.attachments.length === 0)) {
+    return NextResponse.json({ error: '内容が必要です' }, { status: 400 })
+  }
+
+  const { data: post, error } = await adminClient
+    .from('gw_posts')
+    .update({
+      content: trimmedContent || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', post_id)
+    .select()
+    .single()
+
+  if (error || !post) {
+    return NextResponse.json({ error: error?.message || '投稿の更新に失敗しました' }, { status: 500 })
+  }
+
+  return NextResponse.json({ post })
+}
+
+export async function DELETE(request: NextRequest) {
+  const user = await getUserSession()
+  if (!user) {
+    return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
+  }
+
+  const postId = request.nextUrl.searchParams.get('post_id')
+  if (!postId) {
+    return NextResponse.json({ error: 'post_id が必要です' }, { status: 400 })
+  }
+
+  const { data: post, error: fetchError } = await adminClient
+    .from('gw_posts')
+    .select('id, user_id, group_id')
+    .eq('id', postId)
+    .single()
+
+  if (fetchError || !post) {
+    return NextResponse.json({ error: '投稿が見つかりません' }, { status: 404 })
+  }
+
+  if (post.user_id !== user.id && user.role !== 'admin') {
+    return NextResponse.json({ error: '削除権限がありません' }, { status: 403 })
+  }
+
+  const { data: comments } = await adminClient
+    .from('gw_posts')
+    .select('id')
+    .eq('parent_id', postId)
+
+  const postIds = [postId, ...(comments || []).map(comment => comment.id)]
+
+  await adminClient
+    .from('gw_reactions')
+    .delete()
+    .in('post_id', postIds)
+
+  const { error } = await adminClient
+    .from('gw_posts')
+    .delete()
+    .in('id', postIds)
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  adminClient
+    .from('gw_groups')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', post.group_id)
+    .then(undefined, e => console.error('[Group timestamp update error]', e))
+
+  return NextResponse.json({ ok: true, deletedIds: postIds })
+}
