@@ -1,75 +1,222 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useState, useEffect, useRef } from "react";
-import { MOCK_GROUPS, MOCK_MESSAGES, MOCK_USERS } from "@/lib/mock-data";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-function AvatarPlaceholder({
-  initials,
-  color,
-  size = 32,
-}: {
-  initials: string;
-  color: string;
-  size?: number;
-}) {
+type ChatUser = {
+  id: string;
+  display_name: string;
+  picture_url: string | null;
+  role?: string;
+  group_role?: string;
+};
+
+type Attachment = {
+  url: string;
+  viewUrl?: string;
+  name: string;
+  type: string;
+  driveId?: string;
+  webViewLink?: string;
+};
+
+type Message = {
+  id: string;
+  user_id: string;
+  content: string | null;
+  attachments: Attachment[];
+  created_at: string;
+  author: ChatUser;
+  isOwn: boolean;
+};
+
+type ChatGroup = {
+  id: string;
+  name: string;
+  icon: string;
+};
+
+function Avatar({ user, size = 30 }: { user: ChatUser; size?: number }) {
+  if (user.picture_url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={user.picture_url} alt="" className="avatar" width={size} height={size} />;
+  }
+
   return (
-    <div
-      className="avatar-placeholder"
-      style={{ width: size, height: size, background: color, fontSize: size * 0.38 }}
-      aria-hidden="true"
-    >
-      {initials}
+    <div className="avatar-placeholder" style={{ width: size, height: size, fontSize: size * 0.4 }}>
+      {user.display_name?.charAt(0) || "?"}
     </div>
   );
+}
+
+function formatTime(value: string) {
+  return new Date(value).toLocaleTimeString("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function attachmentViewUrl(attachment: Attachment) {
+  return attachment.viewUrl || attachment.url;
 }
 
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-
-  const group = MOCK_GROUPS.find((g) => g.id === id);
-  const initialMessages = MOCK_MESSAGES.filter((m) => m.groupId === id);
-
-  const [messages, setMessages] = useState(initialMessages);
-  const [input, setInput] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const messageIdsRef = useRef<Set<string>>(new Set());
 
-  // Scroll to bottom on new messages
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  const [group, setGroup] = useState<ChatGroup | null>(null);
+  const [members, setMembers] = useState<ChatUser[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  const latestMessageAt = useMemo(() => {
+    return messages.length > 0 ? messages[messages.length - 1].created_at : "";
   }, [messages]);
 
-  function handleSend() {
-    const trimmed = input.trim();
-    if (!trimmed) return;
+  const mergeMessages = useCallback((incoming: Message[]) => {
+    if (incoming.length === 0) return;
 
-    const newMsg = {
-      id: `msg-${Date.now()}`,
-      groupId: id,
-      author: MOCK_USERS[0],
-      createdAt: new Date().toLocaleTimeString("ja-JP", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      text: trimmed,
-      imageUrl: null,
-      isOwn: true,
+    setMessages(prev => {
+      const next = [...prev];
+      for (const message of incoming) {
+        if (messageIdsRef.current.has(message.id)) continue;
+        messageIdsRef.current.add(message.id);
+        next.push(message);
+      }
+      return next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    });
+  }, []);
+
+  const loadChat = useCallback(async (since?: string) => {
+    const params = new URLSearchParams({ group_id: id });
+    if (since) params.set("since", since);
+
+    const res = await fetch(`/api/chat?${params.toString()}`, { cache: "no-store" });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || "チャットの取得に失敗しました");
+    }
+
+    setGroup(data.group);
+    setMembers(data.members || []);
+
+    if (since) {
+      mergeMessages(data.messages || []);
+    } else {
+      messageIdsRef.current = new Set((data.messages || []).map((message: Message) => message.id));
+      setMessages(data.messages || []);
+    }
+  }, [id, mergeMessages]);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+
+    loadChat()
+      .catch(err => {
+        if (active) setError(err instanceof Error ? err.message : "チャットの取得に失敗しました");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
     };
+  }, [loadChat]);
 
-    setMessages((prev) => [...prev, newMsg]);
-    setInput("");
-    inputRef.current?.focus();
+  useEffect(() => {
+    if (!latestMessageAt) return;
+
+    const timer = window.setInterval(() => {
+      loadChat(latestMessageAt).catch(err => {
+        console.error("[Chat polling error]", err);
+      });
+    }, 4000);
+
+    return () => window.clearInterval(timer);
+  }, [latestMessageAt, loadChat]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: loading ? "auto" : "smooth" });
+  }, [messages, loading]);
+
+  async function uploadSelectedFile() {
+    if (!selectedFile) return [];
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || "ファイルのアップロードに失敗しました");
+    }
+
+    return [{
+      url: data.viewUrl || data.url,
+      viewUrl: data.viewUrl,
+      name: data.name || selectedFile.name,
+      type: data.type || selectedFile.type,
+      driveId: data.driveId,
+      webViewLink: data.webViewLink,
+    }];
+  }
+
+  async function handleSend() {
+    const content = input.trim();
+    if ((!content && !selectedFile) || sending) return;
+
+    setSending(true);
+    setError("");
+
+    try {
+      const attachments = await uploadSelectedFile();
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_id: id, content, attachments }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.error || "メッセージ送信に失敗しました");
+      }
+
+      mergeMessages([data.message]);
+      setInput("");
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "メッセージ送信に失敗しました");
+    } finally {
+      setSending(false);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") handleSend();
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      handleSend();
+    }
   }
 
   return (
     <>
-      {/* Header */}
       <header className="top-header" role="banner">
         <button
           type="button"
@@ -79,91 +226,153 @@ export default function ChatPage() {
         >
           ‹
         </button>
-        <h1 className="top-header__title">{group?.name ?? "チャット"}</h1>
-        <span className="top-header__meta">{MOCK_USERS.length}名</span>
+        <h1 className="top-header__title">
+          <span aria-hidden="true">{group?.icon || "💬"}</span>
+          {group?.name || "チャット"}
+        </h1>
+        <span className="top-header__meta">{members.length}名</span>
       </header>
 
-      {/* Messages */}
-      <section
-        className="chat-messages"
-        aria-label="チャットメッセージ"
-        role="log"
-        aria-live="polite"
-      >
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`msg msg--${msg.isOwn ? "own" : "other"}`}
-            aria-label={`${msg.isOwn ? "自分" : msg.author.name}: ${msg.text} ${msg.createdAt}`}
-          >
-            {/* Avatar (others only) */}
-            {!msg.isOwn && (
+      <section className="chat-messages" aria-label="チャットメッセージ" role="log" aria-live="polite">
+        {loading && <p className="chat-empty">読み込み中...</p>}
+
+        {!loading && error && messages.length === 0 && (
+          <div className="chat-error">
+            <p>{error}</p>
+            <button type="button" className="btn-primary" onClick={() => router.push("/groups")}>
+              グループ一覧へ戻る
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && messages.length === 0 && (
+          <p className="chat-empty">メッセージはまだありません。最初のメッセージを送りましょう。</p>
+        )}
+
+        {messages.map(message => (
+          <div key={message.id} className={`msg msg--${message.isOwn ? "own" : "other"}`}>
+            {!message.isOwn && (
               <div className="msg__avatar-col">
-                <AvatarPlaceholder
-                  initials={msg.author.initials}
-                  color={msg.author.color}
-                  size={30}
-                />
+                <Avatar user={message.author} />
               </div>
             )}
 
-            {/* Bubble + name */}
-            <div style={{ display: "flex", flexDirection: "column", maxWidth: "100%" }}>
-              {!msg.isOwn && (
-                <span className="msg__name">{msg.author.name}</span>
-              )}
-              <div className="msg__bubble">{msg.text}</div>
-              {msg.imageUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={msg.imageUrl} alt="画像メッセージ" className="msg__image" />
-              )}
+            <div className="msg__body">
+              {!message.isOwn && <span className="msg__name">{message.author.display_name}</span>}
+
+              {message.content && <div className="msg__bubble">{message.content}</div>}
+
+              {message.attachments?.map((attachment, index) => {
+                const viewUrl = attachmentViewUrl(attachment);
+                if (attachment.type?.startsWith("image/")) {
+                  return (
+                    <button
+                      key={`${message.id}-${index}`}
+                      type="button"
+                      className="msg__image-btn"
+                      onClick={() => setPreviewImage(viewUrl)}
+                      aria-label={`${attachment.name}を拡大表示`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={viewUrl} alt={attachment.name} className="msg__image" />
+                    </button>
+                  );
+                }
+
+                return (
+                  <a
+                    key={`${message.id}-${index}`}
+                    href={attachment.webViewLink || attachment.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="msg__file"
+                  >
+                    <span aria-hidden="true">📎</span>
+                    <span>{attachment.name}</span>
+                  </a>
+                );
+              })}
             </div>
 
-            {/* Timestamp */}
-            <time className="msg__time" dateTime={msg.createdAt}>
-              {msg.createdAt}
+            <time className="msg__time" dateTime={message.created_at}>
+              {formatTime(message.created_at)}
             </time>
           </div>
         ))}
 
-        {messages.length === 0 && (
-          <p style={{ textAlign: "center", color: "var(--text-sub)", padding: "40px 0" }}>
-            メッセージはまだありません。最初のメッセージを送りましょう！
-          </p>
-        )}
-
-        {/* Scroll anchor */}
         <div ref={bottomRef} aria-hidden="true" />
       </section>
 
-      {/* Chat input bar */}
+      {error && messages.length > 0 && <div className="chat-inline-error">{error}</div>}
+
       <form
         className="chat-input-bar"
-        onSubmit={(e) => { e.preventDefault(); handleSend(); }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSend();
+        }}
         aria-label="メッセージ入力"
       >
-        <button type="button" className="icon-btn" aria-label="画像を添付">
+        {selectedFile && (
+          <div className="chat-selected-file">
+            <span>{selectedFile.name}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedFile(null);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+              aria-label="添付を解除"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="visually-hidden"
+          onChange={e => setSelectedFile(e.target.files?.[0] || null)}
+        />
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="ファイルを添付"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={sending}
+        >
           📎
         </button>
         <input
-          ref={inputRef}
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="メッセージを入力…"
+          placeholder="メッセージを入力..."
           aria-label="メッセージ"
           autoComplete="off"
+          disabled={sending}
         />
         <button
           type="submit"
           className="send-btn"
           aria-label="送信"
-          disabled={!input.trim()}
+          disabled={sending || (!input.trim() && !selectedFile)}
         >
-          ↑
+          {sending ? "…" : "↑"}
         </button>
       </form>
+
+      {previewImage && (
+        <div className="image-preview" role="dialog" aria-modal="true" onClick={() => setPreviewImage(null)}>
+          <button type="button" className="image-preview__close" onClick={() => setPreviewImage(null)} aria-label="閉じる">
+            ×
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={previewImage} alt="添付画像プレビュー" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
     </>
   );
 }
