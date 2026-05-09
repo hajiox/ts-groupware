@@ -63,6 +63,9 @@ export default function BoardPage() {
 
   const [groupName, setGroupName] = useState("掲示板");
   const [posts, setPosts] = useState<Post[]>([]);
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(true);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
