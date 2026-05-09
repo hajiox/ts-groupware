@@ -14,7 +14,7 @@ import { adminClient } from '@/lib/supabase/admin'
  */
 
 export async function GET(request: NextRequest) {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || request.nextUrl.origin
 
   try {
     const searchParams = request.nextUrl.searchParams

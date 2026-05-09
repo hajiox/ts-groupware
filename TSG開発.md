@@ -381,6 +381,26 @@
   - `app/page.tsx`
   - `app/globals.css`
 
+### 2026-05-09 iPhone SafariのLINEログイン失敗対策
+- **症状**: iPhone SE + Safari環境でLINEログインに進めない/承認待ち登録まで到達しないケースが発生。
+- **原因候補**:
+  - Vercel Productionの `NEXT_PUBLIC_SITE_URL` が空文字になっていた。
+  - 認証APIが空文字の環境変数をフォールバック処理し、LINE OAuthの `redirect_uri` に `http://localhost:3000` を使う可能性があった。
+  - スマホSafariからLINEアプリへ遷移するOAuthでは、callback URLの不一致がログイン失敗に直結する。
+- **修正**:
+  - `/api/auth/line` で `request.nextUrl.origin` を使い、実際にアクセスされた本番ドメインから `redirect_uri` を生成。
+  - `/api/auth/line/callback` のトークン交換時も同じoriginから `redirect_uri` を生成。
+  - `/api/auth/logout` のリダイレクト先もアクセス元originを使用。
+  - `NEXT_PUBLIC_SITE_URL` は `.trim()` して使用し、Vercel CLI入力時の末尾空白・改行混入に備える。
+  - Vercel Productionの `NEXT_PUBLIC_SITE_URL` を `https://v0-line-blush.vercel.app` に再設定済み。
+- **影響範囲**:
+  - LINE認証開始、LINE callback、ログアウトのみ。
+  - 掲示板関連ファイルは未変更。
+- **関連ファイル**:
+  - `app/api/auth/line/route.ts`
+  - `app/api/auth/line/callback/route.ts`
+  - `app/api/auth/logout/route.ts`
+
 ### 2026-05-09 添付ファイル上限を100MBへ変更
 - **要望**: 動画なども想定し、アップロード可能なファイルサイズ上限を一旦100MBまで広げる。
 - **修正**:

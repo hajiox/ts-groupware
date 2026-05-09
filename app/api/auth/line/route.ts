@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 
 /**
@@ -10,13 +10,13 @@ import crypto from 'crypto'
  * フロー: ブラウザ → このRoute → LINE認可画面 → /api/auth/line/callback
  */
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const channelId = process.env.LINE_CHANNEL_ID
   if (!channelId) {
     return NextResponse.json({ error: 'LINE_CHANNEL_ID が未設定です' }, { status: 500 })
   }
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || request.nextUrl.origin
   const redirectUri = `${siteUrl}/api/auth/line/callback`
 
   // CSRF 防止用のランダム state
