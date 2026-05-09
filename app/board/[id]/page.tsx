@@ -116,7 +116,8 @@ export default function BoardPage() {
             name: data.name
           });
         } else {
-          alert('ファイルのアップロードに失敗しました');
+          const data = await res.json().catch(() => null);
+          alert(data?.error || 'ファイルのアップロードに失敗しました');
           setIsUploading(false);
           return;
         }

@@ -1,4 +1,5 @@
 import { google } from 'googleapis'
+import { Readable } from 'stream'
 
 /**
  * Google Drive API クライアント
@@ -7,13 +8,38 @@ import { google } from 'googleapis'
  * ファイルのアップロード先フォルダ ID を GOOGLE_DRIVE_FOLDER_ID に設定。
  */
 
+function parseServiceAccountKey(keyString: string) {
+  try {
+    return JSON.parse(keyString)
+  } catch (firstError) {
+    const normalized = keyString.replace(
+      /("private_key"\s*:\s*")([\s\S]*?)("\s*,\s*"client_email")/,
+      (_match, prefix: string, privateKey: string, suffix: string) => {
+        const fixedPrivateKey = privateKey
+          .replace(/\r\n/g, '\n')
+          .replace(/\r/g, '\n')
+          .replace(/\n/g, '\\n')
+
+        return `${prefix}${fixedPrivateKey}${suffix}`
+      }
+    )
+
+    try {
+      return JSON.parse(normalized)
+    } catch {
+      const message = firstError instanceof Error ? firstError.message : 'invalid JSON'
+      throw new Error(`GOOGLE_SERVICE_ACCOUNT_KEY is invalid JSON: ${message}`)
+    }
+  }
+}
+
 function getDriveClient() {
   const keyString = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
   if (!keyString) {
     throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY is not set')
   }
 
-  const credentials = JSON.parse(keyString)
+  const credentials = parseServiceAccountKey(keyString)
   
   const auth = new google.auth.GoogleAuth({
     credentials,
@@ -28,7 +54,6 @@ export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mi
   const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID
 
   // Node.js 組み込みの Readable で Buffer を stream に変換
-  const { Readable } = require('stream')
   const stream = new Readable()
   stream.push(fileBuffer)
   stream.push(null)
