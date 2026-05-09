@@ -35,7 +35,8 @@ async function getChatAccess(groupId: string, userId: string) {
     return { group: null, membership: null, error: 'チャットが見つかりません', status: 404 }
   }
 
-  if (!membership && user?.role !== 'admin') {
+  const isDirectChat = typeof group.description === 'string' && group.description.startsWith('direct:')
+  if (!membership && (user?.role !== 'admin' || isDirectChat)) {
     return { group: null, membership: null, error: 'このチャットに参加していません', status: 403 }
   }
 

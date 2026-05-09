@@ -590,6 +590,22 @@
   - `app/api/chat/route.ts`
   - `app/admin/page.tsx`
   - `app/globals.css`
+
+### 2026-05-09 メンバー一覧から個人Chat開始・個人Chat秘匿
+- **要望**: 「＋個人Chat」ボタンは不要。登録済みメンバーリストを全員が見られ、そこから自由に個人Chatできるようにする。ただし個人Chatは検閲されないようセキュアにする。
+- **修正**:
+  - グループ一覧画面の「＋個人Chat」ボタンを廃止。
+  - グループ一覧上部に承認済みメンバー一覧を常時表示。
+  - メンバーを押すと、その相手との個人Chatを作成または既存Chatを再利用して遷移。
+  - 管理者の「全グループ参加」対象から `description` が `direct:` で始まる個人Chatを除外。
+  - `/api/chat` で個人Chatは当事者2名以外アクセス不可にし、管理者であっても未参加なら403にする。
+- **確認**:
+  - `npm.cmd run build` 成功。
+- **関連ファイル**:
+  - `app/groups/page.tsx`
+  - `app/api/groups/route.ts`
+  - `app/api/chat/route.ts`
+  - `app/globals.css`
 ### 2026-05-09 TSG専用LINEログインチャネル基本設定確認
 - **確認内容**:
   - LINE Developers Console上で、プロバイダー「内職管理システム」配下にTSG専用のLINEログインチャネル「TS Groupware」が作成されていることを確認。

@@ -7,6 +7,10 @@ import { getUserSession } from '@/lib/session'
  * POST /api/groups — グループ新規作成
  */
 
+function isDirectChat(group: { type?: string; description?: string | null }) {
+  return group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:')
+}
+
 export async function GET() {
   const user = await getUserSession()
   if (!user) {
@@ -32,8 +36,11 @@ export async function GET() {
     groupsQuery = groupsQuery.in('id', explicitGroupIds)
   }
 
-  const { data: groups } = await groupsQuery
-  const groupIds = (groups || []).map(group => group.id)
+  const { data: rawGroups } = await groupsQuery
+  const groups = user.role === 'admin'
+    ? (rawGroups || []).filter(group => !isDirectChat(group) || explicitGroupIds.includes(group.id))
+    : (rawGroups || [])
+  const groupIds = groups.map(group => group.id)
 
   if (groupIds.length === 0) {
     return NextResponse.json({ groups: [] })
@@ -45,8 +52,8 @@ export async function GET() {
     .in('group_id', groupIds)
 
   const explicitGroupIdSet = new Set(explicitGroupIds)
-  const directOtherUserIds = (groups || [])
-    .filter(group => group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:'))
+  const directOtherUserIds = groups
+    .filter(group => isDirectChat(group))
     .filter(group => explicitGroupIdSet.has(group.id))
     .map(group => (groupMembers || []).find(member => member.group_id === group.id && member.user_id !== user.id)?.user_id)
     .filter(Boolean)
@@ -62,8 +69,8 @@ export async function GET() {
 
   // 各グループの最新投稿と未読数を取得
   const enrichedGroups = await Promise.all(
-    (groups || []).map(async (group) => {
-      const directOtherUserId = group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:') && explicitGroupIdSet.has(group.id)
+    groups.map(async (group) => {
+      const directOtherUserId = isDirectChat(group) && explicitGroupIdSet.has(group.id)
         ? (groupMembers || []).find(member => member.group_id === group.id && member.user_id !== user.id)?.user_id
         : null
       const directUser = directOtherUserId ? directUserMap[directOtherUserId] : null

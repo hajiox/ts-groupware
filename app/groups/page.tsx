@@ -154,35 +154,49 @@ function CreateGroupModal({
   );
 }
 
-function DirectChatModal({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
-  const [users, setUsers] = useState<DirectChatUser[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [creatingUserId, setCreatingUserId] = useState("");
-  const [error, setError] = useState("");
+function formatTime(dateStr: string) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+}
+
+export default function GroupsPage() {
+  const [user, setUser] = useState<User | null>(null);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [members, setMembers] = useState<DirectChatUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [membersLoading, setMembersLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [creatingChatUserId, setCreatingChatUserId] = useState("");
+  const [memberError, setMemberError] = useState("");
+
+  function loadData() {
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => data && setUser(data.user))
+      .catch(() => {});
+
+    fetch("/api/groups")
+      .then((r) => (r.ok ? r.json() : { groups: [] }))
+      .then((data) => setGroups(data.groups))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+
+    fetch("/api/chat/direct")
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("メンバー一覧を取得できませんでした")))
+      .then(data => setMembers(data.users || []))
+      .catch(err => setMemberError(err instanceof Error ? err.message : "メンバー一覧を取得できませんでした"))
+      .finally(() => setMembersLoading(false));
+  }
 
   useEffect(() => {
-    if (!open) return;
-
-    setLoading(true);
-    setError("");
-    fetch("/api/chat/direct")
-      .then(r => r.ok ? r.json() : Promise.reject(new Error("ユーザー一覧を取得できませんでした")))
-      .then(data => setUsers(data.users || []))
-      .catch(err => setError(err instanceof Error ? err.message : "ユーザー一覧を取得できませんでした"))
-      .finally(() => setLoading(false));
-  }, [open]);
-
-  if (!open) return null;
+    loadData();
+  }, []);
 
   async function startDirectChat(targetUserId: string) {
-    setCreatingUserId(targetUserId);
-    setError("");
+    setCreatingChatUserId(targetUserId);
+    setMemberError("");
 
     const res = await fetch("/api/chat/direct", {
       method: "POST",
@@ -196,84 +210,9 @@ function DirectChatModal({
       return;
     }
 
-    setError(data.error || "個人Chatの作成に失敗しました");
-    setCreatingUserId("");
+    setMemberError(data.error || "個人Chatの開始に失敗しました");
+    setCreatingChatUserId("");
   }
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <h2 className="modal-title">個人Chat</h2>
-        {loading ? (
-          <p className="modal-empty">読み込み中...</p>
-        ) : error ? (
-          <p className="modal-error">{error}</p>
-        ) : users.length === 0 ? (
-          <p className="modal-empty">Chatできるユーザーがいません</p>
-        ) : (
-          <div className="direct-chat-list">
-            {users.map(targetUser => (
-              <button
-                key={targetUser.id}
-                type="button"
-                className="direct-chat-user"
-                onClick={() => startDirectChat(targetUser.id)}
-                disabled={Boolean(creatingUserId)}
-              >
-                {targetUser.picture_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={targetUser.picture_url} alt="" className="avatar" width={38} height={38} />
-                ) : (
-                  <AvatarPlaceholder initials={targetUser.display_name.charAt(0)} color="#3b82f6" size={38} />
-                )}
-                <span>{targetUser.display_name}</span>
-                <span className="direct-chat-user__action">
-                  {creatingUserId === targetUser.id ? "作成中..." : "Chat"}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="modal-actions">
-          <button type="button" className="btn-cancel" onClick={onClose}>
-            閉じる
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function formatTime(dateStr: string) {
-  if (!dateStr) return "";
-  const d = new Date(dateStr);
-  return d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
-}
-
-export default function GroupsPage() {
-  const [user, setUser] = useState<User | null>(null);
-  const [groups, setGroups] = useState<Group[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [showDirectChat, setShowDirectChat] = useState(false);
-  const [showUserMenu, setShowUserMenu] = useState(false);
-
-  function loadData() {
-    fetch("/api/auth/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => data && setUser(data.user))
-      .catch(() => {});
-
-    fetch("/api/groups")
-      .then((r) => (r.ok ? r.json() : { groups: [] }))
-      .then((data) => setGroups(data.groups))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   return (
     <>
@@ -331,10 +270,42 @@ export default function GroupsPage() {
         aria-label="グループ一覧"
         style={{ paddingTop: 16 }}
       >
-        <div className="groups-actions">
-          <button type="button" className="groups-action-btn groups-action-btn--chat" onClick={() => setShowDirectChat(true)}>
-            ＋ 個人Chat
-          </button>
+        <div className="member-directory">
+          <div className="member-directory__header">
+            <h2>メンバー</h2>
+            <span>{members.length}名</span>
+          </div>
+          {membersLoading ? (
+            <p className="member-directory__empty">読み込み中...</p>
+          ) : memberError ? (
+            <p className="member-directory__error">{memberError}</p>
+          ) : members.length === 0 ? (
+            <p className="member-directory__empty">表示できるメンバーがいません</p>
+          ) : (
+            <div className="member-directory__list">
+              {members.map(member => (
+                <button
+                  key={member.id}
+                  type="button"
+                  className="member-directory__item"
+                  onClick={() => startDirectChat(member.id)}
+                  disabled={Boolean(creatingChatUserId)}
+                  title={`${member.display_name} とChat`}
+                >
+                  {member.picture_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={member.picture_url} alt="" className="avatar" width={34} height={34} />
+                  ) : (
+                    <AvatarPlaceholder initials={member.display_name.charAt(0)} color="#3b82f6" size={34} />
+                  )}
+                  <span>{member.display_name}</span>
+                  <span className="member-directory__chat">
+                    {creatingChatUserId === member.id ? "開始中..." : "Chat"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -388,10 +359,6 @@ export default function GroupsPage() {
         )}
       </section>
 
-      <DirectChatModal
-        open={showDirectChat}
-        onClose={() => setShowDirectChat(false)}
-      />
     </>
   );
 }
