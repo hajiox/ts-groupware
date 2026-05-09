@@ -96,11 +96,6 @@ function LoginContent() {
         </div>
       )}
 
-      <div className="top-qr login-qr">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={qrUrl} alt="LINEログインへ進むQRコード" width={220} height={220} />
-      </div>
-
       <a
         href={lineLoginUrl}
         className="btn-line"
@@ -114,6 +109,14 @@ function LoginContent() {
         </span>
         LINEでログイン
       </a>
+
+      <details className="login-qr-details">
+        <summary>スマホで開くQR</summary>
+        <div className="top-qr login-qr">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={qrUrl} alt="LINEログインへ進むQRコード" width={180} height={180} />
+        </div>
+      </details>
 
       <p className="login-note">
         LINEアカウントを使用して安全にログインします。

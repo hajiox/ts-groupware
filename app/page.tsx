@@ -29,11 +29,6 @@ export default function RootPage() {
           <p className="login-logo__sub">社内グループウェア</p>
         </div>
 
-        <div className="top-qr">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={qrUrl} alt="LINEログインへ進むQRコード" width={220} height={220} />
-        </div>
-
         <a href={lineLoginUrl} className="btn-line top-login-btn" aria-label="LINEアカウントでログイン">
           <span className="btn-line__icon" aria-hidden="true">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="white" aria-hidden="true">
@@ -42,6 +37,14 @@ export default function RootPage() {
           </span>
           LINEでログイン
         </a>
+
+        <details className="login-qr-details">
+          <summary>スマホで開くQR</summary>
+          <div className="top-qr">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={qrUrl} alt="LINEログインへ進むQRコード" width={180} height={180} />
+          </div>
+        </details>
       </section>
     </main>
   );
