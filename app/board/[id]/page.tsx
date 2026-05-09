@@ -4,6 +4,8 @@ import { useParams, useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"] as const;
+const IMAGE_UPLOAD_MAX_SIZE = 1600;
+const IMAGE_UPLOAD_QUALITY = 0.82;
 
 type Author = {
   id: string;
@@ -81,6 +83,69 @@ function getAttachmentImageUrl(url: string) {
   return `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200`;
 }
 
+function getCompressedImageName(name: string) {
+  const baseName = name.replace(/\.[^.]+$/, "");
+  return `${baseName || "image"}.jpg`;
+}
+
+async function loadImageSource(file: File) {
+  if ("createImageBitmap" in window) {
+    const bitmap = await createImageBitmap(file);
+    return {
+      source: bitmap,
+      width: bitmap.width,
+      height: bitmap.height,
+      close: () => bitmap.close(),
+    };
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = objectUrl;
+  });
+
+  return {
+    source: image,
+    width: image.naturalWidth || image.width,
+    height: image.naturalHeight || image.height,
+    close: () => URL.revokeObjectURL(objectUrl),
+  };
+}
+
+async function prepareUploadFile(file: File, uploadOriginal: boolean) {
+  if (uploadOriginal || !file.type.startsWith("image/")) return file;
+
+  const image = await loadImageSource(file);
+  try {
+    const scale = Math.min(1, IMAGE_UPLOAD_MAX_SIZE / Math.max(image.width, image.height));
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+
+    ctx.drawImage(image.source, 0, 0, width, height);
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", IMAGE_UPLOAD_QUALITY);
+    });
+    if (!blob) return file;
+
+    if (scale === 1 && blob.size >= file.size) return file;
+
+    return new File([blob], getCompressedImageName(file.name), {
+      type: "image/jpeg",
+      lastModified: Date.now(),
+    });
+  } finally {
+    image.close();
+  }
+}
+
 export default function BoardPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -92,6 +157,7 @@ export default function BoardPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadOriginal, setUploadOriginal] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -125,9 +191,10 @@ export default function BoardPage() {
     if (selectedFile) {
       setIsUploading(true);
       const formData = new FormData();
-      formData.append('file', selectedFile);
 
       try {
+        const uploadFile = await prepareUploadFile(selectedFile, uploadOriginal);
+        formData.append('file', uploadFile);
         const res = await fetch('/api/upload', {
           method: 'POST',
           body: formData,
@@ -161,23 +228,49 @@ export default function BoardPage() {
     });
 
     if (res.ok) {
+      const data = await res.json().catch(() => null);
       setText("");
       setSelectedFile(null);
+      setUploadOriginal(false);
       setIsUploading(false);
       if (textareaRef.current) textareaRef.current.style.height = "38px";
-      loadPosts();
+      if (data?.post) {
+        setPosts(current => [data.post, ...current]);
+      } else {
+        loadPosts();
+      }
     } else {
       setIsUploading(false);
     }
   }
 
   async function handleReaction(postId: string, emoji: string) {
-    await fetch("/api/reactions", {
+    setPosts(current => current.map(post => {
+      if (post.id !== postId) return post;
+      const currentReaction = post.reactions[emoji] || { count: 0, hasOwn: false };
+      const nextCount = currentReaction.hasOwn
+        ? Math.max(0, currentReaction.count - 1)
+        : currentReaction.count + 1;
+
+      return {
+        ...post,
+        reactions: {
+          ...post.reactions,
+          [emoji]: {
+            count: nextCount,
+            hasOwn: !currentReaction.hasOwn,
+          },
+        },
+      };
+    }));
+
+    const res = await fetch("/api/reactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ post_id: postId, emoji }),
     });
-    loadPosts();
+
+    if (!res.ok) loadPosts();
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -191,6 +284,12 @@ export default function BoardPage() {
     const el = e.target;
     el.style.height = "38px";
     el.style.height = `${el.scrollHeight}px`;
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] || null;
+    setSelectedFile(file);
+    setUploadOriginal(false);
   }
 
   return (
@@ -332,25 +431,36 @@ export default function BoardPage() {
       <div className="post-input-bar" style={{ flexDirection: "column", alignItems: "stretch", padding: 0 }}>
         {/* Selected file preview */}
         {selectedFile && (
-          <div style={{ 
-            padding: "8px 12px", 
-            borderBottom: "1px solid var(--border)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            fontSize: 12,
-            color: "var(--text)"
-          }}>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              📎 {selectedFile.name}
-            </span>
-            <button 
-              type="button" 
-              onClick={() => setSelectedFile(null)}
-              style={{ color: "var(--text-sub)", fontSize: 16, padding: "0 4px" }}
-            >
-              ×
-            </button>
+          <div className="selected-file">
+            <div className="selected-file__main">
+              <span className="selected-file__name">
+                📎 {selectedFile.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedFile(null);
+                  setUploadOriginal(false);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+                className="selected-file__remove"
+                aria-label="添付ファイルを削除"
+              >
+                ×
+              </button>
+            </div>
+            {selectedFile.type.startsWith("image/") && (
+              <div className="selected-file__mode">
+                <span>{uploadOriginal ? "元画像のままアップロード" : "縮小してアップロード"}</span>
+                <button
+                  type="button"
+                  className="selected-file__mode-btn"
+                  onClick={() => setUploadOriginal(current => !current)}
+                >
+                  {uploadOriginal ? "縮小に戻す" : "元画像で送る"}
+                </button>
+              </div>
+            )}
           </div>
         )}
         
@@ -387,7 +497,7 @@ export default function BoardPage() {
           <input 
             type="file" 
             ref={fileInputRef} 
-            onChange={(e) => e.target.files && setSelectedFile(e.target.files[0])}
+            onChange={handleFileChange}
             style={{ display: "none" }} 
             disabled={isUploading}
           />

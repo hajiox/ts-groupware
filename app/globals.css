@@ -554,15 +554,18 @@ img {
 .post-input-bar {
   position: fixed;
   bottom: var(--nav-height);
-  left: 0;
-  right: 0;
+  left: 12px;
+  right: 12px;
   z-index: 90;
   background: var(--card);
-  border-top: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
   padding: 10px 12px;
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  overflow: hidden;
 }
 .post-input-bar textarea {
   flex: 1;
@@ -616,6 +619,50 @@ img {
 .send-btn:hover {
   background: var(--accent-dark);
   transform: scale(1.05);
+}
+
+.selected-file {
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+}
+.selected-file__main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.selected-file__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.selected-file__remove {
+  color: var(--text-sub);
+  font-size: 16px;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+.selected-file__mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px 8px;
+  color: var(--text-sub);
+}
+.selected-file__mode-btn {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 9px;
+}
+.selected-file__mode-btn:hover {
+  background: var(--bg);
 }
 
 /* ─── Chat page ─── */
@@ -1032,7 +1079,6 @@ img {
     max-width: 600px;
     margin: 0 auto;
   }
-  .post-input-bar,
   .chat-input-bar,
   .bottom-nav,
   .fab {
@@ -1041,6 +1087,13 @@ img {
     transform: translateX(-50%);
     right: auto;
     width: 100%;
+  }
+  .post-input-bar {
+    max-width: 576px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: calc(100% - 24px);
   }
   .fab {
     left: auto;

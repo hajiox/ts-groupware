@@ -38,22 +38,40 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  if (!posts?.length) {
+    adminClient
+      .from('gw_read_status')
+      .upsert({
+        user_id: user.id,
+        group_id: groupId,
+        last_read_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,group_id' })
+      .then(undefined, e => console.error('[Read status update error]', e))
+
+    return NextResponse.json({ posts: [] })
+  }
+
   // ユーザー情報を取得
   const userIds = [...new Set((posts || []).map(p => p.user_id))]
-  const { data: users } = await adminClient
-    .from('gw_users')
-    .select('id, display_name, picture_url')
-    .in('id', userIds)
+  const postIds = (posts || []).map(p => p.id)
+  const [{ data: users }, { data: reactions }, { data: commentCounts }] = await Promise.all([
+    adminClient
+      .from('gw_users')
+      .select('id, display_name, picture_url')
+      .in('id', userIds),
+    adminClient
+      .from('gw_reactions')
+      .select('post_id, emoji, user_id')
+      .in('post_id', postIds),
+    adminClient
+      .from('gw_posts')
+      .select('parent_id')
+      .in('parent_id', postIds),
+  ])
 
   const userMap = Object.fromEntries((users || []).map(u => [u.id, u]))
 
   // リアクション集計
-  const postIds = (posts || []).map(p => p.id)
-  const { data: reactions } = await adminClient
-    .from('gw_reactions')
-    .select('post_id, emoji, user_id')
-    .in('post_id', postIds)
-
   const reactionMap: Record<string, Record<string, { count: number; hasOwn: boolean }>> = {}
   for (const r of reactions || []) {
     if (!reactionMap[r.post_id]) reactionMap[r.post_id] = {}
@@ -63,11 +81,6 @@ export async function GET(request: NextRequest) {
   }
 
   // コメント数集計
-  const { data: commentCounts } = await adminClient
-    .from('gw_posts')
-    .select('parent_id')
-    .in('parent_id', postIds)
-
   const commentCountMap: Record<string, number> = {}
   for (const c of commentCounts || []) {
     if (c.parent_id) {
@@ -76,13 +89,14 @@ export async function GET(request: NextRequest) {
   }
 
   // 既読更新
-  await adminClient
+  adminClient
     .from('gw_read_status')
     .upsert({
       user_id: user.id,
       group_id: groupId,
       last_read_at: new Date().toISOString(),
     }, { onConflict: 'user_id,group_id' })
+    .then(undefined, e => console.error('[Read status update error]', e))
 
   const enrichedPosts = (posts || []).map(post => ({
     ...post,
@@ -126,29 +140,41 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error?.message || '投稿失敗' }, { status: 500 })
   }
 
-  // グループ名を取得（通知用）
-  const { data: group } = await adminClient
-    .from('gw_groups')
-    .select('name')
-    .eq('id', group_id)
-    .single()
+  const [{ data: group }] = await Promise.all([
+    adminClient
+      .from('gw_groups')
+      .select('name')
+      .eq('id', group_id)
+      .single(),
+    adminClient
+      .from('gw_groups')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', group_id),
+  ])
 
-  // 非同期で通知を送信（APIレスポンスをブロックしない）
-  const { sendPushNotificationToGroup } = await import('@/lib/web-push')
-  const authorName = user.display_name || 'メンバー'
-  const messageBody = content?.trim() ? content.trim().substring(0, 50) : 'ファイルを送信しました'
-  
-  sendPushNotificationToGroup(group_id, user.id, {
-    title: group?.name ? `${group.name} - ${authorName}` : authorName,
-    body: messageBody,
-    url: `/board/${group_id}`,
-  }).catch(e => console.error('[Push Error]', e))
+  import('@/lib/web-push')
+    .then(({ sendPushNotificationToGroup }) => {
+      const authorName = user.display_name || 'メンバー'
+      const messageBody = content?.trim() ? content.trim().substring(0, 50) : 'ファイルを送信しました'
 
-  // グループの updated_at を更新
-  await adminClient
-    .from('gw_groups')
-    .update({ updated_at: new Date().toISOString() })
-    .eq('id', group_id)
+      return sendPushNotificationToGroup(group_id, user.id, {
+        title: group?.name ? `${group.name} - ${authorName}` : authorName,
+        body: messageBody,
+        url: `/board/${group_id}`,
+      })
+    })
+    .catch(e => console.error('[Push Error]', e))
 
-  return NextResponse.json({ post }, { status: 201 })
+  return NextResponse.json({
+    post: {
+      ...post,
+      author: {
+        id: user.id,
+        display_name: user.display_name,
+        picture_url: user.picture_url,
+      },
+      reactions: {},
+      commentCount: 0,
+    },
+  }, { status: 201 })
 }
