@@ -12,7 +12,7 @@ type Attachment = {
 }
 
 async function getChatAccess(groupId: string, userId: string) {
-  const [{ data: group }, { data: membership }] = await Promise.all([
+  const [{ data: group }, { data: membership }, { data: user }] = await Promise.all([
     adminClient
       .from('gw_groups')
       .select('id, name, description, type, icon, created_at, updated_at')
@@ -24,17 +24,22 @@ async function getChatAccess(groupId: string, userId: string) {
       .eq('group_id', groupId)
       .eq('user_id', userId)
       .single(),
+    adminClient
+      .from('gw_users')
+      .select('role')
+      .eq('id', userId)
+      .single(),
   ])
 
   if (!group || group.type !== 'chat') {
     return { group: null, membership: null, error: 'チャットが見つかりません', status: 404 }
   }
 
-  if (!membership) {
+  if (!membership && user?.role !== 'admin') {
     return { group: null, membership: null, error: 'このチャットに参加していません', status: 403 }
   }
 
-  return { group, membership, error: null, status: 0 }
+  return { group, membership: membership || { role: 'admin' }, error: null, status: 0 }
 }
 
 function normalizeAttachments(value: unknown): Attachment[] {

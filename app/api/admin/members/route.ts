@@ -12,9 +12,9 @@ import { getUserSession } from '@/lib/session'
 
 async function requireAdmin() {
   const user = await getUserSession()
-  if (!user) return { error: '認証が必要です', status: 401 }
-  if (user.role !== 'admin') return { error: '管理者権限が必要です', status: 403 }
-  return { error: null, status: 0 }
+  if (!user) return { error: '認証が必要です', status: 401, user: null }
+  if (user.role !== 'admin') return { error: '管理者権限が必要です', status: 403, user: null }
+  return { error: null, status: 0, user }
 }
 
 export async function GET(request: NextRequest) {
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     .select('user_id, role, created_at')
     .eq('group_id', groupId)
 
-  const memberUserIds = (members || []).map(m => m.user_id)
+  const explicitMemberUserIds = (members || []).map(m => m.user_id)
 
   // 全ユーザー
   const { data: allUsers } = await adminClient
@@ -43,13 +43,16 @@ export async function GET(request: NextRequest) {
 
   // メンバーに含まれるユーザー / 含まれないユーザー
   const memberUsers = (allUsers || [])
-    .filter(u => memberUserIds.includes(u.id))
+    .filter(u => u.role === 'admin' || explicitMemberUserIds.includes(u.id))
     .map(u => ({
       ...u,
-      group_role: (members || []).find(m => m.user_id === u.id)?.role || 'member',
+      group_role: u.role === 'admin'
+        ? 'admin'
+        : (members || []).find(m => m.user_id === u.id)?.role || 'member',
+      implicit_member: u.role === 'admin' && !explicitMemberUserIds.includes(u.id),
     }))
 
-  const nonMembers = (allUsers || []).filter(u => !memberUserIds.includes(u.id))
+  const nonMembers = (allUsers || []).filter(u => u.role !== 'admin' && !explicitMemberUserIds.includes(u.id))
 
   return NextResponse.json({ members: memberUsers, nonMembers })
 }

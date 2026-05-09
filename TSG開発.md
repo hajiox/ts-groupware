@@ -572,6 +572,24 @@
   - `app/groups/page.tsx`
   - `app/chat/[id]/page.tsx`
   - `app/globals.css`
+
+### 2026-05-09 管理者の全グループ自動参加対応
+- **問題**: 管理画面のメンバー管理で、管理者が未参加候補に表示され、追加しても参加中表示として分かりにくかった。
+- **方針**: 管理者は個別メンバー設定なしで、全てのChat・掲示板に参加している扱いにする。
+- **修正**:
+  - `/api/admin/members` のメンバー一覧で、承認済み管理者を常に参加中として返す。
+  - 管理者は未参加候補から除外。
+  - 管理画面では管理者に「全グループ参加」を表示し、除外操作を出さない。
+  - `/api/groups` で管理者には全グループを返す。
+  - `/api/chat` で管理者はメンバー登録がなくても全Chatを開けるようにした。
+- **確認**:
+  - `npm.cmd run build` 成功。
+- **関連ファイル**:
+  - `app/api/admin/members/route.ts`
+  - `app/api/groups/route.ts`
+  - `app/api/chat/route.ts`
+  - `app/admin/page.tsx`
+  - `app/globals.css`
 ### 2026-05-09 TSG専用LINEログインチャネル基本設定確認
 - **確認内容**:
   - LINE Developers Console上で、プロバイダー「内職管理システム」配下にTSG専用のLINEログインチャネル「TS Groupware」が作成されていることを確認。

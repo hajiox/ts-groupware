@@ -25,6 +25,7 @@ type GroupMember = {
   picture_url: string | null;
   role: string;
   group_role: string;
+  implicit_member?: boolean;
 };
 
 type Tab = "users" | "groups";
@@ -308,15 +309,22 @@ function GroupsTab() {
                     <Avatar user={m} size={34} />
                     <div className="admin-item__info">
                       <div className="admin-item__name">{m.display_name}</div>
-                      <div className="admin-item__sub">{m.role === "admin" ? "管理者" : "スタッフ"}</div>
+                      <div className="admin-item__sub">
+                        {m.role === "admin" ? "管理者" : "スタッフ"}
+                        {m.implicit_member ? "・自動参加" : ""}
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      className="admin-btn-outline"
-                      onClick={() => handleRemoveMember(m.id)}
-                    >
-                      除外
-                    </button>
+                    {m.role === "admin" ? (
+                      <span className="admin-member-lock">全グループ参加</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="admin-btn-outline"
+                        onClick={() => handleRemoveMember(m.id)}
+                      >
+                        除外
+                      </button>
+                    )}
                   </div>
                 ))
               )}

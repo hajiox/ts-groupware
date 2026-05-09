@@ -13,32 +13,41 @@ export async function GET() {
     return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
   }
 
-  // 自分が参加しているグループを取得
   const { data: memberships } = await adminClient
     .from('gw_group_members')
     .select('group_id')
     .eq('user_id', user.id)
 
-  const groupIds = memberships?.map(m => m.group_id) || []
+  const explicitGroupIds = memberships?.map(m => m.group_id) || []
+
+  let groupsQuery = adminClient
+    .from('gw_groups')
+    .select('*')
+    .order('updated_at', { ascending: false })
+
+  if (user.role !== 'admin') {
+    if (explicitGroupIds.length === 0) {
+      return NextResponse.json({ groups: [] })
+    }
+    groupsQuery = groupsQuery.in('id', explicitGroupIds)
+  }
+
+  const { data: groups } = await groupsQuery
+  const groupIds = (groups || []).map(group => group.id)
 
   if (groupIds.length === 0) {
     return NextResponse.json({ groups: [] })
   }
-
-  // グループ情報取得 + 最新投稿
-  const { data: groups } = await adminClient
-    .from('gw_groups')
-    .select('*')
-    .in('id', groupIds)
-    .order('updated_at', { ascending: false })
 
   const { data: groupMembers } = await adminClient
     .from('gw_group_members')
     .select('group_id, user_id')
     .in('group_id', groupIds)
 
+  const explicitGroupIdSet = new Set(explicitGroupIds)
   const directOtherUserIds = (groups || [])
     .filter(group => group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:'))
+    .filter(group => explicitGroupIdSet.has(group.id))
     .map(group => (groupMembers || []).find(member => member.group_id === group.id && member.user_id !== user.id)?.user_id)
     .filter(Boolean)
 
@@ -54,7 +63,7 @@ export async function GET() {
   // 各グループの最新投稿と未読数を取得
   const enrichedGroups = await Promise.all(
     (groups || []).map(async (group) => {
-      const directOtherUserId = group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:')
+      const directOtherUserId = group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:') && explicitGroupIdSet.has(group.id)
         ? (groupMembers || []).find(member => member.group_id === group.id && member.user_id !== user.id)?.user_id
         : null
       const directUser = directOtherUserId ? directUserMap[directOtherUserId] : null
