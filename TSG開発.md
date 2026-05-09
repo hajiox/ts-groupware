@@ -415,6 +415,23 @@
   - `app/login/page.tsx`
   - `app/globals.css`
 
+### 2026-05-09 LINEログイン診断ログ追加
+- **背景**:
+  - 管理者はLINEログイン済みだが、未登録ユーザー2名でLINE画面から戻ったあと承認待ち登録まで到達しない。
+  - `gw_users` を確認したところ、管理者1件のみで `pending` ユーザーは未作成。
+  - 承認判定ではなく、LINE callback前後の `state` / token交換 / profile取得 / DB登録のどこかで止まっている可能性が高い。
+- **修正**:
+  - `gw_auth_logs` テーブルを追加し、LINE OAuthの到達段階を記録。
+  - `/api/auth/line` 開始時と `/api/auth/line/callback` の主要段階を記録。
+  - LINEユーザーID、表示名などの個人識別子は保存しない。
+- **DB反映**:
+  - `sql/003_auth_logs.sql` を共用Supabase DBへ適用済み。
+- **関連ファイル**:
+  - `sql/003_auth_logs.sql`
+  - `lib/auth-log.ts`
+  - `app/api/auth/line/route.ts`
+  - `app/api/auth/line/callback/route.ts`
+
 ### 2026-05-09 添付ファイル上限を100MBへ変更
 - **要望**: 動画なども想定し、アップロード可能なファイルサイズ上限を一旦100MBまで広げる。
 - **修正**:

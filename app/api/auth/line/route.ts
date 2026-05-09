@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAuthFlowId, logAuthEvent } from '@/lib/auth-log'
 import { createLineOAuthState } from '@/lib/line-oauth-state'
 
 /**
@@ -14,6 +15,11 @@ export async function GET(request: NextRequest) {
   const channelId = process.env.LINE_CHANNEL_ID
   const channelSecret = process.env.LINE_CHANNEL_SECRET
   if (!channelId || !channelSecret) {
+    await logAuthEvent({
+      event: 'line_start_config_missing',
+      detail: !channelId ? 'missing_channel_id' : 'missing_channel_secret',
+      request,
+    })
     return NextResponse.json({ error: 'LINE_CHANNEL_ID または LINE_CHANNEL_SECRET が未設定です' }, { status: 500 })
   }
 
@@ -22,6 +28,7 @@ export async function GET(request: NextRequest) {
 
   // CSRF 防止用の署名付き state。iOS SafariとLINEアプリの往復でCookieが失われても検証できる。
   const state = createLineOAuthState(channelSecret)
+  const flowId = getAuthFlowId(state)
 
   const params = new URLSearchParams({
     response_type: 'code',
@@ -32,6 +39,13 @@ export async function GET(request: NextRequest) {
   })
 
   const authUrl = `https://access.line.me/oauth2/v2.1/authorize?${params.toString()}`
+
+  await logAuthEvent({
+    event: 'line_start_redirect',
+    flowId,
+    detail: `redirect_uri=${redirectUri}`,
+    request,
+  })
 
   // state を Cookie に一時保存（callback で検証するため）
   const response = NextResponse.redirect(authUrl)
