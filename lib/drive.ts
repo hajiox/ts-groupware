@@ -27,21 +27,19 @@ export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mi
   const drive = getDriveClient()
   const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID
 
-  if (!folderId) {
-    throw new Error('GOOGLE_DRIVE_FOLDER_ID is not set')
-  }
-
-  // Node.js v18+ 組み込みの Readable.from を使わずに stream に変換
+  // Node.js 組み込みの Readable で Buffer を stream に変換
   const { Readable } = require('stream')
   const stream = new Readable()
   stream.push(fileBuffer)
   stream.push(null)
 
+  const requestBody: Record<string, unknown> = { name: fileName }
+  if (folderId) {
+    requestBody.parents = [folderId]
+  }
+
   const response = await drive.files.create({
-    requestBody: {
-      name: fileName,
-      parents: [folderId],
-    },
+    requestBody,
     media: {
       mimeType,
       body: stream,

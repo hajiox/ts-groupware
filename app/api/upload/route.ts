@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getUserSession } from '@/lib/session'
-import { adminClient } from '@/lib/supabase/admin'
+import { uploadFileToDrive } from '@/lib/drive'
 
 /**
- * POST /api/upload — ファイルアップロード（Supabase Storage）
+ * POST /api/upload — ファイルアップロード（Google Drive）
  *
- * FormData で受け取ったファイルを Supabase Storage の gw-files バケットに保存し、
+ * FormData で受け取ったファイルを Google Drive にアップロードし、
  * 公開URLを返す。
  */
 
@@ -28,39 +28,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'ファイルサイズは10MB以内にしてください' }, { status: 400 })
     }
 
-    // ユニークなファイル名を生成
-    const ext = file.name.split('.').pop() || 'bin'
-    const timestamp = Date.now()
-    const filePath = `${user.id}/${timestamp}_${Math.random().toString(36).slice(2, 8)}.${ext}`
-
-    // File を ArrayBuffer に変換して Upload
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
 
-    const { error: uploadError } = await adminClient.storage
-      .from('gw-files')
-      .upload(filePath, buffer, {
-        contentType: file.type,
-        upsert: false,
-      })
+    const driveFile = await uploadFileToDrive(buffer, file.name, file.type)
 
-    if (uploadError) {
-      console.error('[Upload] Supabase Storage error:', uploadError)
-      return NextResponse.json({ error: uploadError.message }, { status: 500 })
-    }
-
-    // 公開URLを取得
-    const { data: urlData } = adminClient.storage
-      .from('gw-files')
-      .getPublicUrl(filePath)
+    // Google Drive の直接表示URL
+    const fileUrl = driveFile.id
+      ? `https://drive.google.com/uc?id=${driveFile.id}`
+      : driveFile.webViewLink || ''
 
     return NextResponse.json({
-      url: urlData.publicUrl,
+      url: fileUrl,
       name: file.name,
       type: file.type,
+      driveId: driveFile.id,
+      webViewLink: driveFile.webViewLink,
     })
   } catch (err) {
-    console.error('[Upload] Unexpected error:', err)
-    return NextResponse.json({ error: 'アップロードに失敗しました' }, { status: 500 })
+    console.error('[Upload] Error:', err)
+    const message = err instanceof Error ? err.message : 'アップロードに失敗しました'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
