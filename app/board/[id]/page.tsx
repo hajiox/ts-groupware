@@ -289,13 +289,12 @@ export default function BoardPage() {
       </section>
 
       {/* Post input bar */}
-      <div style={{ position: "fixed", bottom: "var(--nav-height)", left: 0, right: 0, zIndex: 90 }}>
+      <div className="post-input-bar" style={{ flexDirection: "column", alignItems: "stretch", padding: 0 }}>
         {/* Selected file preview */}
         {selectedFile && (
           <div style={{ 
-            background: "var(--card-hover)", 
             padding: "8px 12px", 
-            borderTop: "1px solid var(--border)",
+            borderBottom: "1px solid var(--border)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -316,8 +315,7 @@ export default function BoardPage() {
         )}
         
         <form
-          className="post-input-bar"
-          style={{ position: "static", borderTop: selectedFile ? "none" : "1px solid var(--border)" }}
+          style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "10px 12px" }}
           onSubmit={(e) => { e.preventDefault(); handlePost(); }}
           aria-label="新規投稿"
         >
@@ -330,6 +328,21 @@ export default function BoardPage() {
             rows={1}
             aria-label="投稿テキスト"
             disabled={isUploading}
+            style={{
+              flex: 1,
+              background: "var(--bg)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-sm)",
+              padding: "8px 12px",
+              color: "var(--text)",
+              resize: "none",
+              maxHeight: 120,
+              minHeight: 38,
+              outline: "none",
+              lineHeight: 1.4,
+              fontFamily: "inherit",
+              fontSize: "inherit",
+            }}
           />
           <input 
             type="file" 
