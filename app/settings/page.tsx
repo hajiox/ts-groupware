@@ -9,6 +9,8 @@ type User = {
   role: string;
 };
 
+type DeviceType = "iphone" | "android" | "pc";
+
 // --- Push通知用ユーティリティ ---
 function urlB64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -21,12 +23,29 @@ function urlB64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
-const PUBLIC_VAPID_KEY = "BKGxnPaH_MlzJqV-YpTCO6S3cemGfxnbgUWURzBd6asH7gHRoMTPpksMP_gb86xVIczFy2B-wM6QHAgO-PQMaTg";
+const PUBLIC_VAPID_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "BKGxnPaH_MlzJqV-YpTCO6S3cemGfxnbgUWURzBd6asH7gHRoMTPpksMP_gb86xVIczFy2B-wM6QHAgO-PQMaTg";
+
+function detectDevice(): DeviceType {
+  if (typeof navigator === "undefined") return "pc";
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua)) return "iphone";
+  if (/Android/.test(ua)) return "android";
+  return "pc";
+}
+
+function isIOSStandalone() {
+  if (typeof window === "undefined") return false;
+  return (window.navigator as unknown as { standalone?: boolean }).standalone === true
+    || window.matchMedia("(display-mode: standalone)").matches;
+}
 
 export default function SettingsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [loadingPush, setLoadingPush] = useState(true);
+  const [pushMessage, setPushMessage] = useState("");
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideDevice, setGuideDevice] = useState<DeviceType>("pc");
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -35,17 +54,32 @@ export default function SettingsPage() {
       .catch(() => {});
       
     checkPushStatus();
+    setGuideDevice(detectDevice());
   }, []);
 
   async function checkPushStatus() {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setPushMessage("この環境はWeb Push通知に対応していません");
       setLoadingPush(false);
       return;
     }
+    if (detectDevice() === "iphone" && !isIOSStandalone()) {
+      setPushMessage("iPhoneはSafariでホーム画面に追加したアプリから通知を有効にしてください");
+    }
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js');
-      const subscription = await registration.pushManager.getSubscription();
-      setPushEnabled(!!subscription);
+      const registration = await navigator.serviceWorker.getRegistration('/sw.js');
+      const subscription = registration ? await registration.pushManager.getSubscription() : null;
+      if (!subscription) {
+        setPushEnabled(false);
+      } else {
+        const response = await fetch("/api/push/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: subscription.endpoint }),
+        });
+        const data = response.ok ? await response.json() : { subscribed: false };
+        setPushEnabled(!!data.subscribed);
+      }
     } catch (err) {
       console.error("Push status check failed", err);
     }
@@ -53,13 +87,20 @@ export default function SettingsPage() {
   }
 
   async function togglePush(checked: boolean) {
-    if (!('serviceWorker' in navigator)) return;
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
     setLoadingPush(true);
+    setPushMessage("");
 
     try {
-      const registration = await navigator.serviceWorker.ready;
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
       
       if (checked) {
+        if (detectDevice() === "iphone" && !isIOSStandalone()) {
+          setPushMessage("iPhoneはSafariでホーム画面に追加後、そのアイコンから開いて通知を有効にしてください");
+          setLoadingPush(false);
+          return;
+        }
         // 購読する
         const permission = await Notification.requestPermission();
         if (permission !== 'granted') {
@@ -76,9 +117,10 @@ export default function SettingsPage() {
         await fetch('/api/push/subscribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ subscription }),
+          body: JSON.stringify({ subscription: subscription.toJSON() }),
         });
         setPushEnabled(true);
+        setPushMessage("通知を有効にしました");
       } else {
         // 解除する
         const subscription = await registration.pushManager.getSubscription();
@@ -91,12 +133,28 @@ export default function SettingsPage() {
           await subscription.unsubscribe();
         }
         setPushEnabled(false);
+        setPushMessage("通知を解除しました");
       }
     } catch (err) {
       console.error("Failed to toggle push", err);
       alert("設定の変更に失敗しました");
     }
     setLoadingPush(false);
+  }
+
+  async function sendTestNotification() {
+    setLoadingPush(true);
+    try {
+      const res = await fetch("/api/push/test", { method: "POST" });
+      if (res.ok) {
+        setPushMessage("テスト通知を送信しました");
+      } else {
+        const data = await res.json().catch(() => null);
+        setPushMessage(data?.error || "テスト通知に失敗しました");
+      }
+    } finally {
+      setLoadingPush(false);
+    }
   }
 
   function handleLogout() {
@@ -144,7 +202,7 @@ export default function SettingsPage() {
             <div>
               <div className="settings-row__label">Web Push 通知</div>
               <div className="settings-row__sub">
-                新しい投稿やメッセージを通知
+                投稿・編集・削除・リアクションを通知
               </div>
             </div>
             <label className="toggle">
@@ -157,7 +215,154 @@ export default function SettingsPage() {
               <span className="toggle__track" />
             </label>
           </div>
+          <div className="settings-row settings-row--stack">
+            {pushMessage && <div className="settings-row__sub">{pushMessage}</div>}
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="settings-action-btn"
+                onClick={() => setGuideOpen(true)}
+              >
+                設定ガイド
+              </button>
+              <button
+                type="button"
+                className="settings-action-btn"
+                disabled={!pushEnabled || loadingPush}
+                onClick={sendTestNotification}
+              >
+                テスト通知
+              </button>
+            </div>
+          </div>
         </section>
+
+        {guideOpen && (
+          <div className="modal-overlay" onClick={() => setGuideOpen(false)}>
+            <div className="modal-content notification-guide" onClick={(e) => e.stopPropagation()}>
+              <div className="notification-guide__header">
+                <h3 className="modal-title">通知設定ガイド</h3>
+                <button type="button" className="notification-guide__close" onClick={() => setGuideOpen(false)}>
+                  ×
+                </button>
+              </div>
+              <div className="notification-guide__tabs">
+                {(["iphone", "android", "pc"] as const).map(device => (
+                  <button
+                    key={device}
+                    type="button"
+                    className={`notification-guide__tab${guideDevice === device ? " notification-guide__tab--active" : ""}`}
+                    onClick={() => setGuideDevice(device)}
+                  >
+                    {device === "iphone" ? "iPhone" : device === "android" ? "Android" : "PC"}
+                  </button>
+                ))}
+              </div>
+              <div className="notification-guide__body">
+                {guideDevice === "iphone" && (
+                  <>
+                    <p className="notification-guide__note">iPhoneはSafariでホーム画面に追加したアプリから通知を有効にします。</p>
+                    <ol>
+                      <li>Safariでこのサイトを開く</li>
+                      <li>共有ボタンから「ホーム画面に追加」を選ぶ</li>
+                      <li>ホーム画面のアイコンから開いてログインする</li>
+                      <li>設定画面で「Web Push 通知」をONにして許可する</li>
+                    </ol>
+                  </>
+                )}
+                {guideDevice === "android" && (
+                  <ol>
+                    <li>Chromeでこのサイトを開く</li>
+                    <li>設定画面で「Web Push 通知」をONにする</li>
+                    <li>ブラウザの通知許可で「許可」を選ぶ</li>
+                    <li>「テスト通知」で届くか確認する</li>
+                  </ol>
+                )}
+                {guideDevice === "pc" && (
+                  <ol>
+                    <li>Chrome / Edge / Firefoxで設定画面を開く</li>
+                    <li>「Web Push 通知」をONにする</li>
+                    <li>ブラウザの通知許可で「許可」を選ぶ</li>
+                    <li>通知をブロックした場合は、アドレスバー左のサイト設定から通知を許可する</li>
+                  </ol>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <style jsx>{`
+          .settings-row--stack {
+            align-items: stretch;
+            flex-direction: column;
+          }
+          .settings-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+          }
+          .settings-action-btn {
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--accent);
+            font-size: 13px;
+            font-weight: 700;
+            padding: 7px 12px;
+          }
+          .settings-action-btn:disabled {
+            color: var(--text-muted);
+            cursor: not-allowed;
+            opacity: 0.6;
+          }
+          .notification-guide {
+            max-width: 520px;
+          }
+          .notification-guide__header {
+            align-items: center;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+          }
+          .notification-guide__close {
+            color: var(--text-sub);
+            font-size: 24px;
+            line-height: 1;
+          }
+          .notification-guide__tabs {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-bottom: 16px;
+          }
+          .notification-guide__tab {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-sub);
+            padding: 8px;
+          }
+          .notification-guide__tab--active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+            font-weight: 700;
+          }
+          .notification-guide__body {
+            color: var(--text);
+            font-size: 14px;
+            line-height: 1.7;
+          }
+          .notification-guide__body ol {
+            margin-left: 20px;
+          }
+          .notification-guide__note {
+            background: rgba(245, 158, 11, 0.12);
+            border-radius: var(--radius-sm);
+            color: #fbbf24;
+            margin-bottom: 12px;
+            padding: 10px 12px;
+          }
+        `}</style>
 
         {/* Logout */}
         <button

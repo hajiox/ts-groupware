@@ -50,6 +50,27 @@ export async function POST(request: NextRequest) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
+
+    const { data: post } = await adminClient
+      .from('gw_posts')
+      .select('id, user_id, group_id, content')
+      .eq('id', post_id)
+      .single()
+
+    if (post && post.user_id !== user.id) {
+      import('@/lib/web-push')
+        .then(({ sendPushNotificationToUser }) => {
+          const authorName = user.display_name || 'メンバー'
+          return sendPushNotificationToUser(post.user_id, {
+            title: `${authorName} がリアクションしました`,
+            body: `${emoji} ${post.content ? post.content.substring(0, 40) : '投稿へのリアクション'}`,
+            url: `/board/${post.group_id}`,
+            tag: `tsg-reaction-${post_id}-${emoji}`,
+          })
+        })
+        .catch(e => console.error('[Push Error]', e))
+    }
+
     return NextResponse.json({ action: 'added' }, { status: 201 })
   }
 }

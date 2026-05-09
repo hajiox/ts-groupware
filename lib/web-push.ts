@@ -47,6 +47,13 @@ export async function sendPushNotificationToAll(payload: PushPayload): Promise<v
 }
 
 /**
+ * 特定ユーザーの登録済み端末にプッシュ通知を送信
+ */
+export async function sendPushNotificationToUser(userId: string, payload: PushPayload): Promise<void> {
+  await _sendToSubscriptions(userId, payload)
+}
+
+/**
  * 特定のグループのメンバーにのみプッシュ通知を送信
  * ただし、送信元ユーザー（senderId）には送らない
  */

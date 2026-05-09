@@ -236,7 +236,7 @@ export async function PATCH(request: NextRequest) {
 
   const { data: existing, error: fetchError } = await adminClient
     .from('gw_posts')
-    .select('id, user_id, attachments')
+    .select('id, user_id, group_id, content, attachments')
     .eq('id', post_id)
     .single()
 
@@ -266,6 +266,23 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: error?.message || '投稿の更新に失敗しました' }, { status: 500 })
   }
 
+  adminClient
+    .from('gw_groups')
+    .select('name')
+    .eq('id', existing.group_id)
+    .single()
+    .then(async ({ data: group }) => {
+      const { sendPushNotificationToGroup } = await import('@/lib/web-push')
+      const authorName = user.display_name || 'メンバー'
+      return sendPushNotificationToGroup(existing.group_id, user.id, {
+        title: group?.name ? `${group.name} - ${authorName}` : authorName,
+        body: '投稿が編集されました',
+        url: `/board/${existing.group_id}`,
+        tag: `tsg-post-edit-${post_id}`,
+      })
+    })
+    .catch(e => console.error('[Push Error]', e))
+
   return NextResponse.json({ post })
 }
 
@@ -282,7 +299,7 @@ export async function DELETE(request: NextRequest) {
 
   const { data: post, error: fetchError } = await adminClient
     .from('gw_posts')
-    .select('id, user_id, group_id, attachments')
+    .select('id, user_id, group_id, content, attachments')
     .eq('id', postId)
     .single()
 
@@ -337,6 +354,23 @@ export async function DELETE(request: NextRequest) {
     .update({ updated_at: new Date().toISOString() })
     .eq('id', post.group_id)
     .then(undefined, e => console.error('[Group timestamp update error]', e))
+
+  adminClient
+    .from('gw_groups')
+    .select('name')
+    .eq('id', post.group_id)
+    .single()
+    .then(async ({ data: group }) => {
+      const { sendPushNotificationToGroup } = await import('@/lib/web-push')
+      const authorName = user.display_name || 'メンバー'
+      return sendPushNotificationToGroup(post.group_id, user.id, {
+        title: group?.name ? `${group.name} - ${authorName}` : authorName,
+        body: '投稿が削除されました',
+        url: `/board/${post.group_id}`,
+        tag: `tsg-post-delete-${postId}`,
+      })
+    })
+    .catch(e => console.error('[Push Error]', e))
 
   return NextResponse.json({
     ok: true,

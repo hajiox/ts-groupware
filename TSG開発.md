@@ -406,3 +406,25 @@
   - `lib/drive.ts`
   - `app/api/posts/route.ts`
   - `app/board/[id]/page.tsx`
+
+### 2026-05-09 掲示板アクション通知システム
+- **要望**: 通知を受け取る設定をしたユーザーに、掲示板上の投稿などのアクションをPC/Android/iPhoneへWeb Push通知する。内職管理システムの実装を参考にする。
+- **実装**:
+  - 既存の `gw_push_subscriptions` と `web-push` を利用し、購読済み端末にのみ通知する。
+  - `/api/push/status` を追加し、現在端末の購読状態をDBと照合できるようにした。
+  - `/api/push/test` を追加し、設定画面からテスト通知を送信できるようにした。
+  - `public/sw.js` を内職管理システム寄りに調整し、通知クリック時は既存タブへ遷移/フォーカス、なければ新規で開くようにした。
+  - 設定画面に通知ON/OFF、テスト通知、iPhone/Android/PC別の設定ガイドを追加。
+  - 新規投稿は既存のグループ通知を継続利用。
+  - 投稿編集・投稿削除時にグループメンバーへ通知する。
+  - リアクション追加時は投稿者本人へ通知する。自分の投稿への自分のリアクションは通知しない。
+- **iPhone注意**:
+  - iPhoneはSafariでホーム画面に追加したPWAから開いた場合のみWeb Push通知を有効化できる。
+- **関連ファイル**:
+  - `app/settings/page.tsx`
+  - `app/api/push/status/route.ts`
+  - `app/api/push/test/route.ts`
+  - `app/api/posts/route.ts`
+  - `app/api/reactions/route.ts`
+  - `lib/web-push.ts`
+  - `public/sw.js`
