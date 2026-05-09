@@ -4,6 +4,11 @@ import { Readable } from 'stream'
 /**
  * Google Drive API クライアント
  * 
+ * OAuth方式:
+ * - GOOGLE_CLIENT_ID
+ * - GOOGLE_CLIENT_SECRET
+ * - GOOGLE_DRIVE_REFRESH_TOKEN
+ *
  * サービスアカウントの JSON 文字列を環境変数 GOOGLE_SERVICE_ACCOUNT_KEY に設定。
  * ファイルのアップロード先フォルダ ID を GOOGLE_DRIVE_FOLDER_ID に設定。
  */
@@ -34,9 +39,19 @@ function parseServiceAccountKey(keyString: string) {
 }
 
 function getDriveClient() {
+  const clientId = process.env.GOOGLE_CLIENT_ID
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET
+  const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN
+
+  if (clientId && clientSecret && refreshToken) {
+    const auth = new google.auth.OAuth2(clientId, clientSecret)
+    auth.setCredentials({ refresh_token: refreshToken.trim() })
+    return google.drive({ version: 'v3', auth })
+  }
+
   const keyString = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
   if (!keyString) {
-    throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY is not set')
+    throw new Error('Google Drive OAuth env vars are not set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN)')
   }
 
   const credentials = parseServiceAccountKey(keyString)
@@ -54,7 +69,7 @@ export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mi
   const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim()
 
   if (!folderId) {
-    throw new Error('GOOGLE_DRIVE_FOLDER_ID is not set. Service accounts cannot upload to their own My Drive; set a shared drive folder ID.')
+    throw new Error('GOOGLE_DRIVE_FOLDER_ID is not set')
   }
 
   // Node.js 組み込みの Readable で Buffer を stream に変換

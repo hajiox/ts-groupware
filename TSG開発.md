@@ -228,6 +228,28 @@
 - **関連ファイル**:
   - `lib/drive.ts`
 
+### 2026-05-09 Google DriveアップロードをOAuth方式へ変更
+
+- **背景**: Google Driveの「共有アイテム」やマイドライブ内共有フォルダは、サービスアカウント方式では `Service Accounts do not have storage quota` でアップロードできない。
+- **方針**: Supabase Storageは使わず、Google OAuthで `aizubrandhall@gmail.com` など実ユーザーのDrive権限を使ってアップロードする。
+- **実装**:
+  - `lib/drive.ts` をOAuth優先に変更。
+  - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_DRIVE_REFRESH_TOKEN` が揃っている場合はOAuth方式でDrive APIを実行。
+  - OAuth環境変数が無い場合のみ、従来のサービスアカウント方式にフォールバック。
+  - `scripts/google-drive-oauth-token.mjs` を追加し、Drive用refresh tokenを取得できるようにした。
+- **必要なVercel環境変数**:
+  - `GOOGLE_CLIENT_ID`
+  - `GOOGLE_CLIENT_SECRET`
+  - `GOOGLE_DRIVE_REFRESH_TOKEN`
+  - `GOOGLE_DRIVE_FOLDER_ID`
+- **追加確認**:
+  - OAuthクライアントが属するGoogle Cloudプロジェクトで Google Drive API を有効化する必要がある。
+  - 今回使用したOAuthクライアントのプロジェクト `314370661071` では未有効だったため、`https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=314370661071` で有効化が必要。
+- **関連ファイル**:
+  - `lib/drive.ts`
+  - `scripts/google-drive-oauth-token.mjs`
+  - `.env.local.example`
+
 ### 8-1. LINEアプリ直接起動
 - スマホブラウザからLINE認証URLにアクセスした際、LINEアプリが直接起動せずWebブラウザ内でログイン画面が開く場合がある
 - Vercelの共有ドメイン（`*.vercel.app`）ではOS側のUniversal Linksが信頼度が低い可能性
