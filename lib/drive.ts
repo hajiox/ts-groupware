@@ -104,3 +104,12 @@ export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mi
 
   return response.data
 }
+
+export async function deleteFileFromDrive(fileId: string) {
+  const drive = getDriveClient()
+
+  await drive.files.delete({
+    fileId,
+    supportsAllDrives: true,
+  })
+}

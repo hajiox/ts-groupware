@@ -18,7 +18,7 @@ type Post = {
   group_id: string;
   user_id: string;
   content: string | null;
-  attachments: { type: string; url: string; name: string }[];
+  attachments: { type: string; url: string; name: string; driveId?: string; webViewLink?: string }[];
   created_at: string;
   is_pinned: boolean;
   author: Author;
@@ -222,7 +222,9 @@ export default function BoardPage() {
           attachments.push({
             type: data.type,
             url: data.viewUrl || data.url, // プレビュー用URLを優先
-            name: data.name
+            name: data.name,
+            driveId: data.driveId,
+            webViewLink: data.webViewLink,
           });
         } else {
           const data = await res.json().catch(() => null);

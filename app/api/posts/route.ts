@@ -1,11 +1,52 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
+import { deleteFileFromDrive } from '@/lib/drive'
 
 /**
  * GET /api/posts?group_id=xxx — 投稿一覧取得
  * POST /api/posts — 新規投稿作成
  */
+
+type Attachment = {
+  driveId?: string
+  url?: string
+  webViewLink?: string
+}
+
+function getDriveFileIdFromUrl(url: string) {
+  try {
+    const parsed = new URL(url)
+    if (parsed.hostname !== 'drive.google.com') return null
+
+    const id = parsed.searchParams.get('id')
+    if (id) return id
+
+    const filePathMatch = parsed.pathname.match(/\/file\/d\/([^/]+)/)
+    if (filePathMatch?.[1]) return filePathMatch[1]
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+function getAttachmentDriveIds(posts: { attachments?: Attachment[] | null }[]) {
+  const ids = new Set<string>()
+
+  for (const post of posts) {
+    for (const attachment of post.attachments || []) {
+      const id =
+        attachment.driveId ||
+        (attachment.url ? getDriveFileIdFromUrl(attachment.url) : null) ||
+        (attachment.webViewLink ? getDriveFileIdFromUrl(attachment.webViewLink) : null)
+
+      if (id) ids.add(id)
+    }
+  }
+
+  return [...ids]
+}
 
 export async function GET(request: NextRequest) {
   const user = await getUserSession()
@@ -241,7 +282,7 @@ export async function DELETE(request: NextRequest) {
 
   const { data: post, error: fetchError } = await adminClient
     .from('gw_posts')
-    .select('id, user_id, group_id')
+    .select('id, user_id, group_id, attachments')
     .eq('id', postId)
     .single()
 
@@ -255,10 +296,27 @@ export async function DELETE(request: NextRequest) {
 
   const { data: comments } = await adminClient
     .from('gw_posts')
-    .select('id')
+    .select('id, attachments')
     .eq('parent_id', postId)
 
   const postIds = [postId, ...(comments || []).map(comment => comment.id)]
+  const attachmentDriveIds = getAttachmentDriveIds([post, ...(comments || [])])
+  const attachmentDeleteResults = await Promise.allSettled(
+    attachmentDriveIds.map(fileId => deleteFileFromDrive(fileId))
+  )
+  const failedAttachmentDeletes = attachmentDeleteResults
+    .map((result, index) => ({ result, fileId: attachmentDriveIds[index] }))
+    .filter(({ result }) => result.status === 'rejected')
+    .map(({ result, fileId }) => ({
+      fileId,
+      error: result.status === 'rejected' && result.reason instanceof Error
+        ? result.reason.message
+        : 'Drive file delete failed',
+    }))
+
+  if (failedAttachmentDeletes.length > 0) {
+    console.error('[Drive attachment delete errors]', failedAttachmentDeletes)
+  }
 
   await adminClient
     .from('gw_reactions')
@@ -280,5 +338,12 @@ export async function DELETE(request: NextRequest) {
     .eq('id', post.group_id)
     .then(undefined, e => console.error('[Group timestamp update error]', e))
 
-  return NextResponse.json({ ok: true, deletedIds: postIds })
+  return NextResponse.json({
+    ok: true,
+    deletedIds: postIds,
+    deletedDriveFileIds: attachmentDriveIds.filter(fileId => (
+      !failedAttachmentDeletes.some(failure => failure.fileId === fileId)
+    )),
+    attachmentDeleteErrors: failedAttachmentDeletes,
+  })
 }
