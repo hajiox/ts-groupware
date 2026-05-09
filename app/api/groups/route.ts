@@ -82,6 +82,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
   }
 
+  // 管理者のみグループ作成可
+  if (user.role !== 'admin') {
+    return NextResponse.json({ error: '管理者のみグループを作成できます' }, { status: 403 })
+  }
+
   const body = await request.json()
   const { name, description, type, icon } = body
 

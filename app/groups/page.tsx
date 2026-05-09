@@ -261,22 +261,7 @@ export default function GroupsPage() {
           })
         )}
       </section>
-
-      {/* FAB */}
-      <button
-        type="button"
-        className="fab"
-        aria-label="グループを新規作成"
-        onClick={() => setShowCreate(true)}
-      >
-        +
-      </button>
-
-      <CreateGroupModal
-        open={showCreate}
-        onClose={() => setShowCreate(false)}
-        onCreated={loadData}
-      />
     </>
   );
 }
+

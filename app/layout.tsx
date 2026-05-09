@@ -1,21 +1,31 @@
 "use client";
 
-import type { Metadata } from "next";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import "./globals.css";
 
 // ─── Bottom Navigation ────────────────────────────────────────────────────────
 function BottomNav() {
   const pathname = usePathname();
+  const [isAdmin, setIsAdmin] = useState(false);
   const hide = pathname === "/login" || pathname === "/";
+
+  useEffect(() => {
+    if (hide) return;
+    fetch("/api/auth/me")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.user?.role === "admin") setIsAdmin(true);
+      })
+      .catch(() => {});
+  }, [hide]);
 
   if (hide) return null;
 
   const items = [
     { href: "/groups", label: "ホーム", icon: "🏠" },
-    { href: "/groups", label: "グループ", icon: "👥" },
-    { href: "/settings", label: "通知", icon: "🔔", dot: true },
+    ...(isAdmin ? [{ href: "/admin", label: "管理", icon: "🛡️" }] : []),
     { href: "/settings", label: "設定", icon: "⚙️" },
   ];
 
@@ -40,7 +50,6 @@ function BottomNav() {
               <span className="bottom-nav__icon" aria-hidden="true">
                 {item.icon}
               </span>
-              {item.dot && <span className="nav-dot" aria-label="未読通知あり" />}
             </span>
             <span>{item.label}</span>
           </Link>
