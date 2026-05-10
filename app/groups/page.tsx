@@ -173,7 +173,20 @@ export default function GroupsPage() {
 
     fetch("/api/groups")
       .then((r) => (r.ok ? r.json() : { groups: [] }))
-      .then((data) => setGroups(data.groups))
+      .then((data) => {
+        const fetchedGroups = data.groups || [];
+        setGroups(fetchedGroups);
+
+        // App Badging API (PWA用)
+        if ("setAppBadge" in navigator && "clearAppBadge" in navigator) {
+          const totalUnread = fetchedGroups.reduce((sum: number, g: Group) => sum + (g.unread || 0), 0);
+          if (totalUnread > 0) {
+            navigator.setAppBadge(totalUnread).catch(console.error);
+          } else {
+            navigator.clearAppBadge().catch(console.error);
+          }
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }

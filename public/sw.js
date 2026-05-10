@@ -15,8 +15,15 @@ self.addEventListener('push', (event) => {
       },
     }
 
+    const badgePromise = ('setAppBadge' in navigator)
+      ? navigator.setAppBadge().catch(err => console.error('[SW] Badge error', err))
+      : Promise.resolve()
+
     event.waitUntil(
-      self.registration.showNotification(data.title || 'TS Groupware', options)
+      Promise.all([
+        self.registration.showNotification(data.title || 'TS Groupware', options),
+        badgePromise
+      ])
     )
   } catch (err) {
     console.error('[SW] Push event error', err)
@@ -25,6 +32,10 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
+
+  if ('clearAppBadge' in navigator) {
+    navigator.clearAppBadge().catch(err => console.error('[SW] clearBadge error', err));
+  }
 
   const urlToOpen = event.notification.data?.url || '/'
 
