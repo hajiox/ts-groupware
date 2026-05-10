@@ -81,7 +81,8 @@ export async function sendPushNotificationToGroup(groupId: string, senderId: str
 
   if (!members || members.length === 0) return
 
-  let userIds = members.map(m => m.user_id).filter(id => id !== senderId)
+  // テスト時や複数端末利用時に自分の投稿でも通知を受け取れるよう、senderIdでの除外を削除
+  let userIds = members.map(m => m.user_id)
 
   if (userIds.length === 0) return
 
