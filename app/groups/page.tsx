@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://v0-line-blush.vercel.app";
+const lineLoginUrl = `${siteUrl}/api/auth/line?openExternalBrowser=1`;
+const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=96x96&margin=8&data=${encodeURIComponent(lineLoginUrl)}`;
+
 type User = {
   id: string;
   display_name: string;
@@ -234,6 +238,17 @@ export default function GroupsPage() {
         aria-label="グループ一覧"
         style={{ paddingTop: 16 }}
       >
+        <div className="home-line-qr" aria-label="LINEログインQR">
+          <div className="home-line-qr__text">
+            <span className="home-line-qr__label">LINEログインQR</span>
+            <span className="home-line-qr__sub">別端末で開く時に使えます</span>
+          </div>
+          <a href={lineLoginUrl} className="home-line-qr__code" aria-label="LINEログインへ進むQR">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={qrUrl} alt="LINEログインへ進むQRコード" width={76} height={76} />
+          </a>
+        </div>
+
         {loading ? (
           <p style={{ textAlign: "center", color: "var(--text-sub)", padding: "40px 0" }}>
             読み込み中...
