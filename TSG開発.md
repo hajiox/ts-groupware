@@ -895,3 +895,41 @@
 - **関連ファイル**:
   - `app/board/[id]/page.tsx`
   - `app/globals.css`
+
+### 2026-05-10 iPhone Push通知の根本修正（内職管理システム方式への統一）
+- **問題**:
+  - iPhoneでSafariからLINEログインすると、Safari → LINE → Chromeに戻ってしまい、結果としてChromeで通知設定しても通知が届かない。
+  - device-loginリンクをSafariで開いても通知トグルが反応しない。
+- **根本原因の特定（内職管理システムとの比較）**:
+  - **iOSではWeb Push通知はSafari PWA（ホーム画面追加アプリ）でのみ利用可能**。Chrome等の他ブラウザでは不可。
+  - 内職管理システムはこれを正しく判定し、PWA外では通知ボタンを非表示にしてPWA化手順を案内していた。
+  - TSGはこの判定が欠如しており、Chromeからでも通知トグルが表示されて操作できるが、実際には動作しない状態だった。
+- **修正内容**:
+  - **PWA基盤の修正**:
+    - `public/manifest.json`: 192x192/512x512 PNGアイコンを追加、`start_url`を`/groups`に変更
+    - `public/apple-touch-icon.png`, `public/icon-192.png`, `public/icon-512.png` を追加
+    - `app/layout.tsx`: `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, `apple-mobile-web-app-title`, `apple-touch-icon` メタタグを追加
+  - **設定ページの全面改修** (`app/settings/page.tsx`):
+    - 内職管理システムと同じiOS standalone判定を導入（`navigator.standalone` + `display-mode: standalone`）
+    - iOSでPWA外の場合: 通知トグルを表示せず、Safari PWA化の手順を案内するガイドを表示
+    - iOSでPWA内の場合: 通常通り通知トグルを表示
+    - 「通知非対応」「通知ブロック済み」の状態別UIを追加
+    - device-login経由アクセス時（`?deviceLogin=1`）に成功メッセージを表示
+    - iPhoneの設定ガイドを「Safari PWA限定」に明確化、Chrome不可を赤色警告で表示
+- **iPhone通知の正しい設定手順（修正後）**:
+  1. iPhoneの**Safari**で `v0-line-blush.vercel.app` を開く
+  2. 共有ボタン → 「ホーム画面に追加」
+  3. ホーム画面のTSGアイコンからアプリを開く
+  4. LINEでログイン（PWA内のWebViewでOAuthが完結するためSafariに戻る問題なし）
+  5. 設定画面で通知をONにする
+  - または、別ブラウザでログイン済みの場合は設定画面から「Safari用ログインリンクを作成」し、Safari PWAで開いてセッションを引き継ぐ
+- **確認**:
+  - `npm run build` 成功。
+  - `git push origin main` 成功。Vercel自動デプロイ開始。
+- **関連ファイル**:
+  - `app/layout.tsx`
+  - `app/settings/page.tsx`
+  - `public/manifest.json`
+  - `public/apple-touch-icon.png`
+  - `public/icon-192.png`
+  - `public/icon-512.png`
