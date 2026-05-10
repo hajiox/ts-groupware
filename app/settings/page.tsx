@@ -347,7 +347,7 @@ export default function SettingsPage() {
           <div>
             <div className="settings-row__label">Web Push 通知</div>
             <div className="settings-row__sub">
-              投稿・編集・削除・リアクションを通知
+              投稿・リアクションを通知
             </div>
           </div>
           <label className="toggle">
