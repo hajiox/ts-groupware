@@ -1309,6 +1309,27 @@ img {
   border-bottom-left-radius: 4px;
 }
 
+.msg__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-end;
+}
+
+.msg__delete-btn {
+  background: none;
+  border: none;
+  color: #fca5a5;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.msg__delete-btn:hover {
+  background: rgba(252, 165, 165, 0.1);
+}
+
 .msg__time {
   font-size: 10px;
   color: var(--text-muted);
@@ -2182,3 +2203,4 @@ img {
   background: var(--bg-main);
   color: var(--text-main);
 }
+

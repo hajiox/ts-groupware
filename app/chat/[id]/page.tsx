@@ -238,6 +238,26 @@ export default function ChatPage() {
     }
   }
 
+  async function deleteMessage(messageId: string) {
+    if (!confirm("メッセージを削除しますか？")) return;
+
+    try {
+      const res = await fetch(`/api/posts?post_id=${messageId}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "メッセージの削除に失敗しました");
+      }
+
+      setMessages(prev => prev.filter(m => m.id !== messageId));
+      messageIdsRef.current.delete(messageId);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "メッセージの削除に失敗しました");
+    }
+  }
+
   return (
     <>
       <header className="top-header" role="banner">
@@ -324,9 +344,22 @@ export default function ChatPage() {
               })}
             </div>
 
-            <time className="msg__time" dateTime={message.created_at}>
-              {formatTime(message.created_at)}
-            </time>
+            <div className="msg__meta">
+              {message.isOwn && (
+                <button
+                  type="button"
+                  className="msg__delete-btn"
+                  onClick={() => deleteMessage(message.id)}
+                  aria-label="メッセージを削除"
+                  title="メッセージを削除"
+                >
+                  削除
+                </button>
+              )}
+              <time className="msg__time" dateTime={message.created_at}>
+                {formatTime(message.created_at)}
+              </time>
+            </div>
           </div>
         ))}
 
