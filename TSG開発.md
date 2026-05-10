@@ -368,6 +368,26 @@
   - `app/groups/page.tsx`
   - `app/globals.css`
 
+### 2026-05-10 掲示板コメント機能の実装
+- **担当**: 掲示板
+- **要件**:
+  - 掲示板投稿の「コメント」ボタンが表示だけで実動作していなかったため、`gw_posts.parent_id` を使ったコメント展開・投稿を実装する。
+  - ログイン担当・Chat担当の作業と衝突しないよう、変更対象は掲示板ページ、投稿APIの互換拡張、掲示板用CSSに限定する。
+- **実装内容**:
+  - `/board/[id]` にコメント展開、コメント一覧読み込み、コメント投稿フォーム、コメント件数の即時更新を追加。
+  - 投稿画面の文字化けしていた表示文言を掲示板ページ内で整理。
+  - 添付ファイル表示を `viewUrl` / `driveId` / `webViewLink` に対応させ、画像プレビューと通常ファイルリンクを安定化。
+  - `/api/posts` GET に `parent_id` クエリを追加し、特定投稿のコメントだけ取得できるようにした。既存の `group_id` 一覧取得と `parent_only` の挙動は維持。
+  - コメントUI用に `.post-comments`, `.post-comment`, `.post-comment-form`, `.post-card__attachments`, `.post-card__file` などのCSSを追加。
+- **確認**:
+  - `npm.cmd run build` 成功。
+  - ローカル `http://localhost:3000/board/test-board` は未ログイン状態で `/login` にリダイレクトされることをブラウザで確認。
+  - 実ログイン済みセッションでのコメント投稿・展開は、ログイン担当の作業完了後に実機確認が必要。
+- **関連ファイル**:
+  - `app/board/[id]/page.tsx`
+  - `app/api/posts/route.ts`
+  - `app/globals.css`
+
 ### 2026-05-09 TOPページにLINEログインQRを追加
 - **要望**: TOPページに、スマホで読み取るとLINEログインへ遷移するQRを表示する。
 - **修正**:
@@ -778,8 +798,6 @@
   - 変更対象は `gw_users.display_name` のみで、LINEアカウント自体の表示名は変更しない。
 - **反映範囲**:
   - 掲示板、Chat、メンバー一覧など、`gw_users.display_name` を参照する画面に反映される。
-- **確認**:
-  - `npm run build` 成功。
 - **関連ファイル**:
   - `app/admin/page.tsx`
   - `app/api/admin/users/route.ts`
@@ -797,55 +815,83 @@
   - `app/page.tsx`
   - `app/login/page.tsx`
   - `app/groups/page.tsx`
-### 2026-05-10 通知設定のiPhone事前ブロック解除とガイド修正
-- **問題**:
-  - iPhoneでChrome通知が動く実績があるにもかかわらず、設定画面がiPhoneかつホーム画面追加でない場合に通知ON操作を先に止めていた。
-  - 通知設定ガイドがSafari/PWA前提に寄りすぎていた。
-- **修正内容**:
-  - iPhone/ホーム画面追加の事前ブロックを削除。
-  - 端末名ではなく、ブラウザの `Notification` / `serviceWorker` / `PushManager` API有無を見て判定するようにした。
-  - APIがある場合は通知ONボタンで実際に購読処理を試せる。
-  - iPhoneガイドを、ChromeまたはSafariで「ログインしたブラウザと通知許可するブラウザを揃える」説明へ変更。
+
+### 2026-05-10 掲示板コメントボタンの反応改善
+- **担当**: 掲示板
+- **症状**:
+  - 掲示板投稿の「コメントする」ボタンを押しても、コメント欄が既に開いている場合や入力欄が画面下に出る場合に反応が分かりにくい。
+- **修正**:
+  - 「コメントする」押下時は必ずコメント欄を開き、未読込ならコメント一覧を読み込むように変更。
+  - コメント欄を開いた後、該当投稿のコメント入力欄へフォーカスするようにした。
 - **確認**:
-  - `npm run build` 成功。
+  - `npm.cmd run build` 成功。
 - **関連ファイル**:
-  - `app/settings/page.tsx`
-### 2026-05-10 通知ON時の自動ガイド表示を削除
-- **問題**:
-  - 通知ON操作時に、未対応判定の分岐で設定ガイドを自動表示しており、通知設定を進める導線を邪魔していた。
-- **修正内容**:
-  - 通知ON操作では設定ガイドを自動表示しないように変更。
-  - ガイドは「設定ガイド」ボタンを押した時だけ表示する。
-  - Web Push APIが見つからない場合は、画面内メッセージだけを表示する。
+  - `app/board/[id]/page.tsx`
+### 2026-05-10 掲示板コメント入力フォームの確実表示
+- **担当**: 掲示板
+- **症状**:
+  - 投稿下部の「コメントする」またはコメント件数ボタンを押しても、入力フォームが表示されないように見える。
+- **修正**:
+  - コメント一覧の展開状態とは別に、入力フォーム表示用の `activeCommentPostId` を追加。
+  - 「コメントする」とコメント件数ボタンのどちらを押しても、該当投稿直下のコメント入力フォームを必ず表示するように変更。
+  - 表示後に該当コメント欄へスクロールし、入力欄へフォーカスするように変更。
 - **確認**:
-  - `npm run build` 成功。
+  - `npm.cmd run build` 成功。
 - **関連ファイル**:
-  - `app/settings/page.tsx`
-### 2026-05-10 iOS LINE自動ログインによるブラウザ切替対策
-- **問題**:
-  - SafariでTSGを開いてLINEログインすると、LINEアプリ自動ログインを経由してChromeへ戻ることがあり、通知設定ブラウザが分断される。
-- **調査結果**:
-  - LINE Loginには `disable_auto_login` パラメータがあり、自動ログインを無効化してブラウザ内SSO/ログイン画面を優先できる。
-- **修正内容**:
-  - `/api/auth/line` でiOS User-Agentを検出した場合のみ、LINE認可URLへ `disable_auto_login=true` を付与。
-  - PC/AndroidのLINEログイン導線は従来通り。
-  - 認証ログに `ios` と `disable_auto_login` の状態を記録。
+  - `app/board/[id]/page.tsx`
+### 2026-05-10 掲示板コメントフォームをdetails方式に変更
+- **担当**: 掲示板
+- **症状**:
+  - PC表示で投稿下部の「コメントする」を押しても入力フォームが表示されない。
+- **修正**:
+  - Reactのクリック状態だけに依存せず、ブラウザ標準の `details/summary` でもコメント欄を開ける構造へ変更。
+  - フッターのコメント件数ボタンと「コメントする」ボタンはどちらも同じ入力フォーム表示処理に統一。
+  - `details` 用CSSを追加し、開いた時はsummaryを隠してフォームを投稿直下に表示。
 - **確認**:
-  - `npm run build` 成功。
+  - `npm.cmd run build` 成功。
+- **関連ファイル**:
+  - `app/board/[id]/page.tsx`
+  - `app/globals.css`
+### 2026-05-10 掲示板コメント開閉をsummaryネイティブ動作へ変更
+- **担当**: 掲示板
+- **症状**:
+  - 本番PCで投稿下部の「コメントする」を押しても入力フォームが開かない。
+- **原因想定**:
+  - フッターのbuttonクリックからReact stateで別要素を開く構造だったため、本番でhydration/JS状態に問題があると見た目が一切変わらない。
+- **修正**:
+  - 投稿フッター自体を `details > summary` に変更し、ブラウザ標準の開閉動作で入力フォームが開く構造にした。
+  - summary内に「コメント件数」「コメントする」を表示し、同じ箇所を押すだけで投稿直下のコメントフォームが開くようにした。
+  - JSが動く場合は従来通りコメント読込・入力欄フォーカスも実行する。
+- **確認**:
+  - `npm.cmd run build` 成功。
+  - `npx vercel --prod --yes` で本番デプロイ成功。Production alias `https://v0-line-blush.vercel.app` 反映済み。
+- **関連ファイル**:
+  - `app/board/[id]/page.tsx`
+  - `app/globals.css`
+### 2026-05-10 LINEログインのiPhone挙動を内職管理システム方式へ戻し
+- **対象**: LINEログイン開始処理
+- **症状**:
+  - iPhoneのSafariからLINEログインすると、Safari → LINE → 再度LINEログイン画面となり、「アプリでログイン」が表示されないケースがあった。
+- **原因想定**:
+  - TSG側だけ `disable_auto_login=true` を付けており、LINEアプリでの自動ログイン導線を抑止していた。
+  - 内職管理システムの通常LINEログインにはこの指定がなく、TSGだけ挙動差が出ていた。
+- **修正内容**:
+  - `/api/auth/line` のLINE認可URLから `disable_auto_login` 指定を削除。
+  - LINEログイン開始Routeの文字化けコメントを整理し、内職管理システムと同じ標準OAuthパラメータに戻した。
 - **関連ファイル**:
   - `app/api/auth/line/route.ts`
-### 2026-05-10 通知設定用の短時間ログインリンクを追加
-- **背景**:
-  - SafariでLINEログインしてもLINEアプリ経由でChromeへ戻るケースがあり、LINE OAuthだけでは通知設定ブラウザを固定できない。
-  - 内職管理システムでは、LINE OAuthを毎回通さずトークン付きURLで既存ユーザーへセッションを発行する導線がある。
-- **実装内容**:
-  - ログイン済みユーザーが `/api/auth/device-login` のPOSTで5分有効の通知設定用ログインリンクを発行できるようにした。
-  - 発行リンクをSafariまたはホーム画面アプリで開くと、LINEを通さず同じTSGユーザーとして `/settings?deviceLogin=1` にログインする。
-  - 設定画面に「通知設定用リンク」ボタンとコピー欄を追加。
-  - トークンはHMAC署名し、ユーザーID、発行時刻、nonceを含める。
+
+### 2026-05-10 掲示板コメントのリアクション対応
+- **担当**: 掲示板
+- **対応内容**:
+  - コメントにも投稿と同じリアクションボタンを追加。
+  - コメント一覧の `commentsByPost` にもリアクションの楽観更新を反映し、押した直後に件数と選択状態が変わるようにした。
+  - 保存処理は既存の `/api/reactions` を利用し、投稿とコメントで同じリアクション仕様に統一。
 - **確認**:
-  - `npm run build` 成功。
+  - `npm.cmd run build` 成功。
+  - `npx vercel --prod --yes` 成功。
+  - Production alias `https://v0-line-blush.vercel.app` 反映済み。
+  - 本番URLをブラウザで開き、未ログイン状態では `/login` へ遷移することを確認。
 - **関連ファイル**:
-  - `lib/device-login-token.ts`
-  - `app/api/auth/device-login/route.ts`
-  - `app/settings/page.tsx`
+  - `app/board/[id]/page.tsx`
+  - `app/globals.css`

@@ -60,6 +60,7 @@ export async function GET(request: NextRequest) {
   }
 
   const parentOnly = request.nextUrl.searchParams.get('parent_only') !== 'false'
+  const parentId = request.nextUrl.searchParams.get('parent_id')
   const limit = parseInt(request.nextUrl.searchParams.get('limit') || '50')
 
   let query = adminClient
@@ -69,7 +70,9 @@ export async function GET(request: NextRequest) {
     .order('created_at', { ascending: false })
     .limit(limit)
 
-  if (parentOnly) {
+  if (parentId) {
+    query = query.eq('parent_id', parentId)
+  } else if (parentOnly) {
     query = query.is('parent_id', null)
   }
 

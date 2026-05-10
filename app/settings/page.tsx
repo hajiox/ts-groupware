@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 type User = {
   id: string;
@@ -10,6 +10,29 @@ type User = {
 };
 
 type DeviceType = "iphone" | "android" | "pc";
+
+/**
+ * iOS判定: iPhone / iPad / iPod のほか、
+ * iPadOS の「Mac風UA」も maxTouchPoints で判定する。
+ */
+function isIOSDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /iPad|iPhone|iPod/.test(ua)
+    || (ua.includes("Macintosh") && navigator.maxTouchPoints > 1);
+}
+
+/**
+ * iOS PWA (standalone) 判定:
+ * - navigator.standalone === true（Safari PWA）
+ * - display-mode: standalone メディアクエリ
+ */
+function isStandaloneMode(): boolean {
+  if (typeof window === "undefined") return false;
+  const nav = window.navigator as unknown as { standalone?: boolean };
+  return nav.standalone === true
+    || window.matchMedia("(display-mode: standalone)").matches;
+}
 
 // --- Push通知用ユーティリティ ---
 function urlB64ToUint8Array(base64String: string) {
@@ -35,33 +58,79 @@ function detectDevice(): DeviceType {
   return "pc";
 }
 
+/**
+ * Push通知の有効化可否を判定する状態:
+ * - loading: チェック中
+ * - ready: 通知ON/OFFが操作可能
+ * - ios-need-safari-pwa: iOSだがSafari PWAではない → ホーム画面追加を案内
+ * - unsupported: ブラウザがPush APIに非対応
+ * - denied: ブラウザ設定で通知ブロック済み
+ */
+type PushCapability = "loading" | "ready" | "ios-need-safari-pwa" | "unsupported" | "denied";
+
 export default function SettingsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [loadingPush, setLoadingPush] = useState(true);
   const [pushMessage, setPushMessage] = useState("");
+  const [pushCapability, setPushCapability] = useState<PushCapability>("loading");
   const [guideOpen, setGuideOpen] = useState(false);
   const [guideDevice, setGuideDevice] = useState<DeviceType>("pc");
   const [deviceLoginUrl, setDeviceLoginUrl] = useState("");
   const [creatingDeviceLoginUrl, setCreatingDeviceLoginUrl] = useState(false);
+
+  // deviceLogin=1 パラメータで来た場合はSafari/PWAから開いたことを自動案内
+  const [fromDeviceLogin, setFromDeviceLogin] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => data && setUser(data.user))
       .catch(() => {});
-      
-    checkPushStatus();
+
+    // URLパラメータチェック
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("deviceLogin") === "1") {
+      setFromDeviceLogin(true);
+    }
+
+    determinePushCapability();
     setGuideDevice(detectDevice());
   }, []);
 
-  async function checkPushStatus() {
+  /**
+   * Push通知が使える状態かを判定する。
+   * 内職管理システムと同じ方式: iOS → standalone判定を最優先。
+   */
+  const determinePushCapability = useCallback(async () => {
+    // Step 1: iOS判定
+    if (isIOSDevice()) {
+      if (!isStandaloneMode()) {
+        // iOSだがSafari PWA（ホーム画面追加）ではない
+        setPushCapability("ios-need-safari-pwa");
+        setLoadingPush(false);
+        return;
+      }
+      // iOS + standalone → Push APIが使えるかチェックに進む
+    }
+
+    // Step 2: Push API存在チェック
     if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-      setPushMessage("このブラウザではWeb Pushに必要な機能が見つかりません。別ブラウザや通知許可設定を確認してください。");
+      setPushCapability("unsupported");
       setLoadingPush(false);
       return;
     }
 
+    // Step 3: ブラウザの通知パーミッション確認
+    if (Notification.permission === "denied") {
+      setPushCapability("denied");
+      setLoadingPush(false);
+      return;
+    }
+
+    setPushCapability("ready");
+
+    // Step 4: 既存の購読状態チェック
     try {
       const registration = await navigator.serviceWorker.getRegistration('/sw.js');
       const subscription = registration ? await registration.pushManager.getSubscription() : null;
@@ -80,16 +149,15 @@ export default function SettingsPage() {
       console.error("Push status check failed", err);
     }
     setLoadingPush(false);
-  }
+  }, []);
 
   async function togglePush(checked: boolean) {
     setLoadingPush(true);
     setPushMessage("");
 
     try {
-      if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-        setPushEnabled(false);
-        setPushMessage("このブラウザではWeb Pushに必要な機能が見つかりません。別ブラウザで開き直すか、ブラウザの通知許可設定を確認してください。");
+      if (pushCapability !== "ready") {
+        setPushMessage("この環境では通知を有効にできません。設定ガイドを確認してください。");
         setLoadingPush(false);
         return;
       }
@@ -117,7 +185,7 @@ export default function SettingsPage() {
           body: JSON.stringify({ subscription: subscription.toJSON() }),
         });
         setPushEnabled(true);
-        setPushMessage("通知を有効にしました");
+        setPushMessage("✅ 通知を有効にしました！「テスト通知」で確認してください。");
       } else {
         // 解除する
         const subscription = await registration.pushManager.getSubscription();
@@ -134,7 +202,8 @@ export default function SettingsPage() {
       }
     } catch (err) {
       console.error("Failed to toggle push", err);
-      alert("設定の変更に失敗しました");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      alert("通知設定の変更に失敗しました: " + msg);
     }
     setLoadingPush(false);
   }
@@ -164,7 +233,7 @@ export default function SettingsPage() {
         return;
       }
       setDeviceLoginUrl(data.url);
-      setPushMessage("通知設定用リンクを作成しました。Safariまたはホーム画面アプリで開いて通知をONにしてください。");
+      setPushMessage("通知設定用リンクを作成しました。Safariで開いて通知をONにしてください。");
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(data.url).catch(() => {});
       }
@@ -175,6 +244,144 @@ export default function SettingsPage() {
 
   function handleLogout() {
     window.location.href = "/api/auth/logout";
+  }
+
+  // --- Push通知の状態別UI ---
+  function renderPushSection() {
+    // iOSでSafari PWAではない場合
+    if (pushCapability === "ios-need-safari-pwa") {
+      return (
+        <section className="settings-section" aria-label="通知設定">
+          <h2 className="settings-section__title">通知</h2>
+          <div className="settings-row settings-row--stack">
+            <div className="ios-pwa-guide">
+              <div className="ios-pwa-guide__icon">📱</div>
+              <div className="ios-pwa-guide__content">
+                <div className="ios-pwa-guide__title">iPhoneで通知を受け取るには</div>
+                <div className="ios-pwa-guide__desc">
+                  <strong>Safari</strong>でこのサイトを開き、ホーム画面に追加してからログインしてください。
+                </div>
+                <ol className="ios-pwa-guide__steps">
+                  <li><strong>Safari</strong>で <code>v0-line-blush.vercel.app</code> を開く</li>
+                  <li>下部の共有ボタン（□に↑）をタップ</li>
+                  <li>「<strong>ホーム画面に追加</strong>」をタップ</li>
+                  <li>ホーム画面のTSGアイコンからアプリを開く</li>
+                  <li>ログイン後、設定画面で通知をONにする</li>
+                </ol>
+                <div className="ios-pwa-guide__warn">
+                  ⚠️ iPhoneではChrome等の他ブラウザでは通知を受け取れません。必ずSafariから操作してください。
+                </div>
+              </div>
+            </div>
+            {/* 別ブラウザ（Chrome）から来た場合向けのdevice-loginリンク */}
+            <div className="settings-actions" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="settings-action-btn"
+                disabled={creatingDeviceLoginUrl}
+                onClick={createNotificationLoginUrl}
+              >
+                📋 Safari用ログインリンクを作成
+              </button>
+            </div>
+            {deviceLoginUrl && (
+              <div className="settings-copy-box">
+                <input value={deviceLoginUrl} readOnly aria-label="Safari用ログインリンク" />
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  onClick={() => navigator.clipboard?.writeText(deviceLoginUrl)}
+                >
+                  コピー
+                </button>
+              </div>
+            )}
+            {pushMessage && <div className="settings-row__sub">{pushMessage}</div>}
+          </div>
+        </section>
+      );
+    }
+
+    // 非対応ブラウザ
+    if (pushCapability === "unsupported") {
+      return (
+        <section className="settings-section" aria-label="通知設定">
+          <h2 className="settings-section__title">通知</h2>
+          <div className="settings-row settings-row--stack">
+            <div className="ios-pwa-guide__warn">
+              🔕 このブラウザではWeb Push通知に対応していません。
+              PCの場合はChrome / Edge / Firefoxをお試しください。
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    // ブラウザ設定でブロック済み
+    if (pushCapability === "denied") {
+      return (
+        <section className="settings-section" aria-label="通知設定">
+          <h2 className="settings-section__title">通知</h2>
+          <div className="settings-row settings-row--stack">
+            <div className="ios-pwa-guide__warn">
+              🔕 通知がブラウザ設定でブロックされています。<br />
+              アドレスバー左の鍵/情報アイコン → サイト設定 → 通知 → 「許可」に変更してください。
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    // ready: 通知ON/OFF操作可能
+    return (
+      <section className="settings-section" aria-label="通知設定">
+        <h2 className="settings-section__title">通知</h2>
+
+        {fromDeviceLogin && !pushEnabled && (
+          <div className="ios-pwa-guide__success" style={{ marginBottom: 12 }}>
+            ✅ Safari/PWAからのログインに成功しました！下の通知トグルをONにしてください。
+          </div>
+        )}
+
+        <div className="settings-row">
+          <div>
+            <div className="settings-row__label">Web Push 通知</div>
+            <div className="settings-row__sub">
+              投稿・編集・削除・リアクションを通知
+            </div>
+          </div>
+          <label className="toggle">
+            <input 
+              type="checkbox" 
+              checked={pushEnabled} 
+              disabled={loadingPush}
+              onChange={(e) => togglePush(e.target.checked)} 
+            />
+            <span className="toggle__track" />
+          </label>
+        </div>
+        <div className="settings-row settings-row--stack">
+          {pushMessage && <div className="settings-row__sub">{pushMessage}</div>}
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="settings-action-btn"
+              onClick={() => setGuideOpen(true)}
+            >
+              設定ガイド
+            </button>
+            <button
+              type="button"
+              className="settings-action-btn"
+              disabled={!pushEnabled || loadingPush}
+              onClick={sendTestNotification}
+            >
+              テスト通知
+            </button>
+          </div>
+        </div>
+      </section>
+    );
   }
 
   return (
@@ -211,67 +418,8 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        {/* Notification settings */}
-        <section className="settings-section" aria-label="通知設定">
-          <h2 className="settings-section__title">通知</h2>
-          <div className="settings-row">
-            <div>
-              <div className="settings-row__label">Web Push 通知</div>
-              <div className="settings-row__sub">
-                投稿・編集・削除・リアクションを通知
-              </div>
-            </div>
-            <label className="toggle">
-              <input 
-                type="checkbox" 
-                checked={pushEnabled} 
-                disabled={loadingPush}
-                onChange={(e) => togglePush(e.target.checked)} 
-              />
-              <span className="toggle__track" />
-            </label>
-          </div>
-          <div className="settings-row settings-row--stack">
-            {pushMessage && <div className="settings-row__sub">{pushMessage}</div>}
-            <div className="settings-actions">
-              <button
-                type="button"
-                className="settings-action-btn"
-                onClick={() => setGuideOpen(true)}
-              >
-                設定ガイド
-              </button>
-              <button
-                type="button"
-                className="settings-action-btn"
-                disabled={!pushEnabled || loadingPush}
-                onClick={sendTestNotification}
-              >
-                テスト通知
-              </button>
-              <button
-                type="button"
-                className="settings-action-btn"
-                disabled={creatingDeviceLoginUrl}
-                onClick={createNotificationLoginUrl}
-              >
-                通知設定用リンク
-              </button>
-            </div>
-            {deviceLoginUrl && (
-              <div className="settings-copy-box">
-                <input value={deviceLoginUrl} readOnly aria-label="通知設定用ログインリンク" />
-                <button
-                  type="button"
-                  className="settings-action-btn"
-                  onClick={() => navigator.clipboard?.writeText(deviceLoginUrl)}
-                >
-                  コピー
-                </button>
-              </div>
-            )}
-          </div>
-        </section>
+        {/* Notification settings - 状態別レンダリング */}
+        {renderPushSection()}
 
         {guideOpen && (
           <div className="modal-overlay" onClick={() => setGuideOpen(false)}>
@@ -297,19 +445,28 @@ export default function SettingsPage() {
               <div className="notification-guide__body">
                 {guideDevice === "iphone" && (
                   <>
-                    <p className="notification-guide__note">iPhoneは、ログインしたブラウザと通知を許可するブラウザを同じにしてください。Chromeで運用する場合はChromeで開いたまま通知をONにします。</p>
+                    <div className="notification-guide__note" style={{ background: "rgba(239, 68, 68, 0.12)", color: "#f87171" }}>
+                      ⚠️ iPhoneでは <strong>Safari</strong> からホーム画面に追加したアプリ（PWA）でのみ通知が使えます。Chrome等の他ブラウザでは通知を受け取れません。
+                    </div>
+                    <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>手順:</p>
                     <ol>
-                      <li>ChromeまたはSafariでTSGを開く</li>
-                      <li>LINEログイン後も同じブラウザに戻っていることを確認する</li>
+                      <li><strong>Safari</strong>で <code style={{ background: "rgba(255,255,255,0.1)", padding: "2px 6px", borderRadius: 4, fontSize: 12 }}>v0-line-blush.vercel.app</code> を開く</li>
+                      <li>下部の共有ボタン（□に↑）をタップ</li>
+                      <li>「<strong>ホーム画面に追加</strong>」をタップ</li>
+                      <li>ホーム画面のTSGアイコンからアプリを開く</li>
+                      <li>LINEでログインする</li>
                       <li>設定画面で「Web Push 通知」をONにする</li>
-                      <li>ブラウザの通知許可で「許可」を選ぶ</li>
-                      <li>届かない場合は、同じブラウザで開き直してから再度ONにする</li>
+                      <li>「通知を許可しますか？」→「<strong>許可</strong>」をタップ</li>
                     </ol>
+                    <div className="notification-guide__note" style={{ marginTop: 12 }}>
+                      💡 iPhone設定 → 通知 → TSG で「通知を許可」「ロック画面」「バナー」「サウンド」がONか確認してください。
+                    </div>
                   </>
                 )}
                 {guideDevice === "android" && (
                   <ol>
                     <li>Chromeでこのサイトを開く</li>
+                    <li>LINEでログインする</li>
                     <li>設定画面で「Web Push 通知」をONにする</li>
                     <li>ブラウザの通知許可で「許可」を選ぶ</li>
                     <li>「テスト通知」で届くか確認する</li>
@@ -408,12 +565,78 @@ export default function SettingsPage() {
           .notification-guide__body ol {
             margin-left: 20px;
           }
+          .notification-guide__body code {
+            background: rgba(255,255,255,0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+          }
           .notification-guide__note {
             background: rgba(245, 158, 11, 0.12);
             border-radius: var(--radius-sm);
             color: #fbbf24;
             margin-bottom: 12px;
             padding: 10px 12px;
+            font-size: 13px;
+            line-height: 1.6;
+          }
+          /* iOS PWA案内 */
+          .ios-pwa-guide {
+            display: flex;
+            gap: 12px;
+            padding: 14px;
+            background: rgba(59, 130, 246, 0.08);
+            border-radius: var(--radius);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+          }
+          .ios-pwa-guide__icon {
+            font-size: 28px;
+            flex-shrink: 0;
+          }
+          .ios-pwa-guide__content {
+            flex: 1;
+          }
+          .ios-pwa-guide__title {
+            font-weight: 700;
+            font-size: 14px;
+            margin-bottom: 6px;
+            color: var(--text);
+          }
+          .ios-pwa-guide__desc {
+            font-size: 13px;
+            color: var(--text-sub);
+            margin-bottom: 10px;
+            line-height: 1.6;
+          }
+          .ios-pwa-guide__steps {
+            margin: 0 0 10px 18px;
+            padding: 0;
+            font-size: 13px;
+            color: var(--text-sub);
+            line-height: 1.8;
+          }
+          .ios-pwa-guide__steps code {
+            background: rgba(255,255,255,0.1);
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 11px;
+            color: #93c5fd;
+          }
+          .ios-pwa-guide__warn {
+            font-size: 12px;
+            color: #f87171;
+            padding: 8px 10px;
+            background: rgba(239, 68, 68, 0.08);
+            border-radius: var(--radius-sm);
+            line-height: 1.5;
+          }
+          .ios-pwa-guide__success {
+            font-size: 13px;
+            color: #4ade80;
+            padding: 10px 12px;
+            background: rgba(34, 197, 94, 0.1);
+            border-radius: var(--radius-sm);
+            font-weight: 600;
           }
         `}</style>
 

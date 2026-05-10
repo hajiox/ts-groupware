@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"] as const;
 const IMAGE_UPLOAD_MAX_SIZE = 1600;
@@ -13,12 +13,22 @@ type Author = {
   picture_url: string | null;
 };
 
+type Attachment = {
+  type: string;
+  url: string;
+  name: string;
+  driveId?: string;
+  viewUrl?: string;
+  webViewLink?: string;
+};
+
 type Post = {
   id: string;
   group_id: string;
   user_id: string;
+  parent_id: string | null;
   content: string | null;
-  attachments: { type: string; url: string; name: string; driveId?: string; webViewLink?: string }[];
+  attachments: Attachment[];
   created_at: string;
   is_pinned: boolean;
   author: Author;
@@ -35,15 +45,10 @@ function Avatar({ user, size = 38 }: { user: Author; size?: number }) {
   if (user.picture_url) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={user.picture_url}
-        alt={user.display_name}
-        className="avatar"
-        width={size}
-        height={size}
-      />
+      <img src={user.picture_url} alt={user.display_name} className="avatar" width={size} height={size} />
     );
   }
+
   return (
     <div
       className="avatar-placeholder"
@@ -55,37 +60,47 @@ function Avatar({ user, size = 38 }: { user: Author; size?: number }) {
 }
 
 function formatDate(dateStr: string) {
-  const d = new Date(dateStr);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
+  const date = new Date(dateStr);
+  const diff = Date.now() - date.getTime();
+
   if (diff < 60000) return "たった今";
   if (diff < 3600000) return `${Math.floor(diff / 60000)}分前`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}時間前`;
-  return d.toLocaleDateString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  return date.toLocaleDateString("ja-JP", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function getDriveFileId(url: string) {
   try {
     const parsed = new URL(url);
-    if (parsed.hostname === "drive.google.com") {
-      const id = parsed.searchParams.get("id");
-      if (id) return id;
+    if (parsed.hostname !== "drive.google.com") return null;
 
-      const filePathMatch = parsed.pathname.match(/\/file\/d\/([^/]+)/);
-      if (filePathMatch?.[1]) return filePathMatch[1];
-    }
+    const id = parsed.searchParams.get("id");
+    if (id) return id;
+
+    const filePathMatch = parsed.pathname.match(/\/file\/d\/([^/]+)/);
+    return filePathMatch?.[1] || null;
   } catch {
     return null;
   }
-
-  return null;
 }
 
-function getAttachmentImageUrl(url: string) {
-  const driveId = getDriveFileId(url);
-  if (!driveId) return url;
+function getAttachmentImageUrl(attachment: Attachment) {
+  if (attachment.viewUrl) return attachment.viewUrl;
+
+  const driveId = attachment.driveId || getDriveFileId(attachment.url) || getDriveFileId(attachment.webViewLink || "");
+  if (!driveId) return attachment.url;
 
   return `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200`;
+}
+
+function getAttachmentOpenUrl(attachment: Attachment) {
+  return attachment.webViewLink || attachment.url || attachment.viewUrl || "#";
 }
 
 function getCompressedImageName(name: string) {
@@ -131,6 +146,7 @@ async function prepareUploadFile(file: File, uploadOriginal: boolean) {
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return file;
 
@@ -139,7 +155,6 @@ async function prepareUploadFile(file: File, uploadOriginal: boolean) {
       canvas.toBlob(resolve, "image/jpeg", IMAGE_UPLOAD_QUALITY);
     });
     if (!blob) return file;
-
     if (scale === 1 && blob.size >= file.size) return file;
 
     return new File([blob], getCompressedImageName(file.name), {
@@ -157,9 +172,16 @@ export default function BoardPage() {
 
   const [groupName, setGroupName] = useState("掲示板");
   const [posts, setPosts] = useState<Post[]>([]);
+  const [commentsByPost, setCommentsByPost] = useState<Record<string, Post[]>>({});
+  const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
+  const [commentTextByPost, setCommentTextByPost] = useState<Record<string, string>>({});
+  const [commentLoadingByPost, setCommentLoadingByPost] = useState<Record<string, boolean>>({});
+  const [commentSubmittingByPost, setCommentSubmittingByPost] = useState<Record<string, boolean>>({});
+  const [commentFilesByPost, setCommentFilesByPost] = useState<Record<string, File | null>>({});
+  const [commentUploadOriginalByPost, setCommentUploadOriginalByPost] = useState<Record<string, boolean>>({});
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [isPosting, setIsPosting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadOriginal, setUploadOriginal] = useState(false);
@@ -167,24 +189,26 @@ export default function BoardPage() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const commentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const commentSectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  const commentFileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
-    // グループ名取得
     fetch("/api/groups")
-      .then(r => r.ok ? r.json() : { groups: [] })
-      .then(data => {
-        const g = data.groups?.find((g: { id: string; name: string }) => g.id === id);
-        if (g) setGroupName(g.name);
+      .then((res) => (res.ok ? res.json() : { groups: [] }))
+      .then((data) => {
+        const group = data.groups?.find((item: { id: string; name: string }) => item.id === id);
+        if (group) setGroupName(group.name);
       })
       .catch(() => {});
 
     fetch("/api/auth/me")
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.user) {
-          setCurrentUser({ id: data.user.id, role: data.user.role });
-        }
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.user) setCurrentUser({ id: data.user.id, role: data.user.role });
       })
       .catch(() => {});
 
@@ -193,95 +217,182 @@ export default function BoardPage() {
   }, [id]);
 
   function loadPosts() {
+    setLoading(true);
     fetch(`/api/posts?group_id=${id}`)
-      .then(r => r.ok ? r.json() : { posts: [] })
-      .then(data => setPosts(data.posts))
+      .then((res) => (res.ok ? res.json() : { posts: [] }))
+      .then((data) => setPosts(data.posts || []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }
 
-  async function handlePost() {
-    if (!text.trim() && !selectedFile) return;
+  async function uploadFile(file: File, uploadOriginalFile: boolean): Promise<Attachment[]> {
+    const formData = new FormData();
+    const preparedFile = await prepareUploadFile(file, uploadOriginalFile);
+    formData.append("file", preparedFile);
 
-    let attachments = [];
-    
-    if (selectedFile) {
-      setIsUploading(true);
-      const formData = new FormData();
-
-      try {
-        const uploadFile = await prepareUploadFile(selectedFile, uploadOriginal);
-        formData.append('file', uploadFile);
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData,
-        });
-        
-        if (res.ok) {
-          const data = await res.json();
-          attachments.push({
-            type: data.type,
-            url: data.viewUrl || data.url, // プレビュー用URLを優先
-            name: data.name,
-            driveId: data.driveId,
-            webViewLink: data.webViewLink,
-          });
-        } else {
-          const data = await res.json().catch(() => null);
-          alert(data?.error || 'ファイルのアップロードに失敗しました');
-          setIsUploading(false);
-          return;
-        }
-      } catch (err) {
-        console.error(err);
-        alert('ファイルのアップロードでエラーが発生しました');
-        setIsUploading(false);
-        return;
-      }
-    }
-
-    const res = await fetch("/api/posts", {
+    const res = await fetch("/api/upload", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ group_id: id, content: text.trim(), attachments }),
+      body: formData,
     });
 
-    if (res.ok) {
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error(data?.error || "ファイルのアップロードに失敗しました");
+    }
+
+    return [{
+      type: data.type,
+      url: data.viewUrl || data.url,
+      name: data.name,
+      driveId: data.driveId,
+      viewUrl: data.viewUrl,
+      webViewLink: data.webViewLink,
+    }];
+  }
+
+  async function handlePost() {
+    if (isPosting || isUploading || (!text.trim() && !selectedFile)) return;
+
+    setIsPosting(true);
+    setIsUploading(Boolean(selectedFile));
+    try {
+      const attachments = selectedFile ? await uploadFile(selectedFile, uploadOriginal) : [];
+      const res = await fetch("/api/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_id: id, content: text.trim(), attachments }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "投稿に失敗しました");
+      }
+
       const data = await res.json().catch(() => null);
       setText("");
       setSelectedFile(null);
       setUploadOriginal(false);
-      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       if (textareaRef.current) textareaRef.current.style.height = "38px";
+
       if (data?.post) {
-        setPosts(current => [data.post, ...current]);
+        setPosts((current) => [data.post, ...current]);
       } else {
         loadPosts();
       }
-    } else {
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "投稿中にエラーが発生しました");
+    } finally {
       setIsUploading(false);
+      setIsPosting(false);
     }
   }
 
-  async function handleReaction(postId: string, emoji: string) {
-    setPosts(current => current.map(post => {
-      if (post.id !== postId) return post;
-      const currentReaction = post.reactions[emoji] || { count: 0, hasOwn: false };
-      const nextCount = currentReaction.hasOwn
-        ? Math.max(0, currentReaction.count - 1)
-        : currentReaction.count + 1;
+  async function loadComments(postId: string) {
+    setCommentLoadingByPost((current) => ({ ...current, [postId]: true }));
+    try {
+      const res = await fetch(`/api/posts?group_id=${id}&parent_id=${postId}&limit=100`);
+      const data = res.ok ? await res.json() : { posts: [] };
+      const comments = (data.posts || [])
+        .filter((post: Post) => post.parent_id === postId)
+        .sort((a: Post, b: Post) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-      return {
-        ...post,
-        reactions: {
-          ...post.reactions,
-          [emoji]: {
-            count: nextCount,
-            hasOwn: !currentReaction.hasOwn,
-          },
+      setCommentsByPost((current) => ({ ...current, [postId]: comments }));
+    } finally {
+      setCommentLoadingByPost((current) => ({ ...current, [postId]: false }));
+    }
+  }
+
+  function openCommentComposer(postId: string) {
+    setActiveCommentPostId(postId);
+
+    if (!commentsByPost[postId]) {
+      loadComments(postId);
+    }
+
+    window.setTimeout(() => {
+      commentSectionRefs.current[postId]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      window.setTimeout(() => {
+        commentInputRefs.current[postId]?.focus();
+      }, 80);
+    }, 0);
+  }
+
+  async function handleComment(postId: string) {
+    const content = (commentTextByPost[postId] || "").trim();
+    const selectedCommentFile = commentFilesByPost[postId] || null;
+    const uploadOriginalComment = commentUploadOriginalByPost[postId] || false;
+    if (commentSubmittingByPost[postId] || (!content && !selectedCommentFile)) return;
+
+    setCommentSubmittingByPost((current) => ({ ...current, [postId]: true }));
+    try {
+      const attachments = selectedCommentFile
+        ? await uploadFile(selectedCommentFile, uploadOriginalComment)
+        : [];
+
+      const res = await fetch("/api/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_id: id, parent_id: postId, content, attachments }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "コメントの投稿に失敗しました");
+      }
+
+      const data = await res.json();
+      setCommentTextByPost((current) => ({ ...current, [postId]: "" }));
+      setCommentFilesByPost((current) => ({ ...current, [postId]: null }));
+      setCommentUploadOriginalByPost((current) => ({ ...current, [postId]: false }));
+      if (commentFileInputRefs.current[postId]) {
+        commentFileInputRefs.current[postId]!.value = "";
+      }
+      setActiveCommentPostId(postId);
+      setCommentsByPost((current) => ({
+        ...current,
+        [postId]: [...(current[postId] || []), data.post],
+      }));
+      setPosts((current) => current.map((post) => (
+        post.id === postId ? { ...post, commentCount: (post.commentCount || 0) + 1 } : post
+      )));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "コメントの投稿に失敗しました");
+    } finally {
+      setCommentSubmittingByPost((current) => ({ ...current, [postId]: false }));
+    }
+  }
+
+  function applyReaction(post: Post, emoji: string) {
+    const currentReaction = post.reactions[emoji] || { count: 0, hasOwn: false };
+    const nextCount = currentReaction.hasOwn
+      ? Math.max(0, currentReaction.count - 1)
+      : currentReaction.count + 1;
+
+    return {
+      ...post,
+      reactions: {
+        ...post.reactions,
+        [emoji]: {
+          count: nextCount,
+          hasOwn: !currentReaction.hasOwn,
         },
-      };
-    }));
+      },
+    };
+  }
+
+  async function handleReaction(postId: string, emoji: string) {
+    setPosts((current) => current.map((post) => (
+      post.id === postId ? applyReaction(post, emoji) : post
+    )));
+    setCommentsByPost((current) => Object.fromEntries(
+      Object.entries(current).map(([parentId, comments]) => [
+        parentId,
+        comments.map((comment) => (
+          comment.id === postId ? applyReaction(comment, emoji) : comment
+        )),
+      ])
+    ));
 
     const res = await fetch("/api/reactions", {
       method: "POST",
@@ -289,7 +400,10 @@ export default function BoardPage() {
       body: JSON.stringify({ post_id: postId, emoji }),
     });
 
-    if (!res.ok) loadPosts();
+    if (!res.ok) {
+      loadPosts();
+      if (activeCommentPostId) loadComments(activeCommentPostId);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -309,6 +423,11 @@ export default function BoardPage() {
     const file = e.target.files?.[0] || null;
     setSelectedFile(file);
     setUploadOriginal(false);
+  }
+
+  function handleCommentFileChange(postId: string, file: File | null) {
+    setCommentFilesByPost((current) => ({ ...current, [postId]: file }));
+    setCommentUploadOriginalByPost((current) => ({ ...current, [postId]: false }));
   }
 
   function canEditPost(post: Post) {
@@ -338,9 +457,19 @@ export default function BoardPage() {
     }
 
     const data = await res.json();
-    setPosts(current => current.map(item => (
-      item.id === post.id ? { ...item, content: data.post.content } : item
+    const nextContent = data.post.content;
+    setPosts((current) => current.map((item) => (
+      item.id === post.id ? { ...item, content: nextContent } : item
     )));
+    setCommentsByPost((current) => {
+      const next = { ...current };
+      for (const postId of Object.keys(next)) {
+        next[postId] = next[postId].map((item) => (
+          item.id === post.id ? { ...item, content: nextContent } : item
+        ));
+      }
+      return next;
+    });
     setEditingPostId(null);
     setEditingText("");
   }
@@ -360,12 +489,345 @@ export default function BoardPage() {
 
     const data = await res.json().catch(() => null);
     const deletedIds = new Set<string>(data?.deletedIds || [post.id]);
-    setPosts(current => current.filter(item => !deletedIds.has(item.id)));
+    setPosts((current) => current
+      .filter((item) => !deletedIds.has(item.id))
+      .map((item) => (
+        post.parent_id === item.id
+          ? { ...item, commentCount: Math.max(0, (item.commentCount || 0) - 1) }
+          : item
+      )));
+    setCommentsByPost((current) => {
+      const next = { ...current };
+      for (const postId of Object.keys(next)) {
+        next[postId] = next[postId].filter((item) => !deletedIds.has(item.id));
+      }
+      return next;
+    });
+  }
+
+  function renderPostBody(post: Post) {
+    if (editingPostId === post.id) {
+      return (
+        <div className="post-card__edit">
+          <textarea
+            className="post-card__edit-textarea"
+            value={editingText}
+            onChange={(e) => setEditingText(e.target.value)}
+            rows={3}
+            aria-label="投稿を編集"
+          />
+          <div className="post-card__edit-actions">
+            <button type="button" className="post-card__edit-btn" onClick={() => saveEdit(post)}>
+              保存
+            </button>
+            <button
+              type="button"
+              className="post-card__edit-btn post-card__edit-btn--sub"
+              onClick={() => {
+                setEditingPostId(null);
+                setEditingText("");
+              }}
+            >
+              キャンセル
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (!post.content) return null;
+
+    return (
+      <div className="post-card__body" style={{ whiteSpace: "pre-wrap" }}>
+        {post.content}
+      </div>
+    );
+  }
+
+  function renderAttachments(post: Post) {
+    if (!post.attachments?.length) return null;
+
+    return (
+      <div className="post-card__attachments">
+        {post.attachments.map((attachment, index) => {
+          if (attachment.type?.startsWith("image")) {
+            const imageUrl = getAttachmentImageUrl(attachment);
+
+            return (
+              <button
+                key={`${attachment.name}-${index}`}
+                type="button"
+                className="post-card__image-button"
+                onClick={() => setPreviewImage({ url: imageUrl, name: attachment.name })}
+                aria-label={`${attachment.name}を拡大表示`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={imageUrl} alt={attachment.name} className="post-card__image" />
+              </button>
+            );
+          }
+
+          return (
+            <a
+              key={`${attachment.name}-${index}`}
+              href={getAttachmentOpenUrl(attachment)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="post-card__file"
+            >
+              📎 {attachment.name}
+            </a>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderComment(post: Post) {
+    return (
+      <article key={post.id} className="post-comment">
+        <Avatar user={post.author} size={28} />
+        <div className="post-comment__main">
+          <div className="post-comment__meta">
+            <span>{post.author.display_name}</span>
+            <span>{formatDate(post.created_at)}</span>
+          </div>
+          {renderPostBody(post)}
+          {renderAttachments(post)}
+          <div className="post-comment__reactions" role="group" aria-label="comment reactions">
+            {REACTION_EMOJIS.map((emoji) => {
+              const data = post.reactions[emoji];
+              const count = data?.count || 0;
+              const isActive = data?.hasOwn || false;
+
+              return (
+                <button
+                  key={emoji}
+                  type="button"
+                  className={`reaction-btn${isActive ? " reaction-btn--active" : ""}`}
+                  onClick={() => handleReaction(post.id, emoji)}
+                  aria-label={`${emoji} ${count}`}
+                  aria-pressed={isActive}
+                >
+                  <span aria-hidden="true">{emoji}</span>
+                  {count > 0 && <span>{count}</span>}
+                </button>
+              );
+            })}
+          </div>
+          {(canEditPost(post) || canDeletePost(post)) && (
+            <div className="post-comment__actions">
+              {canEditPost(post) && (
+                <button type="button" onClick={() => startEditing(post)}>
+                  編集
+                </button>
+              )}
+              {canDeletePost(post) && (
+                <button type="button" onClick={() => deletePost(post)}>
+                  削除
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </article>
+    );
+  }
+
+  function renderCommentComposer(post: Post) {
+    const commentFile = commentFilesByPost[post.id] || null;
+    const uploadOriginalComment = commentUploadOriginalByPost[post.id] || false;
+    const isCommentSubmitting = commentSubmittingByPost[post.id] || false;
+    const currentCommentText = commentTextByPost[post.id] || "";
+
+    return (
+      <>
+        {commentFile && (
+          <div className="comment-selected-file">
+            <div className="comment-selected-file__main">
+              <span className="comment-selected-file__name">📎 {commentFile.name}</span>
+              <button
+                type="button"
+                className="comment-selected-file__remove"
+                onClick={() => {
+                  setCommentFilesByPost((current) => ({ ...current, [post.id]: null }));
+                  setCommentUploadOriginalByPost((current) => ({ ...current, [post.id]: false }));
+                  if (commentFileInputRefs.current[post.id]) {
+                    commentFileInputRefs.current[post.id]!.value = "";
+                  }
+                }}
+                disabled={isCommentSubmitting}
+                aria-label="添付ファイルを削除"
+              >
+                ×
+              </button>
+            </div>
+            {commentFile.type.startsWith("image/") && (
+              <div className="comment-selected-file__mode">
+                <span>{uploadOriginalComment ? "元画像のままアップロード" : "縮小してアップロード"}</span>
+                <button
+                  type="button"
+                  className="comment-selected-file__mode-btn"
+                  onClick={() => setCommentUploadOriginalByPost((current) => ({
+                    ...current,
+                    [post.id]: !uploadOriginalComment,
+                  }))}
+                  disabled={isCommentSubmitting}
+                >
+                  {uploadOriginalComment ? "縮小に戻す" : "元画像で送る"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        <form
+          className="post-comment-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleComment(post.id);
+          }}
+        >
+          <input
+            ref={(element) => {
+              commentInputRefs.current[post.id] = element;
+            }}
+            value={currentCommentText}
+            onChange={(e) => setCommentTextByPost((current) => ({ ...current, [post.id]: e.target.value }))}
+            placeholder="コメントを入力..."
+            aria-label="コメントを入力"
+            disabled={isCommentSubmitting}
+          />
+          <input
+            type="file"
+            ref={(element) => {
+              commentFileInputRefs.current[post.id] = element;
+            }}
+            onChange={(e) => handleCommentFileChange(post.id, e.target.files?.[0] || null)}
+            style={{ display: "none" }}
+            disabled={isCommentSubmitting}
+          />
+          <button
+            type="button"
+            className="comment-attach-btn"
+            onClick={() => commentFileInputRefs.current[post.id]?.click()}
+            disabled={isCommentSubmitting}
+            aria-label="コメントにファイルを添付"
+          >
+            📎
+          </button>
+          <button type="submit" disabled={isCommentSubmitting || (!currentCommentText.trim() && !commentFile)}>
+            {isCommentSubmitting ? "..." : "送信"}
+          </button>
+        </form>
+      </>
+    );
+  }
+
+  function renderPost(post: Post) {
+    const comments = commentsByPost[post.id] || [];
+    const isComposerActive = activeCommentPostId === post.id;
+    const isCommentLoading = commentLoadingByPost[post.id] || false;
+
+    return (
+      <article key={post.id} className="post-card">
+        {post.is_pinned && (
+          <div className="post-card__pinned">
+            📌 ピン留め
+          </div>
+        )}
+
+        <header className="post-card__header">
+          <Avatar user={post.author} size={40} />
+          <div className="post-card__user-info">
+            <div className="post-card__username">{post.author.display_name}</div>
+            <div className="post-card__time">{formatDate(post.created_at)}</div>
+          </div>
+          {(canEditPost(post) || canDeletePost(post)) && (
+            <div className="post-card__actions" aria-label="投稿操作">
+              {canEditPost(post) && (
+                <button type="button" className="post-card__action-btn" onClick={() => startEditing(post)}>
+                  編集
+                </button>
+              )}
+              {canDeletePost(post) && (
+                <button
+                  type="button"
+                  className="post-card__action-btn post-card__action-btn--danger"
+                  onClick={() => deletePost(post)}
+                >
+                  削除
+                </button>
+              )}
+            </div>
+          )}
+        </header>
+
+        {renderPostBody(post)}
+        {renderAttachments(post)}
+
+        <div className="post-card__reactions" role="group" aria-label="リアクション">
+          {REACTION_EMOJIS.map((emoji) => {
+            const data = post.reactions[emoji];
+            const count = data?.count || 0;
+            const isActive = data?.hasOwn || false;
+
+            return (
+              <button
+                key={emoji}
+                type="button"
+                className={`reaction-btn${isActive ? " reaction-btn--active" : ""}`}
+                onClick={() => handleReaction(post.id, emoji)}
+                aria-label={`${emoji} ${count}件`}
+                aria-pressed={isActive}
+              >
+                <span aria-hidden="true">{emoji}</span>
+                {count > 0 && <span>{count}</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        <details
+          className="post-comments-details"
+          open={isComposerActive}
+          onToggle={(event) => {
+            if (event.currentTarget.open) {
+              openCommentComposer(post.id);
+            }
+          }}
+        >
+          <summary className="post-card__footer post-comments-summary-inline">
+            <span className="post-card__footer-btn">
+              💬 {post.commentCount}件のコメント
+            </span>
+            <span className="post-card__footer-btn">
+              コメントする
+            </span>
+          </summary>
+          <section
+            className="post-comments"
+            aria-label="コメント"
+            ref={(element) => {
+              commentSectionRefs.current[post.id] = element;
+            }}
+          >
+            {isCommentLoading ? (
+              <p className="post-comments__empty">コメントを読み込み中...</p>
+            ) : comments.length > 0 ? (
+              comments.map(renderComment)
+            ) : (
+              <p className="post-comments__empty">まだコメントはありません。</p>
+            )}
+            {renderCommentComposer(post)}
+          </section>
+        </details>
+      </article>
+    );
   }
 
   return (
     <>
-      {/* Header */}
       <header className="top-header" role="banner">
         <button
           type="button"
@@ -379,185 +841,21 @@ export default function BoardPage() {
         <span className="top-header__meta">掲示板</span>
       </header>
 
-      {/* Posts */}
       <section className="post-list" aria-label="投稿一覧">
         {loading ? (
-          <p style={{ textAlign: "center", color: "var(--text-sub)", padding: "40px 0" }}>
-            読み込み中...
-          </p>
+          <p className="post-list__state">読み込み中...</p>
         ) : posts.length === 0 ? (
-          <p style={{ textAlign: "center", color: "var(--text-sub)", padding: "40px 0" }}>
-            投稿がありません。最初の投稿をしてみましょう！
-          </p>
+          <p className="post-list__state">投稿がありません。最初の投稿をしてみましょう。</p>
         ) : (
-          posts.map((post) => (
-            <article key={post.id} className="post-card">
-              {/* Pinned badge */}
-              {post.is_pinned && (
-                <div style={{ padding: "6px 14px 0", fontSize: 11, color: "var(--accent)" }}>
-                  📌 ピン留め
-                </div>
-              )}
-
-              {/* Post header */}
-              <header className="post-card__header">
-                <Avatar user={post.author} size={40} />
-                <div className="post-card__user-info">
-                  <div className="post-card__username">{post.author.display_name}</div>
-                  <div className="post-card__time">{formatDate(post.created_at)}</div>
-                </div>
-                {(canEditPost(post) || canDeletePost(post)) && (
-                  <div className="post-card__actions" aria-label="投稿操作">
-                    {canEditPost(post) && (
-                      <button
-                        type="button"
-                        className="post-card__action-btn"
-                        onClick={() => startEditing(post)}
-                      >
-                        編集
-                      </button>
-                    )}
-                    {canDeletePost(post) && (
-                      <button
-                        type="button"
-                        className="post-card__action-btn post-card__action-btn--danger"
-                        onClick={() => deletePost(post)}
-                      >
-                        削除
-                      </button>
-                    )}
-                  </div>
-                )}
-              </header>
-
-              {/* Body */}
-              {editingPostId === post.id ? (
-                <div className="post-card__edit">
-                  <textarea
-                    className="post-card__edit-textarea"
-                    value={editingText}
-                    onChange={(e) => setEditingText(e.target.value)}
-                    rows={3}
-                    aria-label="投稿編集"
-                  />
-                  <div className="post-card__edit-actions">
-                    <button
-                      type="button"
-                      className="post-card__edit-btn"
-                      onClick={() => saveEdit(post)}
-                    >
-                      保存
-                    </button>
-                    <button
-                      type="button"
-                      className="post-card__edit-btn post-card__edit-btn--sub"
-                      onClick={() => {
-                        setEditingPostId(null);
-                        setEditingText("");
-                      }}
-                    >
-                      キャンセル
-                    </button>
-                  </div>
-                </div>
-              ) : post.content && (
-                <div className="post-card__body" style={{ whiteSpace: "pre-wrap" }}>
-                  {post.content}
-                </div>
-              )}
-
-              {/* Attachments */}
-              {post.attachments?.length > 0 && (
-                <div style={{ padding: "10px 14px" }}>
-                  {post.attachments.map((att, i) => {
-                    if (att.type?.startsWith("image")) {
-                      const imageUrl = getAttachmentImageUrl(att.url);
-
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          className="post-card__image-button"
-                          onClick={() => setPreviewImage({ url: imageUrl, name: att.name })}
-                          aria-label={`${att.name}を拡大表示`}
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={imageUrl} alt={att.name} className="post-card__image" />
-                        </button>
-                      );
-                    }
-
-                    return (
-                      <a
-                        key={i}
-                        href={att.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          display: "block",
-                          padding: "10px 14px",
-                          background: "rgba(59, 130, 246, 0.1)",
-                          border: "1px solid rgba(59, 130, 246, 0.2)",
-                          borderRadius: 8,
-                          marginBottom: 8,
-                          color: "var(--accent)",
-                          fontSize: 14,
-                          fontWeight: 500,
-                          textDecoration: "none"
-                        }}
-                      >
-                        📎 {att.name}
-                      </a>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Reactions */}
-              <div className="post-card__reactions" role="group" aria-label="リアクション">
-                {REACTION_EMOJIS.map((emoji) => {
-                  const data = post.reactions[emoji];
-                  const count = data?.count || 0;
-                  const isActive = data?.hasOwn || false;
-                  return (
-                    <button
-                      key={emoji}
-                      type="button"
-                      className={`reaction-btn${isActive ? " reaction-btn--active" : ""}`}
-                      onClick={() => handleReaction(post.id, emoji)}
-                      aria-label={`${emoji} ${count}件`}
-                      aria-pressed={isActive}
-                    >
-                      <span aria-hidden="true">{emoji}</span>
-                      {count > 0 && <span>{count}</span>}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Footer */}
-              <footer className="post-card__footer">
-                <button type="button" className="post-card__footer-btn">
-                  💬 {post.commentCount}件のコメント
-                </button>
-                <button type="button" className="post-card__footer-btn">
-                  コメントする
-                </button>
-              </footer>
-            </article>
-          ))
+          posts.map(renderPost)
         )}
       </section>
 
-      {/* Post input bar */}
-      <div className="post-input-bar" style={{ flexDirection: "column", alignItems: "stretch", padding: 0 }}>
-        {/* Selected file preview */}
+      <div className="post-input-bar post-input-bar--stacked">
         {selectedFile && (
           <div className="selected-file">
             <div className="selected-file__main">
-              <span className="selected-file__name">
-                📎 {selectedFile.name}
-              </span>
+              <span className="selected-file__name">📎 {selectedFile.name}</span>
               <button
                 type="button"
                 onClick={() => {
@@ -567,6 +865,7 @@ export default function BoardPage() {
                 }}
                 className="selected-file__remove"
                 aria-label="添付ファイルを削除"
+                disabled={isPosting || isUploading}
               >
                 ×
               </button>
@@ -577,7 +876,8 @@ export default function BoardPage() {
                 <button
                   type="button"
                   className="selected-file__mode-btn"
-                  onClick={() => setUploadOriginal(current => !current)}
+                  onClick={() => setUploadOriginal((current) => !current)}
+                  disabled={isPosting || isUploading}
                 >
                   {uploadOriginal ? "縮小に戻す" : "元画像で送る"}
                 </button>
@@ -585,50 +885,25 @@ export default function BoardPage() {
             )}
           </div>
         )}
-        
-        <form
-          style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "10px 12px" }}
-          onSubmit={(e) => { e.preventDefault(); handlePost(); }}
-          aria-label="新規投稿"
-        >
+
+        <form className="post-input-bar__form" onSubmit={(e) => { e.preventDefault(); handlePost(); }} aria-label="新規投稿">
           <textarea
             ref={textareaRef}
             value={text}
             onChange={autoResize}
             onKeyDown={handleKeyDown}
-            placeholder="投稿内容を入力… (Ctrl+Enter で送信)"
+            placeholder="投稿内容を入力... (Ctrl+Enterで送信)"
             rows={1}
             aria-label="投稿テキスト"
-            disabled={isUploading}
-            style={{
-              flex: 1,
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              padding: "8px 12px",
-              color: "var(--text)",
-              resize: "none",
-              maxHeight: 120,
-              minHeight: 38,
-              outline: "none",
-              lineHeight: 1.4,
-              fontFamily: "inherit",
-              fontSize: "inherit",
-            }}
+            disabled={isPosting || isUploading}
           />
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileChange}
-            style={{ display: "none" }} 
-            disabled={isUploading}
-          />
-          <button 
-            type="button" 
-            className="icon-btn" 
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} style={{ display: "none" }} disabled={isPosting || isUploading} />
+          <button
+            type="button"
+            className="icon-btn"
             aria-label="ファイルを添付"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
+            disabled={isPosting || isUploading}
           >
             📎
           </button>
@@ -636,9 +911,9 @@ export default function BoardPage() {
             type="submit"
             className="send-btn"
             aria-label="投稿を送信"
-            disabled={(!text.trim() && !selectedFile) || isUploading}
+            disabled={isPosting || isUploading || (!text.trim() && !selectedFile)}
           >
-            {isUploading ? "..." : "↑"}
+            {isPosting || isUploading ? "..." : "↑"}
           </button>
         </form>
       </div>
