@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://v0-line-blush.vercel.app";
-const lineLoginUrl = `${siteUrl}/api/auth/line?openExternalBrowser=1`;
+const lineLoginUrl = `${siteUrl}/api/auth/line`;
 const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=96x96&margin=8&data=${encodeURIComponent(lineLoginUrl)}`;
 
 type User = {

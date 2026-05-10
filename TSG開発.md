@@ -783,3 +783,17 @@
 - **関連ファイル**:
   - `app/admin/page.tsx`
   - `app/api/admin/users/route.ts`
+### 2026-05-10 iPhone Safariログイン時のChrome遷移対策
+- **問題**:
+  - iPhoneでSafariからLINEログインした時、Safari → LINE → Chromeへ戻ることがあり、Safari/PWA前提の通知設定ができない。
+- **原因想定**:
+  - TSG側のLINEログインURLに `openExternalBrowser=1` を付けていたため、LINEアプリから戻る際にiPhoneの既定ブラウザへ開かれ、Chromeへ遷移するケースがある。
+- **修正内容**:
+  - TOPページ、ログインページ、ログイン後ユーザー写真メニュー内QRのLINEログインURLから `openExternalBrowser=1` を削除。
+  - Safariで開始したログインは、Safariへ戻りやすい導線に変更。
+- **確認**:
+  - `npm run build` 成功。
+- **関連ファイル**:
+  - `app/page.tsx`
+  - `app/login/page.tsx`
+  - `app/groups/page.tsx`
