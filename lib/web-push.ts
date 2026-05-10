@@ -48,16 +48,31 @@ export async function sendPushNotificationToAll(payload: PushPayload): Promise<v
 
 /**
  * 特定ユーザーの登録済み端末にプッシュ通知を送信
+ * postIdが指定された場合、ユーザーがその投稿（スレッド）をミュートしていれば送らない
  */
-export async function sendPushNotificationToUser(userId: string, payload: PushPayload): Promise<void> {
+export async function sendPushNotificationToUser(userId: string, payload: PushPayload, postId?: string): Promise<void> {
+  if (postId) {
+    const { data: muteRow } = await adminClient
+      .from('gw_post_notification_settings')
+      .select('muted')
+      .eq('user_id', userId)
+      .eq('post_id', postId)
+      .single()
+
+    if (muteRow && muteRow.muted) {
+      return // ミュート中
+    }
+  }
+
   await _sendToSubscriptions(userId, payload)
 }
 
 /**
  * 特定のグループのメンバーにのみプッシュ通知を送信
- * ただし、送信元ユーザー（senderId）には送らない
+ * ただし、送信元ユーザー（senderId）と通知ミュート中のユーザーには送らない
+ * postIdが指定された場合、その投稿（スレッド）を個別にミュートしているユーザーも除外する
  */
-export async function sendPushNotificationToGroup(groupId: string, senderId: string, payload: PushPayload): Promise<void> {
+export async function sendPushNotificationToGroup(groupId: string, senderId: string, payload: PushPayload, postId?: string): Promise<void> {
   // グループのメンバー取得
   const { data: members } = await adminClient
     .from('gw_group_members')
@@ -66,7 +81,39 @@ export async function sendPushNotificationToGroup(groupId: string, senderId: str
 
   if (!members || members.length === 0) return
 
-  const userIds = members.map(m => m.user_id).filter(id => id !== senderId)
+  let userIds = members.map(m => m.user_id).filter(id => id !== senderId)
+
+  if (userIds.length === 0) return
+
+  // 1. グループ単位の通知ミュート設定を確認し、muted=true のユーザーを除外
+  const { data: mutedRows } = await adminClient
+    .from('gw_notification_settings')
+    .select('user_id')
+    .eq('group_id', groupId)
+    .eq('muted', true)
+    .in('user_id', userIds)
+
+  if (mutedRows && mutedRows.length > 0) {
+    const mutedIds = new Set(mutedRows.map(r => r.user_id))
+    userIds = userIds.filter(id => !mutedIds.has(id))
+  }
+
+  if (userIds.length === 0) return
+
+  // 2. 投稿単位の通知ミュート設定を確認し、muted=true のユーザーを除外（postIdがある場合）
+  if (postId) {
+    const { data: postMutedRows } = await adminClient
+      .from('gw_post_notification_settings')
+      .select('user_id')
+      .eq('post_id', postId)
+      .eq('muted', true)
+      .in('user_id', userIds)
+
+    if (postMutedRows && postMutedRows.length > 0) {
+      const postMutedIds = new Set(postMutedRows.map(r => r.user_id))
+      userIds = userIds.filter(id => !postMutedIds.has(id))
+    }
+  }
 
   if (userIds.length === 0) return
 

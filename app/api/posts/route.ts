@@ -205,7 +205,7 @@ export async function POST(request: NextRequest) {
         title: group?.name ? `${group.name} - ${authorName}` : authorName,
         body: messageBody,
         url: `/board/${group_id}`,
-      })
+      }, post.parent_id || post.id)
     })
     .catch(e => console.error('[Push Error]', e))
 
@@ -239,7 +239,7 @@ export async function PATCH(request: NextRequest) {
 
   const { data: existing, error: fetchError } = await adminClient
     .from('gw_posts')
-    .select('id, user_id, group_id, content, attachments')
+    .select('id, user_id, group_id, content, attachments, parent_id')
     .eq('id', post_id)
     .single()
 
@@ -282,7 +282,7 @@ export async function PATCH(request: NextRequest) {
         body: '投稿が編集されました',
         url: `/board/${existing.group_id}`,
         tag: `tsg-post-edit-${post_id}`,
-      })
+      }, existing.parent_id || existing.id)
     })
     .catch(e => console.error('[Push Error]', e))
 
@@ -302,7 +302,7 @@ export async function DELETE(request: NextRequest) {
 
   const { data: post, error: fetchError } = await adminClient
     .from('gw_posts')
-    .select('id, user_id, group_id, content, attachments')
+    .select('id, user_id, group_id, content, attachments, parent_id')
     .eq('id', postId)
     .single()
 
@@ -371,7 +371,7 @@ export async function DELETE(request: NextRequest) {
         body: '投稿が削除されました',
         url: `/board/${post.group_id}`,
         tag: `tsg-post-delete-${postId}`,
-      })
+      }, post.parent_id || post.id)
     })
     .catch(e => console.error('[Push Error]', e))
 

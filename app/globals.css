@@ -1,4 +1,4 @@
-/* TS Groupware — Vanilla CSS Dark Theme */
+﻿/* TS Groupware 窶・Vanilla CSS Dark Theme */
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -72,14 +72,14 @@ img {
   border: 0;
 }
 
-/* ─── Layout shell ─── */
+/* 笏笏笏 Layout shell 笏笏笏 */
 .app-shell {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
 }
 
-/* ─── Top header ─── */
+/* 笏笏笏 Top header 笏笏笏 */
 .top-header {
   position: sticky;
   top: 0;
@@ -123,7 +123,25 @@ img {
   color: var(--text-sub);
 }
 
-/* ─── Bottom navigation ─── */
+.notif-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--text-sub);
+  font-size: 18px;
+  transition: background 0.15s, color 0.15s;
+}
+.notif-toggle-btn:hover {
+  background: var(--card-hover);
+}
+.notif-toggle-btn--muted {
+  color: #fca5a5;
+}
+
+/* 笏笏笏 Bottom navigation 笏笏笏 */
 .bottom-nav {
   position: fixed;
   bottom: 10px;
@@ -164,14 +182,14 @@ img {
   line-height: 1;
 }
 
-/* ─── Page wrapper ─── */
+/* 笏笏笏 Page wrapper 笏笏笏 */
 .page-content {
   flex: 1;
   padding-bottom: calc(var(--nav-height) + 8px);
   overflow-y: auto;
 }
 
-/* ─── Avatar ─── */
+/* 笏笏笏 Avatar 笏笏笏 */
 .avatar {
   border-radius: 50%;
   object-fit: cover;
@@ -188,7 +206,7 @@ img {
   flex-shrink: 0;
 }
 
-/* ─── Badge ─── */
+/* 笏笏笏 Badge 笏笏笏 */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -206,7 +224,7 @@ img {
   background: var(--danger);
 }
 
-/* ─── FAB ─── */
+/* 笏笏笏 FAB 笏笏笏 */
 .fab {
   position: fixed;
   bottom: calc(var(--nav-height) + 16px);
@@ -229,7 +247,7 @@ img {
   transform: scale(1.07);
 }
 
-/* ─── Cards ─── */
+/* 笏笏笏 Cards 笏笏笏 */
 .card {
   background: var(--card);
   border-radius: var(--radius);
@@ -241,14 +259,14 @@ img {
   box-shadow: var(--shadow);
 }
 
-/* ─── Divider ─── */
+/* 笏笏笏 Divider 笏笏笏 */
 .divider {
   height: 1px;
   background: var(--border);
   margin: 0;
 }
 
-/* ─── Login page ─── */
+/* 笏笏笏 Login page 笏笏笏 */
 .login-page {
   min-height: 100vh;
   display: flex;
@@ -319,7 +337,7 @@ img {
   line-height: 1.6;
 }
 
-/* ─── Top page ─── */
+/* 笏笏笏 Top page 笏笏笏 */
 .top-page {
   min-height: 100vh;
   display: flex;
@@ -380,7 +398,7 @@ img {
   }
 }
 
-/* ─── Groups page ─── */
+/* 笏笏笏 Groups page 笏笏笏 */
 .groups-header {
   display: flex;
   align-items: center;
@@ -664,7 +682,7 @@ img {
   color: var(--text-muted);
 }
 
-/* ─── Board page ─── */
+/* 笏笏笏 Board page 笏笏笏 */
 .post-list {
   display: flex;
   flex-direction: column;
@@ -1225,7 +1243,7 @@ img {
   background: var(--bg);
 }
 
-/* ─── Chat page ─── */
+/* 笏笏笏 Chat page 笏笏笏 */
 .chat-messages {
   display: flex;
   flex-direction: column;
@@ -1450,7 +1468,7 @@ img {
   line-height: 1;
 }
 
-/* ─── Settings page ─── */
+/* 笏笏笏 Settings page 笏笏笏 */
 .settings-page {
   padding: 16px 16px calc(16px + var(--nav-height));
   display: flex;
@@ -1571,7 +1589,7 @@ img {
   border-color: var(--danger);
 }
 
-/* ─── Notification badge on nav ─── */
+/* 笏笏笏 Notification badge on nav 笏笏笏 */
 .nav-icon-wrap {
   position: relative;
   display: inline-flex;
@@ -1587,7 +1605,7 @@ img {
   border: 2px solid var(--card);
 }
 
-/* ─── Utility ─── */
+/* 笏笏笏 Utility 笏笏笏 */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1600,7 +1618,7 @@ img {
   border-width: 0;
 }
 
-/* ─── Modal ─── */
+/* 笏笏笏 Modal 笏笏笏 */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -1692,7 +1710,7 @@ img {
   to { transform: translateY(0); opacity: 1; }
 }
 
-/* ─── Form elements ─── */
+/* 笏笏笏 Form elements 笏笏笏 */
 .form-group {
   margin-bottom: 16px;
 }
@@ -1801,7 +1819,7 @@ img {
   background: var(--card-hover);
 }
 
-/* ─── Responsive ─── */
+/* 笏笏笏 Responsive 笏笏笏 */
 @media (min-width: 640px) {
   .post-list,
   .chat-messages,
@@ -1834,7 +1852,7 @@ img {
   }
 }
 
-/* ─── Admin page ─── */
+/* 笏笏笏 Admin page 笏笏笏 */
 .admin-page {
   padding: 16px 16px calc(16px + var(--nav-height));
   display: flex;
@@ -2119,4 +2137,5 @@ img {
   font-weight: 700;
   margin-bottom: 10px;
 }
+
 

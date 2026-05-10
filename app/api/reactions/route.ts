@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
 
     const { data: post } = await adminClient
       .from('gw_posts')
-      .select('id, user_id, group_id, content')
+      .select('id, user_id, group_id, content, parent_id')
       .eq('id', post_id)
       .single()
 
@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
             body: `${emoji} ${post.content ? post.content.substring(0, 40) : '投稿へのリアクション'}`,
             url: `/board/${post.group_id}`,
             tag: `tsg-reaction-${post_id}-${emoji}`,
-          })
+          }, post.parent_id || post.id)
         })
         .catch(e => console.error('[Push Error]', e))
     }

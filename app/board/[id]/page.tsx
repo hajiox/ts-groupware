@@ -189,6 +189,10 @@ export default function BoardPage() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
+  const [notifMuted, setNotifMuted] = useState(false);
+  const [notifToggling, setNotifToggling] = useState(false);
+  const [postMutedSettings, setPostMutedSettings] = useState<Record<string, boolean>>({});
+  const [postNotifToggling, setPostNotifToggling] = useState<Record<string, boolean>>({});
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -212,9 +216,25 @@ export default function BoardPage() {
       })
       .catch(() => {});
 
+    fetch(`/api/notifications/settings?group_id=${id}`)
+      .then((res) => (res.ok ? res.json() : { muted: false }))
+      .then((data) => setNotifMuted(!!data.muted))
+      .catch(() => {});
+
     loadPosts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    if (posts.length === 0) return;
+    const postIds = posts.map(p => p.id).join(',');
+    fetch(`/api/notifications/posts?post_ids=${postIds}`)
+      .then((res) => (res.ok ? res.json() : { settings: {} }))
+      .then((data) => {
+        setPostMutedSettings(prev => ({ ...prev, ...data.settings }));
+      })
+      .catch(() => {});
+  }, [posts]);
 
   function loadPosts() {
     setLoading(true);
@@ -743,24 +763,31 @@ export default function BoardPage() {
             <div className="post-card__username">{post.author.display_name}</div>
             <div className="post-card__time">{formatDate(post.created_at)}</div>
           </div>
-          {(canEditPost(post) || canDeletePost(post)) && (
-            <div className="post-card__actions" aria-label="投稿操作">
-              {canEditPost(post) && (
-                <button type="button" className="post-card__action-btn" onClick={() => startEditing(post)}>
-                  編集
-                </button>
-              )}
-              {canDeletePost(post) && (
-                <button
-                  type="button"
-                  className="post-card__action-btn post-card__action-btn--danger"
-                  onClick={() => deletePost(post)}
-                >
-                  削除
-                </button>
-              )}
-            </div>
-          )}
+          <div className="post-card__actions" aria-label="投稿操作">
+            <button
+              type="button"
+              className="post-card__action-btn"
+              onClick={() => togglePostMute(post.id)}
+              disabled={postNotifToggling[post.id]}
+              title={postMutedSettings[post.id] ? "この投稿の通知はOFFです — タップでON" : "この投稿の通知はONです — タップでOFF"}
+            >
+              {postMutedSettings[post.id] ? "🔕" : "🔔"}
+            </button>
+            {canEditPost(post) && (
+              <button type="button" className="post-card__action-btn" onClick={() => startEditing(post)}>
+                編集
+              </button>
+            )}
+            {canDeletePost(post) && (
+              <button
+                type="button"
+                className="post-card__action-btn post-card__action-btn--danger"
+                onClick={() => deletePost(post)}
+              >
+                削除
+              </button>
+            )}
+          </div>
         </header>
 
         {renderPostBody(post)}
@@ -826,6 +853,44 @@ export default function BoardPage() {
     );
   }
 
+  async function toggleNotifMute() {
+    const next = !notifMuted;
+    setNotifToggling(true);
+    try {
+      const res = await fetch("/api/notifications/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_id: id, muted: next }),
+      });
+      if (res.ok) {
+        setNotifMuted(next);
+      }
+    } catch (e) {
+      console.error("通知設定の変更に失敗", e);
+    } finally {
+      setNotifToggling(false);
+    }
+  }
+
+  async function togglePostMute(postId: string) {
+    const next = !postMutedSettings[postId];
+    setPostNotifToggling((prev) => ({ ...prev, [postId]: true }));
+    try {
+      const res = await fetch("/api/notifications/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ post_id: postId, muted: next }),
+      });
+      if (res.ok) {
+        setPostMutedSettings((prev) => ({ ...prev, [postId]: next }));
+      }
+    } catch (e) {
+      console.error("投稿通知設定の変更に失敗", e);
+    } finally {
+      setPostNotifToggling((prev) => ({ ...prev, [postId]: false }));
+    }
+  }
+
   return (
     <>
       <header className="top-header" role="banner">
@@ -838,7 +903,16 @@ export default function BoardPage() {
           ‹
         </button>
         <h1 className="top-header__title">{groupName}</h1>
-        <span className="top-header__meta">掲示板</span>
+        <button
+          type="button"
+          className={`notif-toggle-btn${notifMuted ? " notif-toggle-btn--muted" : ""}`}
+          onClick={toggleNotifMute}
+          disabled={notifToggling}
+          aria-label={notifMuted ? "通知をONにする" : "通知をOFFにする"}
+          title={notifMuted ? "通知OFF中 — タップでON" : "通知ON中 — タップでOFF"}
+        >
+          {notifMuted ? "🔕" : "🔔"}
+        </button>
       </header>
 
       <section className="post-list" aria-label="投稿一覧">

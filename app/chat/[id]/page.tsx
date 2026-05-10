@@ -80,6 +80,8 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [notifMuted, setNotifMuted] = useState(false);
+  const [notifToggling, setNotifToggling] = useState(false);
 
   const latestMessageAt = useMemo(() => {
     return messages.length > 0 ? messages[messages.length - 1].created_at : "";
@@ -134,10 +136,15 @@ export default function ChatPage() {
         if (active) setLoading(false);
       });
 
+    fetch(`/api/notifications/settings?group_id=${id}`)
+      .then((res) => (res.ok ? res.json() : { muted: false }))
+      .then((data) => setNotifMuted(!!data.muted))
+      .catch(() => {});
+
     return () => {
       active = false;
     };
-  }, [loadChat]);
+  }, [loadChat, id]);
 
   useEffect(() => {
     if (!latestMessageAt) return;
@@ -212,6 +219,25 @@ export default function ChatPage() {
     }
   }
 
+  async function toggleNotifMute() {
+    const next = !notifMuted;
+    setNotifToggling(true);
+    try {
+      const res = await fetch("/api/notifications/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_id: id, muted: next }),
+      });
+      if (res.ok) {
+        setNotifMuted(next);
+      }
+    } catch (e) {
+      console.error("通知設定の変更に失敗", e);
+    } finally {
+      setNotifToggling(false);
+    }
+  }
+
   return (
     <>
       <header className="top-header" role="banner">
@@ -227,7 +253,16 @@ export default function ChatPage() {
           <span aria-hidden="true">{group?.icon || "💬"}</span>
           {group?.name || "チャット"}
         </h1>
-        <span className="top-header__meta">{members.length}名</span>
+        <button
+          type="button"
+          className={`notif-toggle-btn${notifMuted ? " notif-toggle-btn--muted" : ""}`}
+          onClick={toggleNotifMute}
+          disabled={notifToggling}
+          aria-label={notifMuted ? "通知をONにする" : "通知をOFFにする"}
+          title={notifMuted ? "通知OFF中 — タップでON" : "通知ON中 — タップでOFF"}
+        >
+          {notifMuted ? "🔕" : "🔔"}
+        </button>
       </header>
 
       <section className="chat-messages" aria-label="チャットメッセージ" role="log" aria-live="polite">
