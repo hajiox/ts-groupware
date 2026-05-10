@@ -2139,3 +2139,46 @@ img {
 }
 
 
+
+
+/* --- Settings Actions --- */
+.settings-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+.settings-action-btn {
+  background: var(--bg-hover);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.settings-action-btn:hover:not(:disabled) {
+  background: var(--card-hover);
+  border-color: var(--text-sub);
+}
+.settings-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+
+/* --- Settings Copy Box --- */
+.settings-copy-box {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.settings-copy-box input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-main);
+  color: var(--text-main);
+}
