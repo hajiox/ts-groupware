@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (post && post.user_id !== user.id) {
-      import('@/lib/web-push')
+      await import('@/lib/web-push')
         .then(({ sendPushNotificationToUser }) => {
           const authorName = user.display_name || 'メンバー'
           return sendPushNotificationToUser(post.user_id, {

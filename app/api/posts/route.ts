@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
       .eq('id', group_id),
   ])
 
-  import('@/lib/web-push')
+  await import('@/lib/web-push')
     .then(({ sendPushNotificationToGroup }) => {
       const authorName = user.display_name || 'メンバー'
       const messageBody = content?.trim() ? content.trim().substring(0, 50) : 'ファイルを送信しました'
@@ -269,7 +269,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: error?.message || '投稿の更新に失敗しました' }, { status: 500 })
   }
 
-  adminClient
+  await adminClient
     .from('gw_groups')
     .select('name')
     .eq('id', existing.group_id)
@@ -358,7 +358,7 @@ export async function DELETE(request: NextRequest) {
     .eq('id', post.group_id)
     .then(undefined, e => console.error('[Group timestamp update error]', e))
 
-  adminClient
+  await adminClient
     .from('gw_groups')
     .select('name')
     .eq('id', post.group_id)

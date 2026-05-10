@@ -200,7 +200,7 @@ export async function POST(request: NextRequest) {
     .update({ updated_at: new Date().toISOString() })
     .eq('id', groupId)
 
-  import('@/lib/web-push')
+  await import('@/lib/web-push')
     .then(({ sendPushNotificationToGroup }) => {
       const bodyText = content || (attachments.length > 0 ? 'ファイルを送信しました' : '新しいメッセージ')
       return sendPushNotificationToGroup(groupId, user.id, {
