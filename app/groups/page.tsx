@@ -217,6 +217,16 @@ export default function GroupsPage() {
           </button>
           {showUserMenu && (
             <div className="user-menu" role="menu">
+              <div className="user-menu__qr" aria-label="LINEログインQR">
+                <div className="user-menu__qr-text">
+                  <span>LINEログインQR</span>
+                  <small>別端末で開く</small>
+                </div>
+                <a href={lineLoginUrl} className="user-menu__qr-code" aria-label="LINEログインへ進むQR">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={qrUrl} alt="LINEログインへ進むQRコード" width={72} height={72} />
+                </a>
+              </div>
               <button
                 type="button"
                 className="user-menu__item user-menu__item--danger"
@@ -238,17 +248,6 @@ export default function GroupsPage() {
         aria-label="グループ一覧"
         style={{ paddingTop: 16 }}
       >
-        <div className="home-line-qr" aria-label="LINEログインQR">
-          <div className="home-line-qr__text">
-            <span className="home-line-qr__label">LINEログインQR</span>
-            <span className="home-line-qr__sub">別端末で開く時に使えます</span>
-          </div>
-          <a href={lineLoginUrl} className="home-line-qr__code" aria-label="LINEログインへ進むQR">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={qrUrl} alt="LINEログインへ進むQRコード" width={76} height={76} />
-          </a>
-        </div>
-
         {loading ? (
           <p style={{ textAlign: "center", color: "var(--text-sub)", padding: "40px 0" }}>
             読み込み中...

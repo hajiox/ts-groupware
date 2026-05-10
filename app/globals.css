@@ -417,12 +417,54 @@ img {
   top: calc(100% + 8px);
   right: 0;
   z-index: 150;
-  min-width: 144px;
+  min-width: 188px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
   padding: 6px;
+}
+.user-menu__qr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+  padding: 4px 4px 10px;
+}
+.user-menu__qr-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.user-menu__qr-text span {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.user-menu__qr-text small {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+.user-menu__qr-code {
+  flex: 0 0 auto;
+  display: inline-flex;
+  border-radius: 6px;
+  background: #fff;
+  padding: 5px;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.user-menu__qr-code:hover {
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.24);
+  transform: translateY(-1px);
+}
+.user-menu__qr-code img {
+  width: 72px;
+  height: 72px;
 }
 .user-menu__item {
   width: 100%;
@@ -448,51 +490,6 @@ img {
   flex-direction: column;
   gap: 10px;
   padding: 16px;
-}
-
-.home-line-qr {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  align-self: stretch;
-  max-width: 560px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: rgba(30, 41, 59, 0.48);
-  padding: 10px 12px;
-}
-.home-line-qr__text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-.home-line-qr__label {
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 700;
-}
-.home-line-qr__sub {
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.35;
-}
-.home-line-qr__code {
-  flex: 0 0 auto;
-  display: inline-flex;
-  border-radius: 6px;
-  background: #fff;
-  padding: 6px;
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-.home-line-qr__code:hover {
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.24);
-  transform: translateY(-1px);
-}
-.home-line-qr__code img {
-  width: 76px;
-  height: 76px;
 }
 
 .groups-actions {
