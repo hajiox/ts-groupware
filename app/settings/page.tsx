@@ -87,9 +87,7 @@ export default function SettingsPage() {
     try {
       if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
         setPushEnabled(false);
-        setPushMessage("このブラウザではWeb Pushに必要な機能が見つかりません。通知設定ガイドを確認してください。");
-        setGuideDevice(detectDevice());
-        setGuideOpen(true);
+        setPushMessage("このブラウザではWeb Pushに必要な機能が見つかりません。別ブラウザで開き直すか、ブラウザの通知許可設定を確認してください。");
         setLoadingPush(false);
         return;
       }
