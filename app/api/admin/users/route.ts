@@ -6,7 +6,7 @@ import { getUserSession } from '@/lib/session'
  * 管理者用 API
  *
  * GET  /api/admin/users — 全ユーザー一覧
- * PUT  /api/admin/users — ユーザーのロール・承認状態変更
+ * PUT  /api/admin/users — ユーザーの表示名・ロール・承認状態変更
  * DELETE /api/admin/users — ユーザー削除
  */
 
@@ -38,14 +38,14 @@ export async function PUT(request: NextRequest) {
   if (error) return NextResponse.json({ error }, { status })
 
   const body = await request.json()
-  const { user_id, role, status: userStatus } = body
+  const { user_id, role, status: userStatus, display_name } = body
 
   if (!user_id) {
     return NextResponse.json({ error: 'user_id が必要です' }, { status: 400 })
   }
 
-  if (!role && !userStatus) {
-    return NextResponse.json({ error: 'role または status が必要です' }, { status: 400 })
+  if (!role && !userStatus && display_name === undefined) {
+    return NextResponse.json({ error: 'display_name, role または status が必要です' }, { status: 400 })
   }
 
   if (role && !['admin', 'member'].includes(role)) {
@@ -54,6 +54,16 @@ export async function PUT(request: NextRequest) {
 
   if (userStatus && !['pending', 'approved', 'suspended'].includes(userStatus)) {
     return NextResponse.json({ error: 'status は pending, approved, suspended のいずれかです' }, { status: 400 })
+  }
+
+  if (display_name !== undefined) {
+    const normalizedName = String(display_name).trim()
+    if (!normalizedName) {
+      return NextResponse.json({ error: '表示名を入力してください' }, { status: 400 })
+    }
+    if (normalizedName.length > 80) {
+      return NextResponse.json({ error: '表示名は80文字以内で入力してください' }, { status: 400 })
+    }
   }
 
   if (user_id === user!.id && userStatus && userStatus !== 'approved') {
@@ -67,6 +77,7 @@ export async function PUT(request: NextRequest) {
   const updates: Record<string, string> = {
     updated_at: new Date().toISOString(),
   }
+  if (display_name !== undefined) updates.display_name = String(display_name).trim()
   if (role) updates.role = role
   if (userStatus) updates.status = userStatus
 

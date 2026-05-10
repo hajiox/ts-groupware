@@ -45,13 +45,18 @@ function Avatar({ user, size = 36 }: { user: { display_name: string; picture_url
 // ─── ユーザー管理タブ ───
 function UsersTab() {
   const [users, setUsers] = useState<User[]>([]);
+  const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   function loadUsers() {
     setLoading(true);
     fetch("/api/admin/users")
       .then(r => r.ok ? r.json() : { users: [] })
-      .then(d => setUsers(d.users))
+      .then(d => {
+        const nextUsers = d.users || [];
+        setUsers(nextUsers);
+        setNameDrafts(Object.fromEntries(nextUsers.map((nextUser: User) => [nextUser.id, nextUser.display_name])));
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }
@@ -81,6 +86,26 @@ function UsersTab() {
     }
   }
 
+  async function handleDisplayNameSave(user: User) {
+    const nextName = (nameDrafts[user.id] || "").trim();
+    if (!nextName) {
+      alert("表示名を入力してください");
+      return;
+    }
+    if (nextName === user.display_name) return;
+
+    const res = await fetch("/api/admin/users", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: user.id, display_name: nextName }),
+    });
+    if (res.ok) loadUsers();
+    else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "表示名の変更に失敗しました");
+    }
+  }
+
   async function handleDelete(user: User) {
     if (!confirm(`${user.display_name} を削除しますか？この操作は取り消せません。`)) return;
     const res = await fetch("/api/admin/users", {
@@ -104,6 +129,27 @@ function UsersTab() {
           <Avatar user={user} size={40} />
           <div className="admin-item__info">
             <div className="admin-item__name">{user.display_name}</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 8, maxWidth: 360 }}>
+              <input
+                type="text"
+                className="form-input"
+                value={nameDrafts[user.id] ?? user.display_name}
+                onChange={e => setNameDrafts(current => ({ ...current, [user.id]: e.target.value }))}
+                onKeyDown={e => {
+                  if (e.key === "Enter") handleDisplayNameSave(user);
+                }}
+                aria-label={`${user.display_name} のTSG内表示名`}
+                style={{ height: 34, padding: "7px 10px", fontSize: 13 }}
+              />
+              <button
+                type="button"
+                className="admin-btn-outline"
+                onClick={() => handleDisplayNameSave(user)}
+                disabled={(nameDrafts[user.id] ?? user.display_name).trim() === user.display_name}
+              >
+                名前保存
+              </button>
+            </div>
             <div className="admin-item__sub">
               {new Date(user.created_at).toLocaleDateString("ja-JP")} 登録
               <span className={`admin-status admin-status--${user.status || "approved"}`}>

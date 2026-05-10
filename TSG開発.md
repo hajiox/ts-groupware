@@ -767,3 +767,19 @@
 - **関連ファイル**:
   - `app/groups/page.tsx`
   - `app/globals.css`
+### 2026-05-10 TSG内表示名の管理者変更機能
+- **要望**:
+  - LINEログイン時の表示名があだ名や判別しにくい名前の場合、社内で誰か分からない。
+  - システム内で分かりやすい名前へ変換できるようにする。
+- **実装内容**:
+  - 管理者画面のユーザー一覧に、TSG内表示名の入力欄と「名前保存」ボタンを追加。
+  - `/api/admin/users` の `PUT` で `display_name` 更新を受け付けるようにした。
+  - 空の表示名、80文字超の表示名はAPI側で拒否。
+  - 変更対象は `gw_users.display_name` のみで、LINEアカウント自体の表示名は変更しない。
+- **反映範囲**:
+  - 掲示板、Chat、メンバー一覧など、`gw_users.display_name` を参照する画面に反映される。
+- **確認**:
+  - `npm run build` 成功。
+- **関連ファイル**:
+  - `app/admin/page.tsx`
+  - `app/api/admin/users/route.ts`
