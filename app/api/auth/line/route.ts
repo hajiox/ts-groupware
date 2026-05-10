@@ -29,6 +29,8 @@ export async function GET(request: NextRequest) {
   // CSRF 防止用の署名付き state。iOS SafariとLINEアプリの往復でCookieが失われても検証できる。
   const state = createLineOAuthState(channelSecret)
   const flowId = getAuthFlowId(state)
+  const ua = request.headers.get('user-agent') || ''
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (ua.includes('Macintosh') && ua.includes('Mobile'))
 
   const params = new URLSearchParams({
     response_type: 'code',
@@ -37,13 +39,18 @@ export async function GET(request: NextRequest) {
     state,
     scope: 'profile openid',
   })
+  if (isIOS) {
+    // iOSでLINEアプリ自動ログインに入ると、戻り先が既定ブラウザへ切り替わり
+    // Safari/Chrome間で通知購読が分断されることがあるため、ブラウザ内SSOを優先する。
+    params.set('disable_auto_login', 'true')
+  }
 
   const authUrl = `https://access.line.me/oauth2/v2.1/authorize?${params.toString()}`
 
   await logAuthEvent({
     event: 'line_start_redirect',
     flowId,
-    detail: `redirect_uri=${redirectUri}`,
+    detail: `redirect_uri=${redirectUri};ios=${isIOS};disable_auto_login=${isIOS}`,
     request,
   })
 

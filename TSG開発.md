@@ -821,3 +821,16 @@
   - `npm run build` 成功。
 - **関連ファイル**:
   - `app/settings/page.tsx`
+### 2026-05-10 iOS LINE自動ログインによるブラウザ切替対策
+- **問題**:
+  - SafariでTSGを開いてLINEログインすると、LINEアプリ自動ログインを経由してChromeへ戻ることがあり、通知設定ブラウザが分断される。
+- **調査結果**:
+  - LINE Loginには `disable_auto_login` パラメータがあり、自動ログインを無効化してブラウザ内SSO/ログイン画面を優先できる。
+- **修正内容**:
+  - `/api/auth/line` でiOS User-Agentを検出した場合のみ、LINE認可URLへ `disable_auto_login=true` を付与。
+  - PC/AndroidのLINEログイン導線は従来通り。
+  - 認証ログに `ios` と `disable_auto_login` の状態を記録。
+- **確認**:
+  - `npm run build` 成功。
+- **関連ファイル**:
+  - `app/api/auth/line/route.ts`
