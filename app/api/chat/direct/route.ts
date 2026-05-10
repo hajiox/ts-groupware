@@ -16,14 +16,24 @@ export async function GET() {
     .from('gw_users')
     .select('id, display_name, picture_url, role')
     .eq('status', 'approved')
-    .neq('id', user.id)
     .order('display_name', { ascending: true })
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ users: users || [] })
+  const sortedUsers = (users || []).sort((a, b) => {
+    if (a.id === user.id) return -1
+    if (b.id === user.id) return 1
+    return a.display_name.localeCompare(b.display_name, 'ja')
+  })
+
+  return NextResponse.json({
+    users: sortedUsers.map(member => ({
+      ...member,
+      isSelf: member.id === user.id,
+    })),
+  })
 }
 
 export async function POST(request: NextRequest) {
@@ -38,10 +48,6 @@ export async function POST(request: NextRequest) {
   if (!targetUserId) {
     return NextResponse.json({ error: 'target_user_id が必要です' }, { status: 400 })
   }
-  if (targetUserId === user.id) {
-    return NextResponse.json({ error: '自分自身との個人Chatは作成できません' }, { status: 400 })
-  }
-
   const { data: targetUser, error: targetError } = await adminClient
     .from('gw_users')
     .select('id, display_name, picture_url, status')
@@ -62,12 +68,16 @@ export async function POST(request: NextRequest) {
     .maybeSingle()
 
   if (existing) {
-    await adminClient
-      .from('gw_group_members')
-      .upsert([
+    const members = targetUser.id === user.id
+      ? [{ group_id: existing.id, user_id: user.id, role: 'member' }]
+      : [
         { group_id: existing.id, user_id: user.id, role: 'member' },
         { group_id: existing.id, user_id: targetUser.id, role: 'member' },
-      ], { onConflict: 'group_id,user_id' })
+      ]
+
+    await adminClient
+      .from('gw_group_members')
+      .upsert(members, { onConflict: 'group_id,user_id' })
 
     return NextResponse.json({ group: existing, existed: true })
   }
@@ -75,7 +85,9 @@ export async function POST(request: NextRequest) {
   const { data: group, error: groupError } = await adminClient
     .from('gw_groups')
     .insert({
-      name: `${user.display_name} / ${targetUser.display_name}`,
+      name: targetUser.id === user.id
+        ? `${user.display_name} のメモ`
+        : `${user.display_name} / ${targetUser.display_name}`,
       description: key,
       type: 'chat',
       icon: '💬',
@@ -90,10 +102,12 @@ export async function POST(request: NextRequest) {
 
   const { error: memberError } = await adminClient
     .from('gw_group_members')
-    .insert([
-      { group_id: group.id, user_id: user.id, role: 'member' },
-      { group_id: group.id, user_id: targetUser.id, role: 'member' },
-    ])
+    .insert(targetUser.id === user.id
+      ? [{ group_id: group.id, user_id: user.id, role: 'member' }]
+      : [
+        { group_id: group.id, user_id: user.id, role: 'member' },
+        { group_id: group.id, user_id: targetUser.id, role: 'member' },
+      ])
 
   if (memberError) {
     await adminClient.from('gw_groups').delete().eq('id', group.id)

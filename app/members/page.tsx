@@ -7,6 +7,7 @@ type Member = {
   display_name: string;
   picture_url: string | null;
   role: string;
+  isSelf?: boolean;
 };
 
 function AvatarPlaceholder({
@@ -84,7 +85,7 @@ export default function MembersPage() {
                 className="member-directory__item"
                 onClick={() => startDirectChat(member.id)}
                 disabled={Boolean(creatingChatUserId)}
-                title={`${member.display_name} とChat`}
+                title={member.isSelf ? "自分用メモを開く" : `${member.display_name} とChat`}
               >
                 {member.picture_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -92,9 +93,9 @@ export default function MembersPage() {
                 ) : (
                   <AvatarPlaceholder initials={member.display_name.charAt(0)} />
                 )}
-                <span>{member.display_name}</span>
+                <span>{member.isSelf ? `${member.display_name}（自分用メモ）` : member.display_name}</span>
                 <span className="member-directory__chat">
-                  {creatingChatUserId === member.id ? "開始中..." : "Chat"}
+                  {creatingChatUserId === member.id ? "開始中..." : member.isSelf ? "メモ" : "Chat"}
                 </span>
               </button>
             ))}

@@ -634,6 +634,19 @@
   - `npm.cmd run build` 成功。
 - **関連ファイル**:
   - `app/settings/page.tsx`
+
+### 2026-05-10 自分用メモChat対応
+- **要望**: Chatを自分自身とも開始できるようにし、メモ代わりに使えるようにする。
+- **修正**:
+  - `/api/chat/direct` の自分自身への個人Chat作成禁止を撤廃。
+  - メンバー一覧APIで自分自身も返し、一覧の先頭に表示。
+  - 自分自身を選んだ場合は1人だけがメンバーの `direct:{userId}:{userId}` Chatを作成/再利用。
+  - `/members` では自分自身を「自分用メモ」と表示し、ボタン文言も「メモ」にした。
+- **確認**:
+  - `npm.cmd run build` 成功。
+- **関連ファイル**:
+  - `app/api/chat/direct/route.ts`
+  - `app/members/page.tsx`
 ### 2026-05-09 TSG専用LINEログインチャネル基本設定確認
 - **確認内容**:
   - LINE Developers Console上で、プロバイダー「内職管理システム」配下にTSG専用のLINEログインチャネル「TS Groupware」が作成されていることを確認。
@@ -715,4 +728,18 @@
 - **関連ファイル**:
   - `app/page.tsx`
   - `app/login/page.tsx`
+  - `app/globals.css`
+
+### 2026-05-10 ログイン後ホームへLINEログインQRを追加
+- **要望**:
+  - ログイン後のホーム画面にも、小さくLINEログインへ飛ぶQRを設置する。
+- **修正内容**:
+  - ログイン後ホームであるグループ一覧画面の上部に、小さなLINEログインQRカードを追加。
+  - QRは76px表示にして、グループ一覧の邪魔にならないサイズにした。
+  - QRクリック時もLINEログイン開始URLへ遷移する。
+- **確認**:
+  - `npm run build` 成功。
+  - ローカルでは未ログイン状態のため `/groups` が `/login` に戻され、実セッション付きの画面確認は本番ログイン後確認が必要。
+- **関連ファイル**:
+  - `app/groups/page.tsx`
   - `app/globals.css`
