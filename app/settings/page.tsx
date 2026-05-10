@@ -42,6 +42,8 @@ export default function SettingsPage() {
   const [pushMessage, setPushMessage] = useState("");
   const [guideOpen, setGuideOpen] = useState(false);
   const [guideDevice, setGuideDevice] = useState<DeviceType>("pc");
+  const [deviceLoginUrl, setDeviceLoginUrl] = useState("");
+  const [creatingDeviceLoginUrl, setCreatingDeviceLoginUrl] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -152,6 +154,25 @@ export default function SettingsPage() {
     }
   }
 
+  async function createNotificationLoginUrl() {
+    setCreatingDeviceLoginUrl(true);
+    try {
+      const res = await fetch("/api/auth/device-login", { method: "POST" });
+      const data = res.ok ? await res.json() : null;
+      if (!data?.url) {
+        setPushMessage("通知設定用リンクの作成に失敗しました。もう一度ログインしてから試してください。");
+        return;
+      }
+      setDeviceLoginUrl(data.url);
+      setPushMessage("通知設定用リンクを作成しました。Safariまたはホーム画面アプリで開いて通知をONにしてください。");
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(data.url).catch(() => {});
+      }
+    } finally {
+      setCreatingDeviceLoginUrl(false);
+    }
+  }
+
   function handleLogout() {
     window.location.href = "/api/auth/logout";
   }
@@ -228,7 +249,27 @@ export default function SettingsPage() {
               >
                 テスト通知
               </button>
+              <button
+                type="button"
+                className="settings-action-btn"
+                disabled={creatingDeviceLoginUrl}
+                onClick={createNotificationLoginUrl}
+              >
+                通知設定用リンク
+              </button>
             </div>
+            {deviceLoginUrl && (
+              <div className="settings-copy-box">
+                <input value={deviceLoginUrl} readOnly aria-label="通知設定用ログインリンク" />
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  onClick={() => navigator.clipboard?.writeText(deviceLoginUrl)}
+                >
+                  コピー
+                </button>
+              </div>
+            )}
           </div>
         </section>
 
@@ -296,6 +337,22 @@ export default function SettingsPage() {
             display: flex;
             gap: 8px;
             flex-wrap: wrap;
+          }
+          .settings-copy-box {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            width: 100%;
+          }
+          .settings-copy-box input {
+            min-width: 0;
+            flex: 1;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--bg);
+            color: var(--text-sub);
+            font-size: 12px;
+            padding: 8px 10px;
           }
           .settings-action-btn {
             border: 1px solid var(--border);

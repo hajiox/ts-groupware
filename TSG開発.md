@@ -834,3 +834,18 @@
   - `npm run build` 成功。
 - **関連ファイル**:
   - `app/api/auth/line/route.ts`
+### 2026-05-10 通知設定用の短時間ログインリンクを追加
+- **背景**:
+  - SafariでLINEログインしてもLINEアプリ経由でChromeへ戻るケースがあり、LINE OAuthだけでは通知設定ブラウザを固定できない。
+  - 内職管理システムでは、LINE OAuthを毎回通さずトークン付きURLで既存ユーザーへセッションを発行する導線がある。
+- **実装内容**:
+  - ログイン済みユーザーが `/api/auth/device-login` のPOSTで5分有効の通知設定用ログインリンクを発行できるようにした。
+  - 発行リンクをSafariまたはホーム画面アプリで開くと、LINEを通さず同じTSGユーザーとして `/settings?deviceLogin=1` にログインする。
+  - 設定画面に「通知設定用リンク」ボタンとコピー欄を追加。
+  - トークンはHMAC署名し、ユーザーID、発行時刻、nonceを含める。
+- **確認**:
+  - `npm run build` 成功。
+- **関連ファイル**:
+  - `lib/device-login-token.ts`
+  - `app/api/auth/device-login/route.ts`
+  - `app/settings/page.tsx`
