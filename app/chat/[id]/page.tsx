@@ -212,13 +212,6 @@ export default function ChatPage() {
     }
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      handleSend();
-    }
-  }
-
   return (
     <>
       <header className="top-header" role="banner">
@@ -311,7 +304,6 @@ export default function ChatPage() {
         className="chat-input-bar"
         onSubmit={(e) => {
           e.preventDefault();
-          handleSend();
         }}
         aria-label="メッセージ入力"
       >
@@ -350,17 +342,17 @@ export default function ChatPage() {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
           placeholder="メッセージを入力..."
           aria-label="メッセージ"
           autoComplete="off"
           disabled={sending}
         />
         <button
-          type="submit"
+          type="button"
           className="send-btn"
           aria-label="送信"
           disabled={sending || (!input.trim() && !selectedFile)}
+          onClick={handleSend}
         >
           {sending ? "…" : "↑"}
         </button>

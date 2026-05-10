@@ -647,6 +647,16 @@
 - **関連ファイル**:
   - `app/api/chat/direct/route.ts`
   - `app/members/page.tsx`
+
+### 2026-05-10 ChatのEnter送信停止
+- **要望**: PCでEnterキーにより誤送信される可能性があるため、Chat投稿は↑ボタン押下のみにする。
+- **修正**:
+  - `/chat/[id]` の入力欄からEnter送信処理を削除。
+  - フォームsubmitでは送信せず、↑ボタンのクリック時のみ `handleSend()` を実行。
+- **確認**:
+  - `npm.cmd run build` 成功。
+- **関連ファイル**:
+  - `app/chat/[id]/page.tsx`
 ### 2026-05-09 TSG専用LINEログインチャネル基本設定確認
 - **確認内容**:
   - LINE Developers Console上で、プロバイダー「内職管理システム」配下にTSG専用のLINEログインチャネル「TS Groupware」が作成されていることを確認。
