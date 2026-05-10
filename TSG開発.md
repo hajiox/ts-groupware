@@ -797,3 +797,16 @@
   - `app/page.tsx`
   - `app/login/page.tsx`
   - `app/groups/page.tsx`
+### 2026-05-10 通知設定のiPhone事前ブロック解除とガイド修正
+- **問題**:
+  - iPhoneでChrome通知が動く実績があるにもかかわらず、設定画面がiPhoneかつホーム画面追加でない場合に通知ON操作を先に止めていた。
+  - 通知設定ガイドがSafari/PWA前提に寄りすぎていた。
+- **修正内容**:
+  - iPhone/ホーム画面追加の事前ブロックを削除。
+  - 端末名ではなく、ブラウザの `Notification` / `serviceWorker` / `PushManager` API有無を見て判定するようにした。
+  - APIがある場合は通知ONボタンで実際に購読処理を試せる。
+  - iPhoneガイドを、ChromeまたはSafariで「ログインしたブラウザと通知許可するブラウザを揃える」説明へ変更。
+- **確認**:
+  - `npm run build` 成功。
+- **関連ファイル**:
+  - `app/settings/page.tsx`

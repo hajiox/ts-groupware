@@ -35,12 +35,6 @@ function detectDevice(): DeviceType {
   return "pc";
 }
 
-function isIOSStandalone() {
-  if (typeof window === "undefined") return false;
-  return (window.navigator as unknown as { standalone?: boolean }).standalone === true
-    || window.matchMedia("(display-mode: standalone)").matches;
-}
-
 export default function SettingsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
@@ -60,15 +54,8 @@ export default function SettingsPage() {
   }, []);
 
   async function checkPushStatus() {
-    const device = detectDevice();
-    if (device === "iphone" && !isIOSStandalone()) {
-      setPushMessage("iPhoneはホーム画面に追加したTSGアプリから通知を有効にしてください");
-      setLoadingPush(false);
-      return;
-    }
-
     if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-      setPushMessage("この環境はWeb Push通知に対応していません");
+      setPushMessage("このブラウザではWeb Pushに必要な機能が見つかりません。別ブラウザや通知許可設定を確認してください。");
       setLoadingPush(false);
       return;
     }
@@ -98,19 +85,11 @@ export default function SettingsPage() {
     setPushMessage("");
 
     try {
-      const device = detectDevice();
-      if (checked && device === "iphone" && !isIOSStandalone()) {
-        setGuideDevice("iphone");
-        setGuideOpen(true);
-        setPushEnabled(false);
-        setPushMessage("iPhoneはSafariで共有ボタンからホーム画面に追加し、そのアイコンから開いて通知をONにしてください");
-        setLoadingPush(false);
-        return;
-      }
-
       if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
         setPushEnabled(false);
-        setPushMessage("この環境はWeb Push通知に対応していません");
+        setPushMessage("このブラウザではWeb Pushに必要な機能が見つかりません。通知設定ガイドを確認してください。");
+        setGuideDevice(detectDevice());
+        setGuideOpen(true);
         setLoadingPush(false);
         return;
       }
@@ -279,12 +258,13 @@ export default function SettingsPage() {
               <div className="notification-guide__body">
                 {guideDevice === "iphone" && (
                   <>
-                    <p className="notification-guide__note">iPhoneはSafariでホーム画面に追加したアプリから通知を有効にします。</p>
+                    <p className="notification-guide__note">iPhoneは、ログインしたブラウザと通知を許可するブラウザを同じにしてください。Chromeで運用する場合はChromeで開いたまま通知をONにします。</p>
                     <ol>
-                      <li>Safariでこのサイトを開く</li>
-                      <li>共有ボタンから「ホーム画面に追加」を選ぶ</li>
-                      <li>ホーム画面のアイコンから開いてログインする</li>
-                      <li>設定画面で「Web Push 通知」をONにして許可する</li>
+                      <li>ChromeまたはSafariでTSGを開く</li>
+                      <li>LINEログイン後も同じブラウザに戻っていることを確認する</li>
+                      <li>設定画面で「Web Push 通知」をONにする</li>
+                      <li>ブラウザの通知許可で「許可」を選ぶ</li>
+                      <li>届かない場合は、同じブラウザで開き直してから再度ONにする</li>
                     </ol>
                   </>
                 )}
