@@ -111,11 +111,14 @@ export async function GET(request: NextRequest) {
   const { data: users } = userIds.length > 0
     ? await adminClient
       .from('gw_users')
-      .select('id, display_name, picture_url, role')
+      .select('id, display_name, real_name, picture_url, role')
       .in('id', userIds)
     : { data: [] }
 
-  const userMap = Object.fromEntries((users || []).map(chatUser => [chatUser.id, chatUser]))
+  const userMap = Object.fromEntries((users || []).map(chatUser => [
+    chatUser.id, 
+    { ...chatUser, display_name: chatUser.real_name || chatUser.display_name }
+  ]))
   const members = (memberRows || [])
     .map(member => {
       const memberUser = userMap[member.user_id]

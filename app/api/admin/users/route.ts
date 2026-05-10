@@ -23,7 +23,7 @@ export async function GET() {
 
   const { data: users, error: dbError } = await adminClient
     .from('gw_users')
-    .select('id, display_name, picture_url, role, status, line_user_id, created_at, updated_at')
+    .select('id, display_name, real_name, picture_url, role, status, line_user_id, created_at, updated_at')
     .order('created_at', { ascending: true })
 
   if (dbError) {
@@ -38,14 +38,14 @@ export async function PUT(request: NextRequest) {
   if (error) return NextResponse.json({ error }, { status })
 
   const body = await request.json()
-  const { user_id, role, status: userStatus, display_name } = body
+  const { user_id, role, status: userStatus, display_name, real_name } = body
 
   if (!user_id) {
     return NextResponse.json({ error: 'user_id が必要です' }, { status: 400 })
   }
 
-  if (!role && !userStatus && display_name === undefined) {
-    return NextResponse.json({ error: 'display_name, role または status が必要です' }, { status: 400 })
+  if (!role && !userStatus && display_name === undefined && real_name === undefined) {
+    return NextResponse.json({ error: '更新項目がありません' }, { status: 400 })
   }
 
   if (role && !['admin', 'member'].includes(role)) {
@@ -66,6 +66,13 @@ export async function PUT(request: NextRequest) {
     }
   }
 
+  if (real_name !== undefined) {
+    const normalizedRealName = real_name === null ? null : String(real_name).trim()
+    if (normalizedRealName && normalizedRealName.length > 80) {
+      return NextResponse.json({ error: '本名は80文字以内で入力してください' }, { status: 400 })
+    }
+  }
+
   if (user_id === user!.id && userStatus && userStatus !== 'approved') {
     return NextResponse.json({ error: '自分自身を未承認または停止にはできません' }, { status: 400 })
   }
@@ -78,6 +85,7 @@ export async function PUT(request: NextRequest) {
     updated_at: new Date().toISOString(),
   }
   if (display_name !== undefined) updates.display_name = String(display_name).trim()
+  if (real_name !== undefined) updates.real_name = real_name ? String(real_name).trim() : null
   if (role) updates.role = role
   if (userStatus) updates.status = userStatus
 

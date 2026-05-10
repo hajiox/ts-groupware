@@ -14,7 +14,7 @@ export async function GET() {
 
   const { data: users, error } = await adminClient
     .from('gw_users')
-    .select('id, display_name, picture_url, role')
+    .select('id, display_name, real_name, picture_url, role')
     .eq('status', 'approved')
     .order('display_name', { ascending: true })
 
@@ -31,6 +31,7 @@ export async function GET() {
   return NextResponse.json({
     users: sortedUsers.map(member => ({
       ...member,
+      display_name: member.real_name || member.display_name,
       isSelf: member.id === user.id,
     })),
   })
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
   }
   const { data: targetUser, error: targetError } = await adminClient
     .from('gw_users')
-    .select('id, display_name, picture_url, status')
+    .select('id, display_name, real_name, picture_url, status')
     .eq('id', targetUserId)
     .eq('status', 'approved')
     .single()
@@ -58,6 +59,7 @@ export async function POST(request: NextRequest) {
   if (targetError || !targetUser) {
     return NextResponse.json({ error: '相手ユーザーが見つかりません' }, { status: 404 })
   }
+  targetUser.display_name = targetUser.real_name || targetUser.display_name
 
   const key = directChatKey(user.id, targetUser.id)
   const { data: existing } = await adminClient

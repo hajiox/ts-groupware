@@ -1,0 +1,1 @@
+ALTER TABLE gw_users ADD COLUMN IF NOT EXISTS real_name TEXT;

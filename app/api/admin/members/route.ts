@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
   // 全ユーザー
   const { data: allUsers } = await adminClient
     .from('gw_users')
-    .select('id, display_name, picture_url, role, status')
+    .select('id, display_name, real_name, picture_url, role, status')
     .eq('status', 'approved')
     .order('display_name', { ascending: true })
 
@@ -46,13 +46,16 @@ export async function GET(request: NextRequest) {
     .filter(u => u.role === 'admin' || explicitMemberUserIds.includes(u.id))
     .map(u => ({
       ...u,
+      display_name: u.real_name || u.display_name,
       group_role: u.role === 'admin'
         ? 'admin'
         : (members || []).find(m => m.user_id === u.id)?.role || 'member',
       implicit_member: u.role === 'admin' && !explicitMemberUserIds.includes(u.id),
     }))
 
-  const nonMembers = (allUsers || []).filter(u => u.role !== 'admin' && !explicitMemberUserIds.includes(u.id))
+  const nonMembers = (allUsers || [])
+    .filter(u => u.role !== 'admin' && !explicitMemberUserIds.includes(u.id))
+    .map(u => ({ ...u, display_name: u.real_name || u.display_name }))
 
   return NextResponse.json({ members: memberUsers, nonMembers })
 }

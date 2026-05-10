@@ -59,11 +59,14 @@ export async function GET() {
   const { data: directUsers } = directOtherUserIds.length > 0
     ? await adminClient
       .from('gw_users')
-      .select('id, display_name, picture_url')
+      .select('id, display_name, real_name, picture_url')
       .in('id', directOtherUserIds)
     : { data: [] }
 
-  const directUserMap = Object.fromEntries((directUsers || []).map(directUser => [directUser.id, directUser]))
+  const directUserMap = Object.fromEntries((directUsers || []).map(directUser => [
+    directUser.id, 
+    { ...directUser, display_name: directUser.real_name || directUser.display_name }
+  ]))
 
   // 各グループの最新投稿と未読数を取得
   const enrichedGroups = await Promise.all(

@@ -43,6 +43,8 @@ export async function getUserSession() {
   if (!user) return null
   if ((user.status || 'approved') !== 'approved') return null
 
+  user.display_name = user.real_name || user.display_name
+
   return user
 }
 

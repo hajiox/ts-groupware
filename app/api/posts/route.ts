@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
   const [{ data: users }, { data: reactions }, { data: commentCounts }] = await Promise.all([
     adminClient
       .from('gw_users')
-      .select('id, display_name, picture_url')
+      .select('id, display_name, real_name, picture_url')
       .in('id', userIds),
     adminClient
       .from('gw_reactions')
@@ -113,7 +113,10 @@ export async function GET(request: NextRequest) {
       .in('parent_id', postIds),
   ])
 
-  const userMap = Object.fromEntries((users || []).map(u => [u.id, u]))
+  const userMap = Object.fromEntries((users || []).map(u => [
+    u.id, 
+    { ...u, display_name: u.real_name || u.display_name }
+  ]))
 
   // リアクション集計
   const reactionMap: Record<string, Record<string, { count: number; hasOwn: boolean }>> = {}

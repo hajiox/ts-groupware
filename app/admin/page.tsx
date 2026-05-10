@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 type User = {
   id: string;
   display_name: string;
+  real_name: string | null;
   picture_url: string | null;
   role: string;
   status: "pending" | "approved" | "suspended";
@@ -55,7 +56,7 @@ function UsersTab() {
       .then(d => {
         const nextUsers = d.users || [];
         setUsers(nextUsers);
-        setNameDrafts(Object.fromEntries(nextUsers.map((nextUser: User) => [nextUser.id, nextUser.display_name])));
+        setNameDrafts(Object.fromEntries(nextUsers.map((nextUser: User) => [nextUser.id, nextUser.real_name || ""])));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -86,23 +87,19 @@ function UsersTab() {
     }
   }
 
-  async function handleDisplayNameSave(user: User) {
+  async function handleRealNameSave(user: User) {
     const nextName = (nameDrafts[user.id] || "").trim();
-    if (!nextName) {
-      alert("表示名を入力してください");
-      return;
-    }
-    if (nextName === user.display_name) return;
+    if (nextName === (user.real_name || "")) return;
 
     const res = await fetch("/api/admin/users", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: user.id, display_name: nextName }),
+      body: JSON.stringify({ user_id: user.id, real_name: nextName || null }),
     });
     if (res.ok) loadUsers();
     else {
       const data = await res.json().catch(() => ({}));
-      alert(data.error || "表示名の変更に失敗しました");
+      alert(data.error || "本名の保存に失敗しました");
     }
   }
 
@@ -128,26 +125,30 @@ function UsersTab() {
         <div key={user.id} className="admin-item">
           <Avatar user={user} size={40} />
           <div className="admin-item__info">
-            <div className="admin-item__name">{user.display_name}</div>
-            <div style={{ display: "flex", gap: 8, marginTop: 8, maxWidth: 360 }}>
+            <div className="admin-item__name">
+              {user.display_name}
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center" }}>
               <input
                 type="text"
                 className="form-input"
-                value={nameDrafts[user.id] ?? user.display_name}
+                placeholder="本名 (任意)"
+                value={nameDrafts[user.id] ?? (user.real_name || "")}
                 onChange={e => setNameDrafts(current => ({ ...current, [user.id]: e.target.value }))}
                 onKeyDown={e => {
-                  if (e.key === "Enter") handleDisplayNameSave(user);
+                  if (e.key === "Enter") handleRealNameSave(user);
                 }}
-                aria-label={`${user.display_name} のTSG内表示名`}
-                style={{ height: 34, padding: "7px 10px", fontSize: 13 }}
+                aria-label={`${user.display_name} の本名`}
+                style={{ flex: 1, minWidth: 0, height: 30, padding: "4px 8px", fontSize: 13 }}
               />
               <button
                 type="button"
                 className="admin-btn-outline"
-                onClick={() => handleDisplayNameSave(user)}
-                disabled={(nameDrafts[user.id] ?? user.display_name).trim() === user.display_name}
+                onClick={() => handleRealNameSave(user)}
+                disabled={(nameDrafts[user.id] ?? (user.real_name || "")).trim() === (user.real_name || "")}
+                style={{ height: 30, padding: "0 10px", fontSize: 12, whiteSpace: "nowrap" }}
               >
-                名前保存
+                保存
               </button>
             </div>
             <div className="admin-item__sub">
