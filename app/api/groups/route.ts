@@ -68,54 +68,69 @@ export async function GET() {
     { ...directUser, display_name: directUser.real_name || directUser.display_name }
   ]))
 
-  // 各グループの最新投稿と未読数を取得
-  const enrichedGroups = await Promise.all(
-    groups.map(async (group) => {
-      const directOtherUserId = isDirectChat(group) && explicitGroupIdSet.has(group.id)
-        ? (groupMembers || []).find(member => member.group_id === group.id && member.user_id !== user.id)?.user_id
-        : null
-      const directUser = directOtherUserId ? directUserMap[directOtherUserId] : null
+  // 全グループの最新投稿・既読状態・全投稿数を一括取得（N+1 解消）
+  const [{ data: allPosts }, { data: allReadStatus }, { data: allPostCounts }] = await Promise.all([
+    // 各グループの投稿を新しい順に取得（最新投稿の抽出用）
+    adminClient
+      .from('gw_posts')
+      .select('group_id, content, created_at')
+      .in('group_id', groupIds)
+      .is('parent_id', null)
+      .order('created_at', { ascending: false }),
+    // このユーザーの全既読ステータスを一括取得
+    adminClient
+      .from('gw_read_status')
+      .select('group_id, last_read_at')
+      .eq('user_id', user.id)
+      .in('group_id', groupIds),
+    // 各グループの全投稿を取得（未読計算用に created_at が必要）
+    adminClient
+      .from('gw_posts')
+      .select('group_id, created_at')
+      .in('group_id', groupIds)
+      .is('parent_id', null),
+  ])
 
-      // 最新投稿
-      const { data: latestPost } = await adminClient
-        .from('gw_posts')
-        .select('content, created_at')
-        .eq('group_id', group.id)
-        .is('parent_id', null) // コメントを除外
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
+  // グループごとの最新投稿をマップ化（最初に見つかったものが最新）
+  const latestPostMap: Record<string, { content: string | null; created_at: string }> = {}
+  for (const post of allPosts || []) {
+    if (!latestPostMap[post.group_id]) {
+      latestPostMap[post.group_id] = post
+    }
+  }
 
-      // 既読管理から未読数を計算
-      const { data: readStatus } = await adminClient
-        .from('gw_read_status')
-        .select('last_read_at')
-        .eq('user_id', user.id)
-        .eq('group_id', group.id)
-        .single()
+  // 既読ステータスのマップ化
+  const readStatusMap: Record<string, string> = {}
+  for (const rs of allReadStatus || []) {
+    readStatusMap[rs.group_id] = rs.last_read_at
+  }
 
-      let unreadCount = 0
-      if (readStatus?.last_read_at) {
-        const { count } = await adminClient
-          .from('gw_posts')
-          .select('id', { count: 'exact', head: true })
-          .eq('group_id', group.id)
-          .is('parent_id', null)
-          .gt('created_at', readStatus.last_read_at)
-        unreadCount = count || 0
-      }
+  // 未読数の計算（既読時刻以降の投稿数をカウント）
+  const unreadMap: Record<string, number> = {}
+  for (const post of allPostCounts || []) {
+    const lastRead = readStatusMap[post.group_id]
+    if (lastRead && post.created_at > lastRead) {
+      unreadMap[post.group_id] = (unreadMap[post.group_id] || 0) + 1
+    }
+  }
 
-      return {
-        ...group,
-        name: directUser?.display_name || group.name,
-        isDirect: Boolean(directUser),
-        directUser: directUser || null,
-        lastMessage: latestPost?.content?.slice(0, 50) || '',
-        lastMessageAt: latestPost?.created_at || group.created_at,
-        unread: unreadCount,
-      }
-    })
-  )
+  const enrichedGroups = groups.map((group) => {
+    const directOtherUserId = isDirectChat(group) && explicitGroupIdSet.has(group.id)
+      ? (groupMembers || []).find(member => member.group_id === group.id && member.user_id !== user.id)?.user_id
+      : null
+    const directUser = directOtherUserId ? directUserMap[directOtherUserId] : null
+    const latestPost = latestPostMap[group.id]
+
+    return {
+      ...group,
+      name: directUser?.display_name || group.name,
+      isDirect: Boolean(directUser),
+      directUser: directUser || null,
+      lastMessage: latestPost?.content?.slice(0, 50) || '',
+      lastMessageAt: latestPost?.created_at || group.created_at,
+      unread: unreadMap[group.id] || 0,
+    }
+  })
 
   return NextResponse.json({ groups: enrichedGroups })
 }

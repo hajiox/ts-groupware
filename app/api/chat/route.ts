@@ -11,8 +11,8 @@ type Attachment = {
   webViewLink?: string
 }
 
-async function getChatAccess(groupId: string, userId: string) {
-  const [{ data: group }, { data: membership }, { data: user }] = await Promise.all([
+async function getChatAccess(groupId: string, userId: string, userRole: string) {
+  const [{ data: group }, { data: membership }] = await Promise.all([
     adminClient
       .from('gw_groups')
       .select('id, name, description, type, icon, created_at, updated_at')
@@ -24,11 +24,6 @@ async function getChatAccess(groupId: string, userId: string) {
       .eq('group_id', groupId)
       .eq('user_id', userId)
       .single(),
-    adminClient
-      .from('gw_users')
-      .select('role')
-      .eq('id', userId)
-      .single(),
   ])
 
   if (!group || group.type !== 'chat') {
@@ -36,7 +31,7 @@ async function getChatAccess(groupId: string, userId: string) {
   }
 
   const isDirectChat = typeof group.description === 'string' && group.description.startsWith('direct:')
-  if (!membership && (user?.role !== 'admin' || isDirectChat)) {
+  if (!membership && (userRole !== 'admin' || isDirectChat)) {
     return { group: null, membership: null, error: 'このチャットに参加していません', status: 403 }
   }
 
@@ -70,7 +65,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'group_id が必要です' }, { status: 400 })
   }
 
-  const access = await getChatAccess(groupId, user.id)
+  const access = await getChatAccess(groupId, user.id, user.role)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -177,7 +172,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'メッセージまたは添付ファイルが必要です' }, { status: 400 })
   }
 
-  const access = await getChatAccess(groupId, user.id)
+  const access = await getChatAccess(groupId, user.id, user.role)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
