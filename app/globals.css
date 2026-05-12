@@ -1,4 +1,4 @@
-﻿/* TS Groupware 窶・Vanilla CSS Dark Theme */
+/* TS Groupware 窶・Vanilla CSS Dark Theme */
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -616,17 +616,30 @@ img {
   background: var(--card);
   border-radius: var(--radius);
   border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
   padding: 14px 16px;
   display: flex;
   align-items: center;
   gap: 14px;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s, background 0.15s;
+  transition: transform 0.2s, box-shadow 0.2s, background 0.15s, border-color 0.15s;
 }
 .group-card:hover {
   transform: scale(1.01);
   box-shadow: var(--shadow);
   background: var(--card-hover);
+}
+.group-card--board {
+  border-left-color: #1877F2;
+}
+.group-card--board:hover {
+  border-left-color: #4599ff;
+}
+.group-card--chat {
+  border-left-color: #06C755;
+}
+.group-card--chat:hover {
+  border-left-color: #2ee06e;
 }
 
 .group-card__icon {
@@ -639,8 +652,8 @@ img {
   font-size: 24px;
   flex-shrink: 0;
 }
-.group-card__icon--board { background: #1e3a5f; }
-.group-card__icon--chat  { background: #1e3a2f; }
+.group-card__icon--board { background: rgba(24, 119, 242, 0.18); }
+.group-card__icon--chat  { background: rgba(6, 199, 85, 0.18); }
 
 .group-card__info {
   flex: 1;
@@ -667,8 +680,8 @@ img {
   border-radius: 999px;
   margin-right: 6px;
 }
-.group-card__type-tag--board { background: #1e3a5f; color: #60a5fa; }
-.group-card__type-tag--chat  { background: #1e3a2f; color: #4ade80; }
+.group-card__type-tag--board { background: rgba(24, 119, 242, 0.15); color: #60a5fa; }
+.group-card__type-tag--chat  { background: rgba(6, 199, 85, 0.15); color: #4ade80; }
 
 .group-card__right {
   display: flex;

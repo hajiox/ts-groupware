@@ -275,7 +275,7 @@ export default function GroupsPage() {
               group.type === "board" ? `/board/${group.id}` : `/chat/${group.id}`;
             return (
               <Link key={group.id} href={href} aria-label={`${group.name}を開く`}>
-                <article className="group-card">
+                <article className={`group-card group-card--${group.type}`}>
                   <div
                     className={`group-card__icon group-card__icon--${group.type}`}
                     aria-hidden="true"

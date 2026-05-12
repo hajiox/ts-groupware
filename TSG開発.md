@@ -933,3 +933,82 @@
   - `public/apple-touch-icon.png`
   - `public/icon-192.png`
   - `public/icon-512.png`
+
+### 2026-05-10 投稿の編集・削除で通知を送らないよう変更
+- **対象**: 掲示板・グループChat
+- **要件**: 投稿の「編集」および「削除」操作時にはプッシュ通知を送信しない
+- **修正内容**:
+  - `app/api/posts/route.ts`: PATCH（編集）とDELETE（削除）ハンドラから通知送信ロジックを完全に除去
+  - `app/settings/page.tsx`: 設定画面の通知説明文を「投稿・リアクションを通知」に修正
+- **関連ファイル**:
+  - `app/api/posts/route.ts`
+  - `app/settings/page.tsx`
+
+### 2026-05-10 PWAバッジ表示（未読数アイコンバッジ）
+- **対象**: PWA（ホーム画面追加アプリ）
+- **要件**: iPhoneアプリのようにアイコンに未読件数バッジを表示
+- **修正内容**:
+  - `app/groups/page.tsx`: グループ一覧取得時に未読数合計を集計し、`navigator.setAppBadge()` でバッジを表示
+  - `public/sw.js`: プッシュ通知受信時にバッジをセット、通知タップ時にクリア
+- **制限事項**: iOS 16.4+のPWA環境でのみ動作。バッジ更新はService Workerアクティブ時または通知受信時のみ
+- **関連ファイル**:
+  - `app/groups/page.tsx`
+  - `public/sw.js`
+
+### 2026-05-10 本名（real_name）機能の追加
+- **対象**: ユーザー管理・全画面の表示名
+- **要件**: LINEネームを保持したまま、管理画面で本名を設定できるようにする。本名が設定されている場合はアプリ全体で本名を優先表示する
+- **DB変更**:
+  - `gw_users` テーブルに `real_name TEXT` カラムを追加（内職管理システムと共用のSupabase DB `oem-btob` にて実行）
+- **修正内容**:
+  - **管理画面UI** (`app/admin/page.tsx`):
+    - LINEネーム表示の下に「本名 (任意)」入力欄と小さな「保存」ボタンを配置
+    - スマホでもコンパクトに収まるようデザイン調整
+  - **API** (`app/api/admin/users/route.ts`):
+    - GET: `real_name` カラムをSELECTに追加
+    - PUT: `real_name` の更新に対応（空文字列はNULLとして保存）
+  - **セッション** (`lib/session.ts`):
+    - `getUserSession()` で `real_name || display_name` を `display_name` にセット（アプリ全体で自動的に本名優先）
+  - **各API全面対応**:
+    - `app/api/posts/route.ts`: 投稿者情報取得で `real_name` を考慮
+    - `app/api/chat/route.ts`: チャットメンバー・メッセージ著者で `real_name` を考慮
+    - `app/api/chat/direct/route.ts`: メンバー一覧・ターゲットユーザーで `real_name` を考慮
+    - `app/api/groups/route.ts`: ダイレクトチャット相手の表示名で `real_name` を考慮
+    - `app/api/admin/members/route.ts`: グループメンバー管理で `real_name` を考慮
+- **関連ファイル**:
+  - `sql/006_user_real_name.sql`
+  - `lib/session.ts`
+  - `app/admin/page.tsx`
+  - `app/api/admin/users/route.ts`
+  - `app/api/posts/route.ts`
+  - `app/api/chat/route.ts`
+  - `app/api/chat/direct/route.ts`
+  - `app/api/groups/route.ts`
+  - `app/api/admin/members/route.ts`
+
+### 2026-05-10 グループ一覧APIのパフォーマンス最適化（N+1クエリ解消）
+- **対象**: `/api/groups` GET
+- **問題**: グループ一覧取得時、各グループごとに個別にDBクエリを発行していた（N+1問題）
+  - 1グループあたり最大3クエリ（最新投稿・既読ステータス・未読数）
+  - 10グループで最大30回のDB往復 → Vercel↔Supabase間のレイテンシが積算されて遅延
+- **修正内容**:
+  - 全グループ分のデータを3回の一括クエリで取得し、メモリ上でマッピングする方式に変更
+    1. 全グループの投稿を一括取得 → 最新投稿を抽出
+    2. 全グループの既読ステータスを一括取得
+    3. 全グループの投稿日時を一括取得 → 未読数を計算
+  - **30クエリ → 3クエリに90%削減**
+- **追加改善**:
+  - `app/api/chat/route.ts`: `getChatAccess()` から不要なユーザーロール再取得クエリを削除（3クエリ→2クエリ）。呼び出し元からセッションの `user.role` を渡す方式に変更
+- **関連ファイル**:
+  - `app/api/groups/route.ts`
+  - `app/api/chat/route.ts`
+
+### 2026-05-11 eFax送信エラー調査
+- **症状**: 5/8〜5/9のFAX送信が複数取引先（高速・二丸屋・ダイサン食材・高瀬物産・磐梯フード）で一律エラー
+- **調査結果**:
+  - DBのエラーメッセージ: 全件「`81XXXXXXXXXX宛のFaxを送信完了できませんでした`」
+  - Gmail API経由のメール送信（DocScanner→eFax）は成功している
+  - eFax→相手FAX機への送信がeFax側で失敗している
+  - 特定の相手先ではなく全取引先で発生 → eFaxアカウント側の問題（課金停止・認証停止等）
+- **結論**: システム（コード）の問題ではなく、eFaxアカウントの状態問題。eFaxポータルでの確認が必要
+- **補足**: FAX送受信の認証はGmail APIサービスアカウント（`docscanner@tsai-460605.iam.gserviceaccount.com`）で完結しており、eFaxポータルのログイン情報はシステム上に保存されていない
