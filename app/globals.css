@@ -2312,4 +2312,42 @@ img {
   }
 }
 
+/* ═══ Chat Privacy Banner ═══ */
+.chat-privacy-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin: 8px 12px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(59, 130, 246, 0.08));
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 10px;
+  font-size: 0.72rem;
+  color: var(--text-sub);
+  line-height: 1.45;
+}
+.chat-privacy-banner__icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+/* ═══ TSG AI Badge ═══ */
+.group-card__ai-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  background: linear-gradient(135deg, #10b981, #3b82f6);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 600;
+  border-radius: 20px;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+  animation: ai-badge-pulse 2.5s ease-in-out infinite;
+}
+@keyframes ai-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
 
