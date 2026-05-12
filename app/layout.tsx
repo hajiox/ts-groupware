@@ -25,7 +25,7 @@ function BottomNav() {
 
   const items = [
     { href: "/groups", label: "ホーム", icon: "🏠" },
-    { href: "/members", label: "メンバー", icon: "👥" },
+    { href: "/members", label: "DM", icon: "💬" },
     ...(isAdmin ? [{ href: "/admin", label: "管理", icon: "🛡️" }] : []),
     { href: "/settings", label: "設定", icon: "⚙️" },
   ];
@@ -36,7 +36,9 @@ function BottomNav() {
         const isActive =
           item.href === "/groups"
             ? pathname.startsWith("/groups") ||
-              pathname.startsWith("/board") ||
+              pathname.startsWith("/board")
+            : item.href === "/members"
+            ? pathname.startsWith("/members") ||
               pathname.startsWith("/chat")
             : pathname.startsWith(item.href);
 

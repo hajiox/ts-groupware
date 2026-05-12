@@ -34,6 +34,7 @@ type ChatGroup = {
   id: string;
   name: string;
   icon: string;
+  description?: string | null;
 };
 
 function Avatar({ user, size = 30 }: { user: ChatUser; size?: number }) {
@@ -286,10 +287,12 @@ export default function ChatPage() {
       </header>
 
       <section className="chat-messages" aria-label="チャットメッセージ" role="log" aria-live="polite">
-        <div className="chat-privacy-banner">
-          <span className="chat-privacy-banner__icon" aria-hidden="true">🔒</span>
-          <span>このチャットは安全に保護されています。通信はすべて暗号化され、会話内容が第三者に共有されることはありません。</span>
-        </div>
+        {group?.description?.startsWith("direct:") && (
+          <div className="chat-privacy-banner">
+            <span className="chat-privacy-banner__icon" aria-hidden="true">🔒</span>
+            <span>このチャットは安全に保護されています。通信はすべて暗号化され、会話内容が第三者に共有されることはありません。</span>
+          </div>
+        )}
 
         {loading && <p className="chat-empty">読み込み中...</p>}
 

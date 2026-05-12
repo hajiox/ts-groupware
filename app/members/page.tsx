@@ -65,7 +65,7 @@ export default function MembersPage() {
   return (
     <>
       <header className="top-header" role="banner">
-        <h1 className="top-header__title">メンバー</h1>
+        <h1 className="top-header__title">DM</h1>
         <span className="top-header__meta">{members.length}名</span>
       </header>
 
@@ -93,7 +93,12 @@ export default function MembersPage() {
                 ) : (
                   <AvatarPlaceholder initials={member.display_name.charAt(0)} />
                 )}
-                <span>{member.isSelf ? `${member.display_name}（自分用メモ）` : member.display_name}</span>
+                <span>
+                  {member.isSelf ? `${member.display_name}（自分用メモ）` : member.display_name}
+                  {member.display_name === "TSG君" && (
+                    <span className="group-card__ai-badge">🤖 AIへの相談はこちらへ！</span>
+                  )}
+                </span>
                 <span className="member-directory__chat">
                   {creatingChatUserId === member.id ? "開始中..." : member.isSelf ? "メモ" : "Chat"}
                 </span>

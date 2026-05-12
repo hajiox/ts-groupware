@@ -286,12 +286,7 @@ export default function GroupsPage() {
                   </div>
 
                   <div className="group-card__info">
-                    <div className="group-card__name">
-                      {group.name}
-                      {group.name === "TSG君" && (
-                        <span className="group-card__ai-badge">🤖 AIへの相談はこちらへ！</span>
-                      )}
-                    </div>
+                    <div className="group-card__name">{group.name}</div>
                     <div className="group-card__meta">
                       <span
                         className={`group-card__type-tag group-card__type-tag--${group.type}`}
