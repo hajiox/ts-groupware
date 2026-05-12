@@ -201,25 +201,14 @@ export default function BoardPage() {
   const commentFileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
-    fetch("/api/groups")
-      .then((res) => (res.ok ? res.json() : { groups: [] }))
-      .then((data) => {
-        const group = data.groups?.find((item: { id: string; name: string }) => item.id === id);
-        if (group) setGroupName(group.name);
-      })
-      .catch(() => {});
-
-    fetch("/api/auth/me")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.user) setCurrentUser({ id: data.user.id, role: data.user.role });
-      })
-      .catch(() => {});
-
-    fetch(`/api/notifications/settings?group_id=${id}`)
-      .then((res) => (res.ok ? res.json() : { muted: false }))
-      .then((data) => setNotifMuted(!!data.muted))
-      .catch(() => {});
+    // 初期データを並列取得（/api/groups全件取得を廃止し高速化）
+    Promise.all([
+      fetch("/api/auth/me").then((r) => (r.ok ? r.json() : null)),
+      fetch(`/api/notifications/settings?group_id=${id}`).then((r) => (r.ok ? r.json() : { muted: false })),
+    ]).then(([meData, notifData]) => {
+      if (meData?.user) setCurrentUser({ id: meData.user.id, role: meData.user.role });
+      setNotifMuted(!!notifData?.muted);
+    }).catch(() => {});
 
     loadPosts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -239,8 +228,11 @@ export default function BoardPage() {
   function loadPosts() {
     setLoading(true);
     fetch(`/api/posts?group_id=${id}`)
-      .then((res) => (res.ok ? res.json() : { posts: [] }))
-      .then((data) => setPosts(data.posts || []))
+      .then((res) => (res.ok ? res.json() : { posts: [], groupName: null }))
+      .then((data) => {
+        setPosts(data.posts || []);
+        if (data.groupName) setGroupName(data.groupName);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }

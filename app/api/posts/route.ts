@@ -135,15 +135,22 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 既読更新
-  adminClient
-    .from('gw_read_status')
-    .upsert({
-      user_id: user.id,
-      group_id: groupId,
-      last_read_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,group_id' })
-    .then(undefined, e => console.error('[Read status update error]', e))
+  // 既読更新 + グループ名取得を並列
+  const [, { data: groupInfo }] = await Promise.all([
+    adminClient
+      .from('gw_read_status')
+      .upsert({
+        user_id: user.id,
+        group_id: groupId,
+        last_read_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,group_id' })
+      .then(undefined, e => console.error('[Read status update error]', e)),
+    adminClient
+      .from('gw_groups')
+      .select('name')
+      .eq('id', groupId)
+      .single(),
+  ])
 
   const enrichedPosts = (posts || []).map(post => ({
     ...post,
@@ -152,7 +159,7 @@ export async function GET(request: NextRequest) {
     commentCount: commentCountMap[post.id] || 0,
   }))
 
-  return NextResponse.json({ posts: enrichedPosts })
+  return NextResponse.json({ posts: enrichedPosts, groupName: groupInfo?.name || null })
 }
 
 export async function POST(request: NextRequest) {

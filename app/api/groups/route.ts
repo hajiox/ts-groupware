@@ -68,30 +68,47 @@ export async function GET() {
     { ...directUser, display_name: directUser.real_name || directUser.display_name }
   ]))
 
-  // 全グループの最新投稿・既読状態・全投稿数を一括取得（N+1 解消）
-  const [{ data: allPosts }, { data: allReadStatus }, { data: allPostCounts }] = await Promise.all([
-    // 各グループの投稿を新しい順に取得（最新投稿の抽出用）
+  // まず既読ステータスを取得（未読計算で必要）
+  const { data: allReadStatus } = await adminClient
+    .from('gw_read_status')
+    .select('group_id, last_read_at')
+    .eq('user_id', user.id)
+    .in('group_id', groupIds)
+
+  const readStatusMap: Record<string, string> = {}
+  for (const rs of allReadStatus || []) {
+    readStatusMap[rs.group_id] = rs.last_read_at
+  }
+
+  // 最新投稿取得 + 未読カウント（last_read_at以降のみ）を並列実行
+  // 最古のlast_read_atを求めて、それ以降の投稿のみ取得する
+  const readTimes = Object.values(readStatusMap)
+  const oldestRead = readTimes.length > 0
+    ? readTimes.reduce((a, b) => a < b ? a : b)
+    : null
+
+  const [{ data: allPosts }, { data: unreadPosts }] = await Promise.all([
+    // 最新投稿を新しい順に取得（各グループの最新1件抽出用）
+    // limit制限で全件スキャンを回避
     adminClient
       .from('gw_posts')
       .select('group_id, content, created_at')
       .in('group_id', groupIds)
       .is('parent_id', null)
-      .order('created_at', { ascending: false }),
-    // このユーザーの全既読ステータスを一括取得
-    adminClient
-      .from('gw_read_status')
-      .select('group_id, last_read_at')
-      .eq('user_id', user.id)
-      .in('group_id', groupIds),
-    // 各グループの全投稿を取得（未読計算用に created_at が必要）
-    adminClient
-      .from('gw_posts')
-      .select('group_id, created_at')
-      .in('group_id', groupIds)
-      .is('parent_id', null),
+      .order('created_at', { ascending: false })
+      .limit(groupIds.length * 3),
+    // 未読投稿のみ取得（既読時刻以降）
+    oldestRead
+      ? adminClient
+          .from('gw_posts')
+          .select('group_id, created_at')
+          .in('group_id', groupIds)
+          .is('parent_id', null)
+          .gt('created_at', oldestRead)
+      : Promise.resolve({ data: [] as { group_id: string; created_at: string }[] }),
   ])
 
-  // グループごとの最新投稿をマップ化（最初に見つかったものが最新）
+  // グループごとの最新投稿をマップ化
   const latestPostMap: Record<string, { content: string | null; created_at: string }> = {}
   for (const post of allPosts || []) {
     if (!latestPostMap[post.group_id]) {
@@ -99,15 +116,9 @@ export async function GET() {
     }
   }
 
-  // 既読ステータスのマップ化
-  const readStatusMap: Record<string, string> = {}
-  for (const rs of allReadStatus || []) {
-    readStatusMap[rs.group_id] = rs.last_read_at
-  }
-
-  // 未読数の計算（既読時刻以降の投稿数をカウント）
+  // 未読数の計算
   const unreadMap: Record<string, number> = {}
-  for (const post of allPostCounts || []) {
+  for (const post of unreadPosts || []) {
     const lastRead = readStatusMap[post.group_id]
     if (lastRead && post.created_at > lastRead) {
       unreadMap[post.group_id] = (unreadMap[post.group_id] || 0) + 1
