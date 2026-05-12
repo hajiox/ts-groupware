@@ -164,14 +164,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'グループ名は必須です' }, { status: 400 })
   }
 
+  // チャットタイプはアイコン💬固定
+  const resolvedType = type || 'board'
+  const resolvedIcon = resolvedType === 'chat' ? '💬' : (icon || '📢')
+
   // グループ作成
   const { data: group, error } = await adminClient
     .from('gw_groups')
     .insert({
       name: name.trim(),
       description: description || null,
-      type: type || 'board',
-      icon: icon || '📢',
+      type: resolvedType,
+      icon: resolvedIcon,
       created_by: user.id,
     })
     .select()

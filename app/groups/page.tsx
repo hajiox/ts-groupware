@@ -108,20 +108,21 @@ function CreateGroupModal({
               <button
                 type="button"
                 className={`type-btn ${type === "board" ? "type-btn--active" : ""}`}
-                onClick={() => setType("board")}
+                onClick={() => { setType("board"); setIcon("📢"); }}
               >
                 📋 掲示板
               </button>
               <button
                 type="button"
                 className={`type-btn ${type === "chat" ? "type-btn--active" : ""}`}
-                onClick={() => setType("chat")}
+                onClick={() => { setType("chat"); setIcon("💬"); }}
               >
                 💬 チャット
               </button>
             </div>
           </div>
 
+          {type === "board" && (
           <div className="form-group">
             <label className="form-label">アイコン</label>
             <div className="icon-grid">
@@ -137,6 +138,7 @@ function CreateGroupModal({
               ))}
             </div>
           </div>
+          )}
 
           <div className="modal-actions">
             <button type="button" className="btn-cancel" onClick={onClose}>
