@@ -1,3 +1,6 @@
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://v0-line-blush.vercel.app";
 const lineLoginUrl = `${siteUrl}/api/auth/line`;
 const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(lineLoginUrl)}`;
@@ -5,9 +8,17 @@ const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=1
 /**
  * TOPページ
  *
- * PC画面に表示したQRをスマホで読み取り、LINEログインへ進める入口。
+ * ログイン済みなら /groups へ自動リダイレクト。
+ * 未ログインならQRコード + LINEログインボタンを表示。
  */
-export default function RootPage() {
+export default async function RootPage() {
+  // セッションCookie確認 → ログイン済みなら直接グループ一覧へ
+  const cookieStore = await cookies();
+  const session = cookieStore.get("gw_user_session");
+  if (session?.value) {
+    redirect("/groups");
+  }
+
   return (
     <main className="top-page" role="main">
       <section className="top-panel" aria-label="TS Groupware ログイン">
@@ -49,3 +60,4 @@ export default function RootPage() {
     </main>
   );
 }
+

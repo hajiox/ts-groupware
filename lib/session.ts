@@ -11,21 +11,25 @@ import { adminClient } from '@/lib/supabase/admin'
  * - httpOnly: JS からアクセス不可
  * - secure: 本番では HTTPS のみ
  * - sameSite: lax（OAuthリダイレクトに対応）
- * - 有効期限: 30日
+ * - 有効期限: 30日（スライディングウィンドウ方式で毎回延長）
  */
 
 const SESSION_COOKIE_NAME = 'gw_user_session'
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30 // 30日
 
-export async function setUserSession(userId: string) {
-  const cookieStore = await cookies()
-  cookieStore.set(SESSION_COOKIE_NAME, userId, {
+function getCookieOptions() {
+  return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: 'lax' as const,
     maxAge: SESSION_MAX_AGE,
     path: '/',
-  })
+  }
+}
+
+export async function setUserSession(userId: string) {
+  const cookieStore = await cookies()
+  cookieStore.set(SESSION_COOKIE_NAME, userId, getCookieOptions())
 }
 
 export async function getUserSession() {
@@ -44,6 +48,14 @@ export async function getUserSession() {
   if ((user.status || 'approved') !== 'approved') return null
 
   user.display_name = user.real_name || user.display_name
+
+  // スライディングウィンドウ: アクセスのたびに有効期限を30日延長
+  // これにより定期的にアクセスしている限りログインが切れない
+  try {
+    cookieStore.set(SESSION_COOKIE_NAME, session.value, getCookieOptions())
+  } catch {
+    // proxy/middleware コンテキストではset不可のため無視
+  }
 
   return user
 }
