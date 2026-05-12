@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { linkifyText, OgpPreviews } from "@/components/link-preview";
 
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"] as const;
 const IMAGE_UPLOAD_MAX_SIZE = 1600;
@@ -550,9 +551,12 @@ export default function BoardPage() {
     if (!post.content) return null;
 
     return (
-      <div className="post-card__body" style={{ whiteSpace: "pre-wrap" }}>
-        {post.content}
-      </div>
+      <>
+        <div className="post-card__body" style={{ whiteSpace: "pre-wrap" }}>
+          {linkifyText(post.content)}
+        </div>
+        <OgpPreviews text={post.content} />
+      </>
     );
   }
 
