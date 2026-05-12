@@ -210,6 +210,15 @@ export async function POST(request: NextRequest) {
     })
     .catch(e => console.error('[Chat push error]', e))
 
+  // TSG君 AI応答（非同期で実行 - レスポンスはブロックしない）
+  import('@/lib/tsg-ai')
+    .then(({ isTsgDirectChat, handleTsgAiResponse }) =>
+      isTsgDirectChat(groupId).then(isDm => {
+        if (isDm) return handleTsgAiResponse(groupId, user.id)
+      })
+    )
+    .catch(e => console.error('[TSG AI trigger error]', e))
+
   return NextResponse.json({
     message: {
       ...message,
