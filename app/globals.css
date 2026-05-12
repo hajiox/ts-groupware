@@ -185,7 +185,7 @@ img {
 /* 笏笏笏 Page wrapper 笏笏笏 */
 .page-content {
   flex: 1;
-  padding-bottom: calc(var(--nav-height) + 8px);
+  padding-bottom: calc(var(--nav-height) + 32px);
   overflow-y: auto;
 }
 
@@ -507,7 +507,7 @@ img {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 16px;
+  padding: 16px 16px calc(var(--nav-height) + 32px);
 }
 
 .groups-actions {
@@ -613,7 +613,6 @@ img {
 }
 
 .group-card {
-  background: var(--card);
   border-radius: var(--radius);
   border: 1px solid var(--border);
   border-left: 4px solid var(--border);
@@ -627,18 +626,23 @@ img {
 .group-card:hover {
   transform: scale(1.01);
   box-shadow: var(--shadow);
-  background: var(--card-hover);
 }
 .group-card--board {
+  background: linear-gradient(135deg, rgba(24, 119, 242, 0.12) 0%, rgba(24, 119, 242, 0.05) 100%);
+  border-color: rgba(24, 119, 242, 0.25);
   border-left-color: #1877F2;
 }
 .group-card--board:hover {
+  background: linear-gradient(135deg, rgba(24, 119, 242, 0.20) 0%, rgba(24, 119, 242, 0.10) 100%);
   border-left-color: #4599ff;
 }
 .group-card--chat {
+  background: linear-gradient(135deg, rgba(6, 199, 85, 0.12) 0%, rgba(6, 199, 85, 0.05) 100%);
+  border-color: rgba(6, 199, 85, 0.25);
   border-left-color: #06C755;
 }
 .group-card--chat:hover {
+  background: linear-gradient(135deg, rgba(6, 199, 85, 0.20) 0%, rgba(6, 199, 85, 0.10) 100%);
   border-left-color: #2ee06e;
 }
 
