@@ -7,9 +7,8 @@ import { adminClient } from '@/lib/supabase/admin'
  * Gemini 3.1 Flash-Lite でAI応答を生成しTSG君名義で返信する。
  */
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim()
 const GEMINI_MODEL = 'gemini-3.1-flash-lite'
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`
 
 const SYSTEM_PROMPT = `あなたは「TSG君」という名前の社内AIアシスタントです。
 会津食のブランド館（TS）の社内グループウェア「TS Groupware」で働いています。
@@ -48,13 +47,26 @@ let cachedTsgId: string | null = null
 export async function getTsgUserId(): Promise<string | null> {
   if (cachedTsgId) return cachedTsgId
 
+  // display_name で検索
   const { data } = await adminClient
     .from('gw_users')
     .select('id')
     .eq('display_name', 'TSG君')
     .single()
 
-  if (data) cachedTsgId = data.id
+  if (data) {
+    cachedTsgId = data.id
+    return cachedTsgId
+  }
+
+  // line_user_id がシステムIDの場合でも検索
+  const { data: data2 } = await adminClient
+    .from('gw_users')
+    .select('id')
+    .like('line_user_id', 'system_tsg_%')
+    .single()
+
+  if (data2) cachedTsgId = data2.id
   return cachedTsgId
 }
 
@@ -119,7 +131,8 @@ async function buildConversationHistory(groupId: string, tsgId: string) {
  * Gemini APIを呼び出してAI応答を生成
  */
 async function callGemini(conversationHistory: { role: string; parts: { text: string }[] }[]): Promise<string> {
-  const response = await fetch(GEMINI_API_URL, {
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`
+  const response = await fetch(apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

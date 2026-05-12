@@ -274,16 +274,18 @@ export default function ChatPage() {
           <span aria-hidden="true">{group?.icon || "💬"}</span>
           {group?.name || "チャット"}
         </h1>
-        <button
-          type="button"
-          className={`notif-toggle-btn${notifMuted ? " notif-toggle-btn--muted" : ""}`}
-          onClick={toggleNotifMute}
-          disabled={notifToggling}
-          aria-label={notifMuted ? "通知をONにする" : "通知をOFFにする"}
-          title={notifMuted ? "通知OFF中 — タップでON" : "通知ON中 — タップでOFF"}
-        >
-          {notifMuted ? "🔕" : "🔔"}
-        </button>
+        {!group?.description?.startsWith("direct:") && (
+          <button
+            type="button"
+            className={`notif-toggle-btn${notifMuted ? " notif-toggle-btn--muted" : ""}`}
+            onClick={toggleNotifMute}
+            disabled={notifToggling}
+            aria-label={notifMuted ? "通知をONにする" : "通知をOFFにする"}
+            title={notifMuted ? "通知OFF中 — タップでON" : "通知ON中 — タップでOFF"}
+          >
+            {notifMuted ? "🔕" : "🔔"}
+          </button>
+        )}
       </header>
 
       <section className="chat-messages" aria-label="チャットメッセージ" role="log" aria-live="polite">

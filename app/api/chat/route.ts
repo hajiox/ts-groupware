@@ -198,26 +198,36 @@ export async function POST(request: NextRequest) {
     .update({ updated_at: new Date().toISOString() })
     .eq('id', groupId)
 
-  await import('@/lib/web-push')
-    .then(({ sendPushNotificationToGroup }) => {
-      const bodyText = content || (attachments.length > 0 ? 'ファイルを送信しました' : '新しいメッセージ')
-      return sendPushNotificationToGroup(groupId, user.id, {
-        title: `${access.group?.name || 'チャット'} - ${user.display_name || 'メンバー'}`,
-        body: bodyText.substring(0, 80),
-        url: `/chat/${groupId}`,
-        tag: `tsg-chat-${groupId}`,
-      })
-    })
-    .catch(e => console.error('[Chat push error]', e))
+  // DM判定
+  const isDirect = typeof access.group?.description === 'string' && access.group.description.startsWith('direct:')
 
-  // TSG君 AI応答（非同期で実行 - レスポンスはブロックしない）
-  import('@/lib/tsg-ai')
-    .then(({ isTsgDirectChat, handleTsgAiResponse }) =>
-      isTsgDirectChat(groupId).then(isDm => {
-        if (isDm) return handleTsgAiResponse(groupId, user.id)
+  if (!isDirect) {
+    // グループチャットのみプッシュ通知を送信（DMには通知不要）
+    await import('@/lib/web-push')
+      .then(({ sendPushNotificationToGroup }) => {
+        const bodyText = content || (attachments.length > 0 ? 'ファイルを送信しました' : '新しいメッセージ')
+        return sendPushNotificationToGroup(groupId, user.id, {
+          title: `${access.group?.name || 'チャット'} - ${user.display_name || 'メンバー'}`,
+          body: bodyText.substring(0, 80),
+          url: `/chat/${groupId}`,
+          tag: `tsg-chat-${groupId}`,
+        })
       })
-    )
-    .catch(e => console.error('[TSG AI trigger error]', e))
+      .catch(e => console.error('[Chat push error]', e))
+  }
+
+  // TSG君 AI応答（DMの場合のみ、awaitで実行 — Serverless打ち切り防止）
+  if (isDirect) {
+    try {
+      const { isTsgDirectChat, handleTsgAiResponse } = await import('@/lib/tsg-ai')
+      const isTsg = await isTsgDirectChat(groupId)
+      if (isTsg) {
+        await handleTsgAiResponse(groupId, user.id)
+      }
+    } catch (e) {
+      console.error('[TSG AI trigger error]', e)
+    }
+  }
 
   return NextResponse.json({
     message: {
