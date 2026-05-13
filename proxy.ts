@@ -13,6 +13,7 @@ export function proxy(request: NextRequest) {
   const publicPaths = [
     '/login',
     '/api/auth',
+    '/api/debug-tsg',
     '/_next',
     '/favicon.ico',
     '/manifest.json',
