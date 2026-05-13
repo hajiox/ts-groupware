@@ -1,4 +1,4 @@
-/* TS Groupware 窶・Vanilla CSS Dark Theme */
+﻿/* TS Groupware 窶・Vanilla CSS Dark Theme */
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -26,6 +26,21 @@
   --radius:      12px;
   --radius-sm:   8px;
   --shadow:      0 4px 24px rgba(0,0,0,0.4);
+}
+
+html[data-theme="light"] {
+  --bg:          #f1f5f9;
+  --card:        #ffffff;
+  --card-hover:  #f0f4f8;
+  --border:      #d1d5db;
+  --accent:      #2563eb;
+  --accent-dark: #1d4ed8;
+  --text:        #1e293b;
+  --text-sub:    #475569;
+  --text-muted:  #94a3b8;
+  --own-bubble:  #2563eb;
+  --other-bubble:#e2e8f0;
+  --shadow:      0 4px 24px rgba(0,0,0,0.08);
 }
 
 html, body {
@@ -2359,3 +2374,35 @@ img {
 }
 
 
+
+html[data-theme="light"] .bottom-nav {
+  background: rgba(255, 255, 255, 0.95);
+  border-top: 1px solid var(--border);
+}
+html[data-theme="light"] .msg__bubble {
+  color: #1e293b;
+}
+html[data-theme="light"] .msg--own .msg__bubble {
+  color: #fff;
+}
+html[data-theme="light"] .top-header {
+  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid var(--border);
+}
+html[data-theme="light"] .chat-input-bar {
+  background: rgba(255, 255, 255, 0.95);
+  border-top: 1px solid var(--border);
+}
+html[data-theme="light"] .chat-input-bar__input {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+html[data-theme="light"] .login-page {
+  background: linear-gradient(135deg, #e0e7ff, #f1f5f9) !important;
+}
+html[data-theme="light"] .modal-content {
+  background: #fff;
+}
+html[data-theme="light"] .chat-privacy-banner {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(59, 130, 246, 0.06));
+}

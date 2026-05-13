@@ -78,6 +78,7 @@ export default function SettingsPage() {
   const [guideDevice, setGuideDevice] = useState<DeviceType>("pc");
   const [deviceLoginUrl, setDeviceLoginUrl] = useState("");
   const [creatingDeviceLoginUrl, setCreatingDeviceLoginUrl] = useState(false);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   // deviceLogin=1 パラメータで来た場合はSafari/PWAから開いたことを自動案内
   const [fromDeviceLogin, setFromDeviceLogin] = useState(false);
@@ -93,6 +94,10 @@ export default function SettingsPage() {
     if (params.get("deviceLogin") === "1") {
       setFromDeviceLogin(true);
     }
+
+    // テーマ初期値読み込み
+    const saved = localStorage.getItem("tsg-theme");
+    if (saved === "light" || saved === "dark") setTheme(saved);
 
     determinePushCapability();
     setGuideDevice(detectDevice());
@@ -415,6 +420,31 @@ export default function SettingsPage() {
           </div>
           <div className="settings-profile__sub">
             {user?.role === "admin" ? "管理者" : "メンバー"}
+          </div>
+        </section>
+
+        {/* Theme toggle */}
+        <section className="settings-section" aria-label="テーマ設定">
+          <h2 className="settings-section__title">テーマ</h2>
+          <div className="settings-row">
+            <div>
+              <div className="settings-row__label">{theme === "dark" ? "🌙 ダークモード" : "☀️ ライトモード"}</div>
+              <div className="settings-row__sub">タップで切り替え</div>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={theme === "light"}
+                onChange={(e) => {
+                  const next = e.target.checked ? "light" : "dark";
+                  setTheme(next);
+                  localStorage.setItem("tsg-theme", next);
+                  document.documentElement.setAttribute("data-theme", next);
+                  document.documentElement.style.background = next === "light" ? "#f1f5f9" : "#0f172a";
+                }}
+              />
+              <span className="toggle__track" />
+            </label>
           </div>
         </section>
 

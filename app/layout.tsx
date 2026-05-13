@@ -69,7 +69,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ja" style={{ background: "#0f172a" }}>
+    <html lang="ja" suppressHydrationWarning>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
         <meta name="theme-color" content="#0f172a" />
@@ -80,6 +80,15 @@ export default function RootLayout({
         <title>TS Groupware</title>
         <link rel="manifest" href="/manifest.json" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <script dangerouslySetInnerHTML={{ __html: `
+          (function(){
+            try {
+              var t = localStorage.getItem('tsg-theme') || 'dark';
+              document.documentElement.setAttribute('data-theme', t);
+              document.documentElement.style.background = t === 'light' ? '#f1f5f9' : '#0f172a';
+            } catch(e){}
+          })();
+        `}} />
       </head>
       <body>
         <div className="app-shell">
