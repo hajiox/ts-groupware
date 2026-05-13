@@ -214,19 +214,40 @@ export async function POST(request: NextRequest) {
   // DM判定
   const isDirect = typeof access.group?.description === 'string' && access.group.description.startsWith('direct:')
 
-  if (!isDirect) {
-    // グループチャットのみプッシュ通知を送信（DMには通知不要）
-    await import('@/lib/web-push')
-      .then(({ sendPushNotificationToGroup }) => {
-        const bodyText = content || (attachments.length > 0 ? 'ファイルを送信しました' : '新しいメッセージ')
-        return sendPushNotificationToGroup(groupId, user.id, {
-          title: `${access.group?.name || 'チャット'} - ${user.display_name || 'メンバー'}`,
-          body: bodyText.substring(0, 80),
-          url: `/chat/${groupId}`,
-          tag: `tsg-chat-${groupId}`,
-        })
+  // プッシュ通知を送信（DM: 相手のみ / グループ: 全メンバー）
+  try {
+    const bodyText = content || (attachments.length > 0 ? 'ファイルを送信しました' : '新しいメッセージ')
+    if (isDirect) {
+      // DMの場合: 送信者以外のメンバー（相手）にのみ通知
+      const { data: dmMembers } = await adminClient
+        .from('gw_group_members')
+        .select('user_id')
+        .eq('group_id', groupId)
+        .neq('user_id', user.id)
+
+      if (dmMembers && dmMembers.length > 0) {
+        const { sendPushNotificationToUser } = await import('@/lib/web-push')
+        for (const m of dmMembers) {
+          await sendPushNotificationToUser(m.user_id, {
+            title: `${user.display_name || 'メンバー'}`,
+            body: bodyText.substring(0, 80),
+            url: `/chat/${groupId}`,
+            tag: `tsg-dm-${groupId}`,
+          })
+        }
+      }
+    } else {
+      // グループチャットの場合
+      const { sendPushNotificationToGroup } = await import('@/lib/web-push')
+      await sendPushNotificationToGroup(groupId, user.id, {
+        title: `${access.group?.name || 'チャット'} - ${user.display_name || 'メンバー'}`,
+        body: bodyText.substring(0, 80),
+        url: `/chat/${groupId}`,
+        tag: `tsg-chat-${groupId}`,
       })
-      .catch(e => console.error('[Chat push error]', e))
+    }
+  } catch (e) {
+    console.error('[Chat push error]', e)
   }
 
   // TSG君 AI応答（DMの場合のみ、awaitで実行 — Serverless打ち切り防止）
@@ -236,6 +257,14 @@ export async function POST(request: NextRequest) {
       const isTsg = await isTsgDirectChat(groupId)
       if (isTsg) {
         await handleTsgAiResponse(groupId, user.id)
+        // AI応答後、ユーザーに通知
+        const { sendPushNotificationToUser } = await import('@/lib/web-push')
+        await sendPushNotificationToUser(user.id, {
+          title: 'TSG君',
+          body: '返信しました 💬',
+          url: `/chat/${groupId}`,
+          tag: `tsg-ai-${groupId}`,
+        })
       }
     } catch (e) {
       console.error('[TSG AI trigger error]', e)
