@@ -85,9 +85,11 @@ export async function isTsgDirectChat(groupId: string): Promise<boolean> {
 
   if (!group || group.type !== 'chat') return false
 
-  // direct:userId1,userId2 形式のDM
+  // direct:userId1:userId2 形式のDM
   if (typeof group.description === 'string' && group.description.startsWith('direct:')) {
-    const userIds = group.description.replace('direct:', '').split(',')
+    const parts = group.description.split(':')
+    // parts = ['direct', 'userId1', 'userId2']
+    const userIds = parts.slice(1)
     return userIds.includes(tsgId)
   }
 
