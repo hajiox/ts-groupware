@@ -37,6 +37,11 @@ type ChatGroup = {
   description?: string | null;
 };
 
+type ReadReceipt = {
+  user_id: string;
+  last_read_at: string;
+};
+
 function Avatar({ user, size = 30 }: { user: ChatUser; size?: number }) {
   if (user.picture_url) {
     // eslint-disable-next-line @next/next/no-img-element
@@ -83,6 +88,7 @@ export default function ChatPage() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [notifMuted, setNotifMuted] = useState(false);
   const [notifToggling, setNotifToggling] = useState(false);
+  const [readReceipts, setReadReceipts] = useState<ReadReceipt[]>([]);
 
   const latestMessageAt = useMemo(() => {
     return messages.length > 0 ? messages[messages.length - 1].created_at : "";
@@ -115,6 +121,7 @@ export default function ChatPage() {
 
     setGroup(data.group);
     setMembers(data.members || []);
+    if (data.readReceipts) setReadReceipts(data.readReceipts);
 
     if (since) {
       mergeMessages(data.messages || []);
@@ -355,6 +362,14 @@ export default function ChatPage() {
             </div>
 
             <div className="msg__meta">
+              {message.isOwn && (() => {
+                const readCount = readReceipts.filter(
+                  r => new Date(r.last_read_at) >= new Date(message.created_at)
+                ).length;
+                return readCount > 0 ? (
+                  <span className="msg__read-receipt">既読{readCount > 1 ? ` ${readCount}` : ""}</span>
+                ) : null;
+              })()}
               {message.isOwn && (
                 <button
                   type="button"

@@ -2350,4 +2350,12 @@ img {
   50% { opacity: 0.75; }
 }
 
+/* ═══ Read Receipt ═══ */
+.msg__read-receipt {
+  font-size: 0.7rem;
+  color: #60a5fa;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 

@@ -85,11 +85,15 @@ export async function GET(request: NextRequest) {
     query = query.gt('created_at', since)
   }
 
-  const [{ data: rawMessages, error: messagesError }, { data: memberRows }] = await Promise.all([
+  const [{ data: rawMessages, error: messagesError }, { data: memberRows }, { data: readRows }] = await Promise.all([
     query,
     adminClient
       .from('gw_group_members')
       .select('user_id, role')
+      .eq('group_id', groupId),
+    adminClient
+      .from('gw_read_status')
+      .select('user_id, last_read_at')
       .eq('group_id', groupId),
   ])
 
@@ -128,6 +132,14 @@ export async function GET(request: NextRequest) {
     })
     .filter(Boolean)
 
+  // 既読情報: 自分以外のメンバーのlast_read_atを返す
+  const readReceipts = (readRows || [])
+    .filter(r => r.user_id !== user.id)
+    .map(r => ({
+      user_id: r.user_id,
+      last_read_at: r.last_read_at,
+    }))
+
   adminClient
     .from('gw_read_status')
     .upsert({
@@ -151,6 +163,7 @@ export async function GET(request: NextRequest) {
       author: userMap[message.user_id] || { display_name: '不明', picture_url: null },
       isOwn: message.user_id === user.id,
     })),
+    readReceipts,
   })
 }
 
