@@ -2406,3 +2406,27 @@ html[data-theme="light"] .modal-content {
 html[data-theme="light"] .chat-privacy-banner {
   background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(59, 130, 246, 0.06));
 }
+/* ═══ Nav Badge (unread count) ═══ */
+.nav-icon-wrap {
+  position: relative;
+  display: inline-block;
+}
+.nav-badge {
+  position: absolute;
+  top: -6px;
+  right: -10px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  pointer-events: none;
+}

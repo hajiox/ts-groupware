@@ -9,6 +9,7 @@ import "./globals.css";
 function BottomNav() {
   const pathname = usePathname();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [dmUnread, setDmUnread] = useState(0);
   const hide = pathname === "/login" || pathname === "/";
 
   useEffect(() => {
@@ -21,13 +22,30 @@ function BottomNav() {
       .catch(() => {});
   }, [hide]);
 
+  // DM未読カウントのポーリング（30秒間隔）
+  useEffect(() => {
+    if (hide) return;
+    let active = true;
+
+    const fetchUnread = () => {
+      fetch("/api/dm/unread")
+        .then(r => r.ok ? r.json() : { count: 0 })
+        .then(data => { if (active) setDmUnread(data.count || 0); })
+        .catch(() => {});
+    };
+
+    fetchUnread();
+    const timer = setInterval(fetchUnread, 30000);
+    return () => { active = false; clearInterval(timer); };
+  }, [hide, pathname]);
+
   if (hide) return null;
 
   const items = [
-    { href: "/groups", label: "ホーム", icon: "🏠" },
-    { href: "/members", label: "DM", icon: "💬" },
-    ...(isAdmin ? [{ href: "/admin", label: "管理", icon: "🛡️" }] : []),
-    { href: "/settings", label: "設定", icon: "⚙️" },
+    { href: "/groups", label: "ホーム", icon: "🏠", badge: 0 },
+    { href: "/members", label: "DM", icon: "💬", badge: dmUnread },
+    ...(isAdmin ? [{ href: "/admin", label: "管理", icon: "🛡️", badge: 0 }] : []),
+    { href: "/settings", label: "設定", icon: "⚙️", badge: 0 },
   ];
 
   return (
@@ -53,6 +71,11 @@ function BottomNav() {
               <span className="bottom-nav__icon" aria-hidden="true">
                 {item.icon}
               </span>
+              {item.badge > 0 && (
+                <span className="nav-badge" aria-label={`未読${item.badge}件`}>
+                  {item.badge > 99 ? "99+" : item.badge}
+                </span>
+              )}
             </span>
             <span>{item.label}</span>
           </Link>
