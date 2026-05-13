@@ -96,6 +96,21 @@ function LoginContent() {
         </div>
       )}
 
+      <div style={{
+        background: 'rgba(59, 130, 246, 0.1)',
+        border: '1px solid rgba(59, 130, 246, 0.2)',
+        borderRadius: '10px',
+        padding: '12px 14px',
+        marginBottom: '16px',
+        fontSize: '13px',
+        lineHeight: '1.6',
+        color: 'var(--text-sub)',
+        width: '100%',
+      }}>
+        <div style={{ fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>📱 iPhoneの方へ</div>
+        <strong>Safari</strong>でこのページを開き、共有ボタン（□↑）→「<strong>ホーム画面に追加</strong>」してからログインすると、通知が使えます。
+      </div>
+
       <a
         href={lineLoginUrl}
         className="btn-line"

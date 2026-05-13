@@ -1,4 +1,4 @@
-﻿/* TS Groupware 窶・Vanilla CSS Dark Theme */
+/* TS Groupware 窶・Vanilla CSS Dark Theme */
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -49,7 +49,7 @@ html, body {
   font-family: system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
   font-size: 15px;
   line-height: 1.5;
-  min-height: 100vh;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -91,7 +91,7 @@ img {
 .app-shell {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* 笏笏笏 Top header 笏笏笏 */
@@ -158,19 +158,20 @@ img {
 
 /* 笏笏笏 Bottom navigation 笏笏笏 */
 .bottom-nav {
-  position: fixed;
-  bottom: 10px;
-  left: 12px;
-  right: 12px;
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
   z-index: 100;
-  height: 56px;
+  height: calc(56px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: stretch;
   overflow: hidden;
-  box-shadow: 0 12px 32px rgba(2, 6, 23, 0.35);
+  box-shadow: 0 -4px 24px rgba(2, 6, 23, 0.2);
+  flex-shrink: 0;
 }
 
 .bottom-nav__item {
@@ -283,7 +284,7 @@ img {
 
 /* 笏笏笏 Login page 笏笏笏 */
 .login-page {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -354,7 +355,7 @@ img {
 
 /* 笏笏笏 Top page 笏笏笏 */
 .top-page {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;

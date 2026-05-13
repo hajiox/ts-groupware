@@ -94,7 +94,7 @@ export default function RootLayout({
   return (
     <html lang="ja" suppressHydrationWarning>
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
         <meta name="theme-color" content="#0f172a" />
         <meta name="description" content="TS Groupware — 社内グループウェア" />
         <meta name="apple-mobile-web-app-capable" content="yes" />

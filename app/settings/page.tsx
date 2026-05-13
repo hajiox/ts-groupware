@@ -264,17 +264,18 @@ export default function SettingsPage() {
               <div className="ios-pwa-guide__content">
                 <div className="ios-pwa-guide__title">iPhoneで通知を受け取るには</div>
                 <div className="ios-pwa-guide__desc">
-                  <strong>Safari</strong>でこのサイトを開き、ホーム画面に追加してからログインしてください。
+                  <strong>Safari</strong>でログイン画面を開き、<strong>先にホーム画面に追加</strong>してからログインしてください。
                 </div>
                 <ol className="ios-pwa-guide__steps">
                   <li><strong>Safari</strong>で <code>v0-line-blush.vercel.app</code> を開く</li>
-                  <li>下部の共有ボタン（□に↑）をタップ</li>
+                  <li>ログイン画面のまま、下部の共有ボタン（□に↑）をタップ</li>
                   <li>「<strong>ホーム画面に追加</strong>」をタップ</li>
                   <li>ホーム画面のTSGアイコンからアプリを開く</li>
-                  <li>ログイン後、設定画面で通知をONにする</li>
+                  <li>LINEでログインする</li>
+                  <li>設定画面で通知をONにする</li>
                 </ol>
                 <div className="ios-pwa-guide__warn">
-                  ⚠️ iPhoneではChrome等の他ブラウザでは通知を受け取れません。必ずSafariから操作してください。
+                  ⚠️ iPhoneではChrome・LINE内ブラウザでは通知を受け取れません。必ずSafariから操作してください。
                 </div>
               </div>
             </div>
