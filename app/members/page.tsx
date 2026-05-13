@@ -70,6 +70,10 @@ export default function MembersPage() {
       </header>
 
       <section className="members-page page-content" aria-label="メンバー一覧">
+        <div className="chat-privacy-banner">
+          <span className="chat-privacy-banner__icon" aria-hidden="true">🔒</span>
+          <span>個人チャットは安全に保護されています。通信はすべて暗号化され、会話内容が第三者に共有されることはありません。</span>
+        </div>
         {loading ? (
           <p className="member-directory__empty">読み込み中...</p>
         ) : error ? (

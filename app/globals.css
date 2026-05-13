@@ -2317,14 +2317,14 @@ img {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 12px 16px;
   margin: 8px 12px;
   background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(59, 130, 246, 0.08));
   border: 1px solid rgba(16, 185, 129, 0.2);
   border-radius: 10px;
-  font-size: 0.72rem;
+  font-size: 0.85rem;
   color: var(--text-sub);
-  line-height: 1.45;
+  line-height: 1.5;
 }
 .chat-privacy-banner__icon {
   font-size: 1rem;
