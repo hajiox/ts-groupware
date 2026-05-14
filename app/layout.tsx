@@ -22,15 +22,29 @@ function BottomNav() {
       .catch(() => {});
   }, [hide]);
 
-  // DM未読カウントのポーリング（30秒間隔）
+  // 全体未読カウントのポーリング（30秒間隔）
   useEffect(() => {
     if (hide) return;
     let active = true;
 
     const fetchUnread = () => {
-      fetch("/api/dm/unread")
-        .then(r => r.ok ? r.json() : { count: 0 })
-        .then(data => { if (active) setDmUnread(data.count || 0); })
+      fetch("/api/unread")
+        .then(r => r.ok ? r.json() : { dmUnread: 0, groupUnread: 0, totalUnread: 0 })
+        .then(data => {
+          if (active) {
+            setDmUnread(data.dmUnread || 0);
+            
+            // PWA用 App Badgeの更新（iPhoneホーム画面アイコンの赤丸）
+            if ("setAppBadge" in navigator && "clearAppBadge" in navigator) {
+              const total = data.totalUnread || 0;
+              if (total > 0) {
+                navigator.setAppBadge(total).catch(() => {});
+              } else {
+                navigator.clearAppBadge().catch(() => {});
+              }
+            }
+          }
+        })
         .catch(() => {});
     };
 
