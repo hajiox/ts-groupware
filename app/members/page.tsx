@@ -54,6 +54,23 @@ export default function MembersPage() {
       .catch(() => {});
   }
 
+  useEffect(() => {
+    fetchUnread();
+    const timer = window.setInterval(fetchUnread, 10000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") fetchUnread();
+    };
+
+    window.addEventListener("focus", fetchUnread);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", fetchUnread);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, []);
+
   async function startDirectChat(targetUserId: string) {
     setCreatingChatUserId(targetUserId);
     setError("");
