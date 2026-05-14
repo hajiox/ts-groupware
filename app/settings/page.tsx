@@ -163,7 +163,7 @@ export default function SettingsPage() {
 
     try {
       if (pushCapability !== "ready") {
-        setPushMessage("この環境では通知を有効にできません。設定ガイドを確認してください。");
+        setPushMessage("この環境では通知を受け取れません。設定ガイドを確認してください。");
         setLoadingPush(false);
         return;
       }
@@ -191,7 +191,7 @@ export default function SettingsPage() {
           body: JSON.stringify({ subscription: subscription.toJSON() }),
         });
         setPushEnabled(true);
-        setPushMessage("✅ 通知を有効にしました！「テスト通知」で確認してください。");
+        setPushMessage("✅ この端末で通知を受け取る設定にしました。「テスト通知」で確認してください。");
       } else {
         // 解除する
         const subscription = await registration.pushManager.getSubscription();
@@ -204,7 +204,7 @@ export default function SettingsPage() {
           await subscription.unsubscribe();
         }
         setPushEnabled(false);
-        setPushMessage("通知を解除しました");
+        setPushMessage("この端末では通知を受け取らない設定にしました");
       }
     } catch (err) {
       console.error("Failed to toggle push", err);
@@ -352,9 +352,9 @@ export default function SettingsPage() {
 
         <div className="settings-row">
           <div>
-            <div className="settings-row__label">Web Push 通知</div>
+            <div className="settings-row__label">この端末で通知を受け取る</div>
             <div className="settings-row__sub">
-              投稿・リアクションを通知
+              通知を受け取る端末として登録します
             </div>
           </div>
           <label className="toggle">
@@ -487,7 +487,7 @@ export default function SettingsPage() {
                       <li>「<strong>ホーム画面に追加</strong>」をタップ</li>
                       <li>ホーム画面のTSGアイコンからアプリを開く</li>
                       <li>LINEでログインする</li>
-                      <li>設定画面で「Web Push 通知」をONにする</li>
+                      <li>設定画面で「この端末で通知を受け取る」をONにする</li>
                       <li>「通知を許可しますか？」→「<strong>許可</strong>」をタップ</li>
                     </ol>
                     <div className="notification-guide__note" style={{ marginTop: 12 }}>
@@ -499,7 +499,7 @@ export default function SettingsPage() {
                   <ol>
                     <li>Chromeでこのサイトを開く</li>
                     <li>LINEでログインする</li>
-                    <li>設定画面で「Web Push 通知」をONにする</li>
+                    <li>設定画面で「この端末で通知を受け取る」をONにする</li>
                     <li>ブラウザの通知許可で「許可」を選ぶ</li>
                     <li>「テスト通知」で届くか確認する</li>
                   </ol>
@@ -507,7 +507,7 @@ export default function SettingsPage() {
                 {guideDevice === "pc" && (
                   <ol>
                     <li>Chrome / Edge / Firefoxで設定画面を開く</li>
-                    <li>「Web Push 通知」をONにする</li>
+                    <li>「この端末で通知を受け取る」をONにする</li>
                     <li>ブラウザの通知許可で「許可」を選ぶ</li>
                     <li>通知をブロックした場合は、アドレスバー左のサイト設定から通知を許可する</li>
                   </ol>

@@ -967,7 +967,7 @@
 - **要件**: 投稿の「編集」および「削除」操作時にはプッシュ通知を送信しない
 - **修正内容**:
   - `app/api/posts/route.ts`: PATCH（編集）とDELETE（削除）ハンドラから通知送信ロジックを完全に除去
-  - `app/settings/page.tsx`: 設定画面の通知説明文を「投稿・リアクションを通知」に修正
+  - `app/settings/page.tsx`: 設定画面の通知説明文を端末ごとの受信ON/OFFであることが分かる文言へ修正
 - **関連ファイル**:
   - `app/api/posts/route.ts`
   - `app/settings/page.tsx`
