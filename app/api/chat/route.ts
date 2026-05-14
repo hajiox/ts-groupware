@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
+import { getDeviceIdFromRequest, markGroupRead } from '@/lib/read-status'
 
 type Attachment = {
   url?: string
@@ -72,6 +73,7 @@ export async function GET(request: NextRequest) {
 
   const since = request.nextUrl.searchParams.get('since')
   const limit = Math.min(parseInt(request.nextUrl.searchParams.get('limit') || '80', 10) || 80, 100)
+  const deviceId = getDeviceIdFromRequest(request)
 
   let query = adminClient
     .from('gw_posts')
@@ -140,13 +142,7 @@ export async function GET(request: NextRequest) {
       last_read_at: r.last_read_at,
     }))
 
-  adminClient
-    .from('gw_read_status')
-    .upsert({
-      user_id: user.id,
-      group_id: groupId,
-      last_read_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,group_id' })
+  markGroupRead(user.id, groupId, deviceId)
     .then(undefined, e => console.error('[Chat read status update error]', e))
 
   return NextResponse.json({

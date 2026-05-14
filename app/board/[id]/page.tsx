@@ -3,6 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { linkifyText, OgpPreviews } from "@/components/link-preview";
+import { getDeviceHeaders } from "@/lib/device-id";
 
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"] as const;
 const IMAGE_UPLOAD_MAX_SIZE = 1600;
@@ -228,7 +229,7 @@ export default function BoardPage() {
 
   function loadPosts() {
     setLoading(true);
-    fetch(`/api/posts?group_id=${id}`)
+    fetch(`/api/posts?group_id=${id}`, { headers: getDeviceHeaders() })
       .then((res) => (res.ok ? res.json() : { posts: [], groupName: null }))
       .then((data) => {
         setPosts(data.posts || []);
@@ -304,7 +305,7 @@ export default function BoardPage() {
   async function loadComments(postId: string) {
     setCommentLoadingByPost((current) => ({ ...current, [postId]: true }));
     try {
-      const res = await fetch(`/api/posts?group_id=${id}&parent_id=${postId}&limit=100`);
+      const res = await fetch(`/api/posts?group_id=${id}&parent_id=${postId}&limit=100`, { headers: getDeviceHeaders() });
       const data = res.ok ? await res.json() : { posts: [] };
       const comments = (data.posts || [])
         .filter((post: Post) => post.parent_id === postId)

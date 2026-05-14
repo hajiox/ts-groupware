@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
+import { getDeviceIdFromRequest } from '@/lib/read-status'
 
 export async function POST(request: Request) {
   const user = await getUserSession()
@@ -10,17 +11,35 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}))
   const endpoint = body.endpoint
+  const deviceId = getDeviceIdFromRequest(request)
 
   if (!endpoint) {
     return NextResponse.json({ subscribed: false })
   }
 
-  const { data, error } = await adminClient
+  let query = adminClient
     .from('gw_push_subscriptions')
     .select('id')
     .eq('user_id', user.id)
     .eq('endpoint', endpoint)
-    .maybeSingle()
+
+  if (deviceId) {
+    query = query.eq('device_id', deviceId)
+  }
+
+  let { data, error } = await query.maybeSingle()
+
+  if (error && deviceId && /device_id|schema cache/i.test(error.message || '')) {
+    const fallback = await adminClient
+      .from('gw_push_subscriptions')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('endpoint', endpoint)
+      .maybeSingle()
+
+    data = fallback.data
+    error = fallback.error
+  }
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })

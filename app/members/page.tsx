@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getDeviceHeaders } from "@/lib/device-id";
 
 type Member = {
   id: string;
@@ -47,7 +48,7 @@ export default function MembersPage() {
   }, []);
 
   function fetchUnread() {
-    fetch("/api/dm/unread")
+    fetch("/api/dm/unread", { headers: getDeviceHeaders() })
       .then(r => r.ok ? r.json() : { perUser: {} })
       .then(data => setUnreadMap(data.perUser || {}))
       .catch(() => {});

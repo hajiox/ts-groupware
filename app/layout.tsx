@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { getDeviceHeaders } from "@/lib/device-id";
 import "./globals.css";
 
 // ─── Bottom Navigation ────────────────────────────────────────────────────────
@@ -28,7 +29,7 @@ function BottomNav() {
     let active = true;
 
     const fetchUnread = () => {
-      fetch("/api/unread")
+      fetch("/api/unread", { headers: getDeviceHeaders() })
         .then(r => r.ok ? r.json() : { dmUnread: 0, groupUnread: 0, totalUnread: 0 })
         .then(data => {
           if (active) {

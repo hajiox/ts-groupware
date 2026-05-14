@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getDeviceHeaders } from "@/lib/device-id";
 
 type User = {
   id: string;
@@ -144,7 +145,7 @@ export default function SettingsPage() {
       } else {
         const response = await fetch("/api/push/status", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getDeviceHeaders() },
           body: JSON.stringify({ endpoint: subscription.endpoint }),
         });
         const data = response.ok ? await response.json() : { subscribed: false };
@@ -186,7 +187,7 @@ export default function SettingsPage() {
 
         await fetch('/api/push/subscribe', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getDeviceHeaders() },
           body: JSON.stringify({ subscription: subscription.toJSON() }),
         });
         setPushEnabled(true);
@@ -197,7 +198,7 @@ export default function SettingsPage() {
         if (subscription) {
           await fetch('/api/push/subscribe', {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getDeviceHeaders() },
             body: JSON.stringify({ endpoint: subscription.endpoint }),
           });
           await subscription.unsubscribe();

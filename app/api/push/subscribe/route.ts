@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
+import { getDeviceIdFromRequest, seedDeviceReadStatus } from '@/lib/read-status'
 
 export async function POST(request: Request) {
   const user = await getUserSession()
@@ -11,6 +12,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json()
     const { subscription } = body
+    const deviceId = getDeviceIdFromRequest(request)
 
     if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
       return NextResponse.json({ error: '不正な購読データです' }, { status: 400 })
@@ -23,15 +25,38 @@ export async function POST(request: Request) {
       .eq('endpoint', subscription.endpoint)
       .eq('user_id', user.id)
 
+    await seedDeviceReadStatus(user.id, deviceId)
+
+    const subscriptionRow = {
+      endpoint: subscription.endpoint,
+      p256dh: subscription.keys.p256dh,
+      auth: subscription.keys.auth,
+      user_id: user.id,
+      label: user.display_name,
+      ...(deviceId ? { device_id: deviceId } : {}),
+    }
+
     const { error } = await adminClient
       .from('gw_push_subscriptions')
-      .insert({
-        endpoint: subscription.endpoint,
-        p256dh: subscription.keys.p256dh,
-        auth: subscription.keys.auth,
-        user_id: user.id,
-        label: user.display_name,
-      })
+      .insert(subscriptionRow)
+
+    if (error && /device_id|schema cache/i.test(error.message || '')) {
+      const { error: retryError } = await adminClient
+        .from('gw_push_subscriptions')
+        .insert({
+          endpoint: subscription.endpoint,
+          p256dh: subscription.keys.p256dh,
+          auth: subscription.keys.auth,
+          user_id: user.id,
+          label: user.display_name,
+        })
+
+      if (retryError) {
+        return NextResponse.json({ error: retryError.message }, { status: 500 })
+      }
+
+      return NextResponse.json({ success: true })
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
@@ -52,6 +77,7 @@ export async function DELETE(request: Request) {
 
   try {
     const body = await request.json()
+    const deviceId = getDeviceIdFromRequest(request)
     
     const query = adminClient
       .from('gw_push_subscriptions')
@@ -60,6 +86,8 @@ export async function DELETE(request: Request) {
 
     if (body.endpoint) {
       query.eq('endpoint', body.endpoint)
+    } else if (deviceId) {
+      query.eq('device_id', deviceId)
     }
     
     await query

@@ -120,13 +120,23 @@ export async function sendPushNotificationToGroup(groupId: string, senderId: str
   if (userIds.length === 0) return
 
   // メンバーの購読情報を取得
-  const { data: subscriptions } = await adminClient
+  let { data: subscriptions, error: subscriptionError } = await adminClient
     .from('gw_push_subscriptions')
-    .select('id, endpoint, p256dh, auth, user_id')
+    .select('id, endpoint, p256dh, auth, user_id, device_id')
     .in('user_id', userIds)
+  let subscriptionRows: any[] | null = subscriptions
 
-  if (subscriptions && subscriptions.length > 0) {
-    await _executeSend(subscriptions, payload)
+  if (subscriptionError && /device_id|schema cache/i.test(subscriptionError.message || '')) {
+    const fallback = await adminClient
+      .from('gw_push_subscriptions')
+      .select('id, endpoint, p256dh, auth, user_id')
+      .in('user_id', userIds)
+    subscriptionRows = fallback.data
+    subscriptionError = fallback.error
+  }
+
+  if (!subscriptionError && subscriptionRows && subscriptionRows.length > 0) {
+    await _executeSend(subscriptionRows, payload)
   }
 }
 
@@ -136,19 +146,34 @@ export async function sendPushNotificationToGroup(groupId: string, senderId: str
 async function _sendToSubscriptions(userId: string | null, payload: PushPayload): Promise<void> {
   let query = adminClient
     .from('gw_push_subscriptions')
-    .select('id, endpoint, p256dh, auth, user_id')
+    .select('id, endpoint, p256dh, auth, user_id, device_id')
 
   if (userId) {
     query = query.eq('user_id', userId)
   }
 
-  const { data: subscriptions, error } = await query
+  let { data: subscriptions, error } = await query
+  let subscriptionRows: any[] | null = subscriptions
 
-  if (error || !subscriptions || subscriptions.length === 0) {
+  if (error && /device_id|schema cache/i.test(error.message || '')) {
+    let fallbackQuery = adminClient
+      .from('gw_push_subscriptions')
+      .select('id, endpoint, p256dh, auth, user_id')
+
+    if (userId) {
+      fallbackQuery = fallbackQuery.eq('user_id', userId)
+    }
+
+    const fallback = await fallbackQuery
+    subscriptionRows = fallback.data
+    error = fallback.error
+  }
+
+  if (error || !subscriptionRows || subscriptionRows.length === 0) {
     return
   }
 
-  await _executeSend(subscriptions, payload)
+  await _executeSend(subscriptionRows, payload)
 }
 
 async function _executeSend(subscriptions: any[], payload: PushPayload): Promise<void> {
@@ -161,7 +186,7 @@ async function _executeSend(subscriptions: any[], payload: PushPayload): Promise
     subscriptions.map(async (sub) => {
       try {
         const badgeCount = payload.badgeCount ?? (sub.user_id
-          ? (await getUnreadSummary(sub.user_id)).totalUnread
+          ? (await getUnreadSummary(sub.user_id, sub.device_id)).totalUnread
           : undefined)
         const notificationPayload = JSON.stringify({
           title: payload.title,

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { getDeviceHeaders } from "@/lib/device-id";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://v0-line-blush.vercel.app";
 const lineLoginUrl = `${siteUrl}/api/auth/line`;
@@ -173,7 +174,7 @@ export default function GroupsPage() {
       .then((data) => data && setUser(data.user))
       .catch(() => {});
 
-    fetch("/api/groups")
+    fetch("/api/groups", { headers: getDeviceHeaders() })
       .then((r) => (r.ok ? r.json() : { groups: [] }))
       .then((data) => {
         const fetchedGroups = data.groups || [];

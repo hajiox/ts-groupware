@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getDeviceHeaders } from "@/lib/device-id";
 
 type ChatUser = {
   id: string;
@@ -112,7 +113,10 @@ export default function ChatPage() {
     const params = new URLSearchParams({ group_id: id });
     if (since) params.set("since", since);
 
-    const res = await fetch(`/api/chat?${params.toString()}`, { cache: "no-store" });
+    const res = await fetch(`/api/chat?${params.toString()}`, {
+      cache: "no-store",
+      headers: getDeviceHeaders(),
+    });
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {

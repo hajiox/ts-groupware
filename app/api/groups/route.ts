@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
 import { getUnreadCountsByGroup } from '@/lib/unread'
+import { getDeviceIdFromRequest } from '@/lib/read-status'
 
 /**
  * GET /api/groups — 自分が参加しているグループ一覧
@@ -12,7 +13,7 @@ function isDirectChat(group: { type?: string; description?: string | null }) {
   return group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:')
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const user = await getUserSession()
   if (!user) {
     return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
@@ -79,7 +80,7 @@ export async function GET() {
       .is('parent_id', null)
       .order('created_at', { ascending: false })
       .limit(groupIds.length * 3),
-    getUnreadCountsByGroup(user.id, groupIds),
+    getUnreadCountsByGroup(user.id, groupIds, getDeviceIdFromRequest(request)),
   ])
 
   // グループごとの最新投稿をマップ化
