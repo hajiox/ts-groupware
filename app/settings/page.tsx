@@ -46,7 +46,7 @@ function urlB64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
-const PUBLIC_VAPID_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "BKGxnPaH_MlzJqV-YpTCO6S3cemGfxnbgUWURzBd6asH7gHRoMTPpksMP_gb86xVIczFy2B-wM6QHAgO-PQMaTg";
+const PUBLIC_VAPID_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "";
 
 function detectDevice(): DeviceType {
   if (typeof navigator === "undefined") return "pc";
@@ -120,7 +120,7 @@ export default function SettingsPage() {
     }
 
     // Step 2: Push API存在チェック
-    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    if (!PUBLIC_VAPID_KEY || !('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
       setPushCapability("unsupported");
       setLoadingPush(false);
       return;

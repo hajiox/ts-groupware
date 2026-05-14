@@ -7,6 +7,7 @@
 
 import webpush from 'web-push'
 import { adminClient } from '@/lib/supabase/admin'
+import { getUnreadSummary } from '@/lib/unread'
 
 let vapidInitialized = false
 
@@ -37,6 +38,7 @@ type PushPayload = {
   url?: string
   tag?: string
   icon?: string
+  badgeCount?: number
 }
 
 /**
@@ -81,8 +83,7 @@ export async function sendPushNotificationToGroup(groupId: string, senderId: str
 
   if (!members || members.length === 0) return
 
-  // テスト時や複数端末利用時に自分の投稿でも通知を受け取れるよう、senderIdでの除外を削除
-  let userIds = members.map(m => m.user_id)
+  let userIds = members.map(m => m.user_id).filter(id => id !== senderId)
 
   if (userIds.length === 0) return
 
@@ -156,17 +157,21 @@ async function _executeSend(subscriptions: any[], payload: PushPayload): Promise
     return
   }
 
-  const notificationPayload = JSON.stringify({
-    title: payload.title,
-    body: payload.body,
-    url: payload.url || '/groups',
-    tag: payload.tag || 'ts-groupware-' + Date.now(),
-    icon: payload.icon || '/icon-192x192.png',
-  })
-
   const results = await Promise.allSettled(
     subscriptions.map(async (sub) => {
       try {
+        const badgeCount = payload.badgeCount ?? (sub.user_id
+          ? (await getUnreadSummary(sub.user_id)).totalUnread
+          : undefined)
+        const notificationPayload = JSON.stringify({
+          title: payload.title,
+          body: payload.body,
+          url: payload.url || '/groups',
+          tag: payload.tag || 'ts-groupware-' + Date.now(),
+          icon: payload.icon || '/icon-192.png',
+          badgeCount,
+        })
+
         await webpush.sendNotification(
           {
             endpoint: sub.endpoint,
@@ -186,9 +191,24 @@ async function _executeSend(subscriptions: any[], payload: PushPayload): Promise
             .delete()
             .eq('id', sub.id)
         }
+        throw err
       }
     })
   )
+
+  const failed = results
+    .map((result, index) => ({ result, sub: subscriptions[index] }))
+    .filter(({ result }) => result.status === 'rejected')
+
+  for (const { result, sub } of failed) {
+    const reason = result.status === 'rejected' ? result.reason : null
+    console.error('[WebPush] 送信失敗:', {
+      subscriptionId: sub.id,
+      userId: sub.user_id,
+      statusCode: reason?.statusCode,
+      message: reason instanceof Error ? reason.message : String(reason),
+    })
+  }
 
   const succeeded = results.filter(r => r.status === 'fulfilled').length
   console.log(`[WebPush] 送信完了: ${succeeded}/${subscriptions.length}`)

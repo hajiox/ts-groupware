@@ -5,8 +5,8 @@ self.addEventListener('push', (event) => {
     const data = event.data.json()
     const options = {
       body: data.body || '',
-      icon: data.icon || '/icon-192x192.png',
-      badge: data.badge || '/icon-192x192.png',
+      icon: data.icon || '/icon-192.png',
+      badge: data.badge || '/icon-192.png',
       vibrate: [100, 50, 100],
       tag: data.tag || 'ts-groupware-notification',
       renotify: true,
@@ -15,8 +15,11 @@ self.addEventListener('push', (event) => {
       },
     }
 
+    const badgeCount = Number(data.badgeCount || 0)
     const badgePromise = ('setAppBadge' in navigator)
-      ? navigator.setAppBadge().catch(err => console.error('[SW] Badge error', err))
+      ? (badgeCount > 0
+        ? navigator.setAppBadge(badgeCount).catch(err => console.error('[SW] Badge error', err))
+        : Promise.resolve())
       : Promise.resolve()
 
     event.waitUntil(
@@ -32,10 +35,6 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-
-  if ('clearAppBadge' in navigator) {
-    navigator.clearAppBadge().catch(err => console.error('[SW] clearBadge error', err));
-  }
 
   const urlToOpen = event.notification.data?.url || '/'
 

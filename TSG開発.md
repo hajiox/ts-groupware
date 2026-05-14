@@ -1,8 +1,36 @@
 # TS Groupware (TSG) 開発経過
 
-## 最終更新: 2026-05-09
+## 最終更新: 2026-05-14
 
 ---
+
+### 2026-05-14 通知・未読バッジ・PWA App Badgeの安定化
+- **対象**: 掲示板投稿、グループチャット、DM、Web Push通知、未読赤丸、ホーム画面追加アイコンのApp Badge
+- **問題**:
+  - 掲示板/グループチャット投稿で送信者本人にもPush通知が飛ぶ場合があった
+  - グループ一覧、DM一覧、下部ナビ、PWA App Badgeで未読数の計算ルールが揃っていなかった
+  - Service Workerが通知クリック時にApp Badgeを無条件クリアし、他の未読が残っていても赤丸が消えることがあった
+  - Push通知アイコンが存在しない `/icon-192x192.png` を参照していた
+  - VAPID公開鍵のハードコードフォールバックにより、環境変数不備を見逃す可能性があった
+  - Push送信失敗が成功ログとして扱われ、原因調査しづらかった
+- **修正内容**:
+  - `lib/unread.ts` を新設し、未読数を「自分以外の親投稿/メッセージ、last_read_at以降」で共通計算
+  - `/api/unread` と `/api/groups` の未読計算を共通ロジックへ統一
+  - `sendPushNotificationToGroup` で送信者本人を通知対象から除外
+  - Push payloadにユーザー別の `badgeCount` を付与し、Service Worker側はその数値でApp Badgeを更新
+  - 通知クリック時の無条件 `clearAppBadge()` を削除
+  - 通知アイコン参照を `/icon-192.png` に統一
+  - Push送信エラーを失敗としてログ出力するよう修正
+  - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` 未設定時は通知非対応扱いにし、誤った購読を防止
+- **確認**:
+  - `npm.cmd run build` 成功
+- **関連ファイル**:
+  - `lib/unread.ts`
+  - `lib/web-push.ts`
+  - `public/sw.js`
+  - `app/api/unread/route.ts`
+  - `app/api/groups/route.ts`
+  - `app/settings/page.tsx`
 
 ## 1. プロジェクト概要
 

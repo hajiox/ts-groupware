@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
+import { getUnreadCountsByGroup } from '@/lib/unread'
 
 /**
  * GET /api/groups — 自分が参加しているグループ一覧
@@ -68,26 +69,7 @@ export async function GET() {
     { ...directUser, display_name: directUser.real_name || directUser.display_name }
   ]))
 
-  // まず既読ステータスを取得（未読計算で必要）
-  const { data: allReadStatus } = await adminClient
-    .from('gw_read_status')
-    .select('group_id, last_read_at')
-    .eq('user_id', user.id)
-    .in('group_id', groupIds)
-
-  const readStatusMap: Record<string, string> = {}
-  for (const rs of allReadStatus || []) {
-    readStatusMap[rs.group_id] = rs.last_read_at
-  }
-
-  // 最新投稿取得 + 未読カウント（last_read_at以降のみ）を並列実行
-  // 最古のlast_read_atを求めて、それ以降の投稿のみ取得する
-  const readTimes = Object.values(readStatusMap)
-  const oldestRead = readTimes.length > 0
-    ? readTimes.reduce((a, b) => a < b ? a : b)
-    : null
-
-  const [{ data: allPosts }, { data: unreadPosts }] = await Promise.all([
+  const [{ data: allPosts }, unreadMap] = await Promise.all([
     // 最新投稿を新しい順に取得（各グループの最新1件抽出用）
     // limit制限で全件スキャンを回避
     adminClient
@@ -97,15 +79,7 @@ export async function GET() {
       .is('parent_id', null)
       .order('created_at', { ascending: false })
       .limit(groupIds.length * 3),
-    // 未読投稿のみ取得（既読時刻以降）
-    oldestRead
-      ? adminClient
-          .from('gw_posts')
-          .select('group_id, created_at')
-          .in('group_id', groupIds)
-          .is('parent_id', null)
-          .gt('created_at', oldestRead)
-      : Promise.resolve({ data: [] as { group_id: string; created_at: string }[] }),
+    getUnreadCountsByGroup(user.id, groupIds),
   ])
 
   // グループごとの最新投稿をマップ化
@@ -113,15 +87,6 @@ export async function GET() {
   for (const post of allPosts || []) {
     if (!latestPostMap[post.group_id]) {
       latestPostMap[post.group_id] = post
-    }
-  }
-
-  // 未読数の計算
-  const unreadMap: Record<string, number> = {}
-  for (const post of unreadPosts || []) {
-    const lastRead = readStatusMap[post.group_id]
-    if (lastRead && post.created_at > lastRead) {
-      unreadMap[post.group_id] = (unreadMap[post.group_id] || 0) + 1
     }
   }
 
