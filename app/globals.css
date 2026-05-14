@@ -1,4 +1,4 @@
-/* TS Groupware 窶・Vanilla CSS Dark Theme */
+﻿/* TS Groupware 窶・Vanilla CSS Dark Theme */
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -2430,4 +2430,30 @@ html[data-theme="light"] .chat-privacy-banner {
   line-height: 1;
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
   pointer-events: none;
+}
+
+/* ═══ DM List Unread Badge ═══ */
+.member-directory__avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.member-directory__unread {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  pointer-events: none;
+  border: 2px solid var(--card);
 }

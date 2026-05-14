@@ -4,12 +4,13 @@ import { getUserSession } from '@/lib/session'
 
 /**
  * DM未読メッセージ数を返すAPI
- * gw_read_status の last_read_at 以降に投稿された DM メッセージをカウント
+ * count: 全DM合計の未読数
+ * perUser: ユーザーIDごとの未読数 { [userId]: count }
  */
 export async function GET() {
   const user = await getUserSession()
   if (!user) {
-    return NextResponse.json({ count: 0 }, { status: 401 })
+    return NextResponse.json({ count: 0, perUser: {} }, { status: 401 })
   }
 
   // 自分が参加しているDMグループを取得
@@ -19,7 +20,7 @@ export async function GET() {
     .eq('user_id', user.id)
 
   if (!myGroups || myGroups.length === 0) {
-    return NextResponse.json({ count: 0 })
+    return NextResponse.json({ count: 0, perUser: {} })
   }
 
   const groupIds = myGroups.map(g => g.group_id)
@@ -27,13 +28,13 @@ export async function GET() {
   // DMグループ（description が direct: で始まる）を絞り込み
   const { data: dmGroups } = await adminClient
     .from('gw_groups')
-    .select('id')
+    .select('id, description')
     .in('id', groupIds)
     .eq('type', 'chat')
     .like('description', 'direct:%')
 
   if (!dmGroups || dmGroups.length === 0) {
-    return NextResponse.json({ count: 0 })
+    return NextResponse.json({ count: 0, perUser: {} })
   }
 
   const dmIds = dmGroups.map(g => g.id)
@@ -50,15 +51,26 @@ export async function GET() {
     readMap.set(rs.group_id, rs.last_read_at)
   }
 
+  // descriptionからDM相手のユーザーIDを取得
+  // description format: "direct:userId1:userId2"
+  function getOtherUserId(description: string): string | null {
+    const parts = description.split(':')
+    if (parts.length < 3) return null
+    const id1 = parts[1]
+    const id2 = parts[2]
+    return id1 === user.id ? id2 : id1
+  }
+
   // 各DMグループの未読メッセージ数を集計
   let totalUnread = 0
+  const perUser: Record<string, number> = {}
 
-  for (const dmId of dmIds) {
-    const lastRead = readMap.get(dmId)
+  for (const dm of dmGroups) {
+    const lastRead = readMap.get(dm.id)
     let query = adminClient
       .from('gw_posts')
       .select('id', { count: 'exact', head: true })
-      .eq('group_id', dmId)
+      .eq('group_id', dm.id)
       .neq('user_id', user.id)
       .is('parent_id', null)
 
@@ -67,8 +79,16 @@ export async function GET() {
     }
 
     const { count } = await query
-    totalUnread += (count || 0)
+    const unread = count || 0
+    totalUnread += unread
+
+    if (unread > 0) {
+      const otherUserId = getOtherUserId(dm.description || '')
+      if (otherUserId) {
+        perUser[otherUserId] = unread
+      }
+    }
   }
 
-  return NextResponse.json({ count: totalUnread })
+  return NextResponse.json({ count: totalUnread, perUser })
 }

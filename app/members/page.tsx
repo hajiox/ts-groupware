@@ -33,6 +33,7 @@ export default function MembersPage() {
   const [loading, setLoading] = useState(true);
   const [creatingChatUserId, setCreatingChatUserId] = useState("");
   const [error, setError] = useState("");
+  const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetch("/api/chat/direct")
@@ -40,7 +41,17 @@ export default function MembersPage() {
       .then(data => setMembers(data.users || []))
       .catch(err => setError(err instanceof Error ? err.message : "メンバー一覧を取得できませんでした"))
       .finally(() => setLoading(false));
+
+    // 未読カウント取得
+    fetchUnread();
   }, []);
+
+  function fetchUnread() {
+    fetch("/api/dm/unread")
+      .then(r => r.ok ? r.json() : { perUser: {} })
+      .then(data => setUnreadMap(data.perUser || {}))
+      .catch(() => {});
+  }
 
   async function startDirectChat(targetUserId: string) {
     setCreatingChatUserId(targetUserId);
@@ -82,32 +93,42 @@ export default function MembersPage() {
           <p className="member-directory__empty">表示できるメンバーがいません</p>
         ) : (
           <div className="member-directory__list member-directory__list--page">
-            {members.map(member => (
-              <button
-                key={member.id}
-                type="button"
-                className="member-directory__item"
-                onClick={() => startDirectChat(member.id)}
-                disabled={Boolean(creatingChatUserId)}
-                title={member.isSelf ? "自分用メモを開く" : `${member.display_name} とChat`}
-              >
-                {member.picture_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={member.picture_url} alt="" className="avatar" width={38} height={38} />
-                ) : (
-                  <AvatarPlaceholder initials={member.display_name.charAt(0)} />
-                )}
-                <span>
-                  {member.isSelf ? `${member.display_name}（自分用メモ）` : member.display_name}
-                  {member.display_name === "TSG君" && (
-                    <span className="group-card__ai-badge">🤖 AIへの相談はこちらへ！</span>
-                  )}
-                </span>
-                <span className="member-directory__chat">
-                  {creatingChatUserId === member.id ? "開始中..." : member.isSelf ? "メモ" : "Chat"}
-                </span>
-              </button>
-            ))}
+            {members.map(member => {
+              const unread = unreadMap[member.id] || 0;
+              return (
+                <button
+                  key={member.id}
+                  type="button"
+                  className="member-directory__item"
+                  onClick={() => startDirectChat(member.id)}
+                  disabled={Boolean(creatingChatUserId)}
+                  title={member.isSelf ? "自分用メモを開く" : `${member.display_name} とChat`}
+                >
+                  <span className="member-directory__avatar-wrap">
+                    {member.picture_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={member.picture_url} alt="" className="avatar" width={38} height={38} />
+                    ) : (
+                      <AvatarPlaceholder initials={member.display_name.charAt(0)} />
+                    )}
+                    {unread > 0 && (
+                      <span className="member-directory__unread" aria-label={`未読${unread}件`}>
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    )}
+                  </span>
+                  <span>
+                    {member.isSelf ? `${member.display_name}（自分用メモ）` : member.display_name}
+                    {member.display_name === "TSG君" && (
+                      <span className="group-card__ai-badge">🤖 AIへの相談はこちらへ！</span>
+                    )}
+                  </span>
+                  <span className="member-directory__chat">
+                    {creatingChatUserId === member.id ? "開始中..." : member.isSelf ? "メモ" : "Chat"}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         )}
       </section>
