@@ -1,9 +1,11 @@
+// /app/board/[id]/page.tsx ver.2
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { linkifyText, OgpPreviews } from "@/components/link-preview";
 import { getDeviceHeaders } from "@/lib/device-id";
+import { uploadAttachmentFile } from "@/lib/upload-client";
 
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"] as const;
 const IMAGE_UPLOAD_MAX_SIZE = 1600;
@@ -240,23 +242,12 @@ export default function BoardPage() {
   }
 
   async function uploadFile(file: File, uploadOriginalFile: boolean): Promise<Attachment[]> {
-    const formData = new FormData();
     const preparedFile = await prepareUploadFile(file, uploadOriginalFile);
-    formData.append("file", preparedFile);
-
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
-    });
-
-    const data = await res.json().catch(() => null);
-    if (!res.ok) {
-      throw new Error(data?.error || "ファイルのアップロードに失敗しました");
-    }
+    const data = await uploadAttachmentFile(preparedFile);
 
     return [{
       type: data.type,
-      url: data.viewUrl || data.url,
+      url: data.url,
       name: data.name,
       driveId: data.driveId,
       viewUrl: data.viewUrl,

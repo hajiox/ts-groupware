@@ -1,3 +1,4 @@
+// /lib/drive.ts ver.2
 import { google } from 'googleapis'
 import { Readable } from 'stream'
 
@@ -38,7 +39,7 @@ function parseServiceAccountKey(keyString: string) {
   }
 }
 
-function getDriveClient() {
+function getOAuthClient() {
   const clientId = process.env.GOOGLE_CLIENT_ID
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET
   const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN
@@ -46,22 +47,57 @@ function getDriveClient() {
   if (clientId && clientSecret && refreshToken) {
     const auth = new google.auth.OAuth2(clientId, clientSecret)
     auth.setCredentials({ refresh_token: refreshToken.trim() })
-    return google.drive({ version: 'v3', auth })
+    return auth
   }
 
+  return null
+}
+
+function getGoogleAuth() {
   const keyString = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
-  if (!keyString) {
-    throw new Error('Google Drive OAuth env vars are not set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN)')
-  }
+  if (!keyString) return null
 
   const credentials = parseServiceAccountKey(keyString)
-  
-  const auth = new google.auth.GoogleAuth({
+
+  return new google.auth.GoogleAuth({
     credentials,
     scopes: ['https://www.googleapis.com/auth/drive.file'],
   })
+}
 
-  return google.drive({ version: 'v3', auth })
+function getDriveClient() {
+  const oauthClient = getOAuthClient()
+  if (oauthClient) {
+    return google.drive({ version: 'v3', auth: oauthClient })
+  }
+
+  const googleAuth = getGoogleAuth()
+  if (!googleAuth) {
+    throw new Error('Google Drive OAuth env vars are not set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN)')
+  }
+
+  return google.drive({ version: 'v3', auth: googleAuth })
+}
+
+async function getAccessToken() {
+  const oauthClient = getOAuthClient()
+  if (oauthClient) {
+    const tokenResponse = await oauthClient.getAccessToken()
+    const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token
+    if (!token) throw new Error('Google Drive OAuth access token could not be created')
+    return token
+  }
+
+  const googleAuth = getGoogleAuth()
+  if (!googleAuth) {
+    throw new Error('Google Drive OAuth env vars are not set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN)')
+  }
+
+  const authClient = await googleAuth.getClient()
+  const tokenResponse = await authClient.getAccessToken()
+  const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token
+  if (!token) throw new Error('Google Drive service account access token could not be created')
+  return token
 }
 
 export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mimeType: string) {
@@ -101,6 +137,65 @@ export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mi
       supportsAllDrives: true,
     })
   }
+
+  return response.data
+}
+
+export async function createDriveUploadSession(fileName: string, mimeType: string, fileSize: number) {
+  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim()
+
+  if (!folderId) {
+    throw new Error('GOOGLE_DRIVE_FOLDER_ID is not set')
+  }
+
+  const token = await getAccessToken()
+  const response = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id,webViewLink,webContentLink',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': mimeType || 'application/octet-stream',
+        'X-Upload-Content-Length': String(fileSize),
+      },
+      body: JSON.stringify({
+        name: fileName,
+        parents: [folderId],
+      }),
+    }
+  )
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '')
+    throw new Error(`Google Drive upload session failed: ${response.status} ${errorText}`)
+  }
+
+  const uploadUrl = response.headers.get('location')
+  if (!uploadUrl) {
+    throw new Error('Google Drive upload session URL was not returned')
+  }
+
+  return { uploadUrl }
+}
+
+export async function makeDriveFilePublic(fileId: string) {
+  const drive = getDriveClient()
+
+  await drive.permissions.create({
+    fileId,
+    requestBody: {
+      role: 'reader',
+      type: 'anyone',
+    },
+    supportsAllDrives: true,
+  })
+
+  const response = await drive.files.get({
+    fileId,
+    fields: 'id, webViewLink, webContentLink',
+    supportsAllDrives: true,
+  })
 
   return response.data
 }

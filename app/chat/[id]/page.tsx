@@ -1,8 +1,10 @@
+// /app/chat/[id]/page.tsx ver.2
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDeviceHeaders } from "@/lib/device-id";
+import { uploadAttachmentFile } from "@/lib/upload-client";
 
 type ChatUser = {
   id: string;
@@ -177,21 +179,10 @@ export default function ChatPage() {
   async function uploadSelectedFile() {
     if (!selectedFile) return [];
 
-    const formData = new FormData();
-    formData.append("file", selectedFile);
-
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
-    });
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      throw new Error(data.error || "ファイルのアップロードに失敗しました");
-    }
+    const data = await uploadAttachmentFile(selectedFile);
 
     return [{
-      url: data.viewUrl || data.url,
+      url: data.url,
       viewUrl: data.viewUrl,
       name: data.name || selectedFile.name,
       type: data.type || selectedFile.type,
