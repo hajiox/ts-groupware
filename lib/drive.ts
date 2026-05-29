@@ -1,4 +1,4 @@
-// /lib/drive.ts ver.2
+// /lib/drive.ts ver.3
 import { google } from 'googleapis'
 import { Readable } from 'stream'
 
@@ -66,20 +66,29 @@ function getGoogleAuth() {
 }
 
 function getDriveClient() {
+  const googleAuth = getGoogleAuth()
+  if (googleAuth) {
+    return google.drive({ version: 'v3', auth: googleAuth })
+  }
+
   const oauthClient = getOAuthClient()
   if (oauthClient) {
     return google.drive({ version: 'v3', auth: oauthClient })
   }
 
-  const googleAuth = getGoogleAuth()
-  if (!googleAuth) {
-    throw new Error('Google Drive OAuth env vars are not set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN)')
-  }
-
-  return google.drive({ version: 'v3', auth: googleAuth })
+  throw new Error('Google Drive env vars are not set (GOOGLE_SERVICE_ACCOUNT_KEY or GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET/GOOGLE_DRIVE_REFRESH_TOKEN)')
 }
 
 async function getAccessToken() {
+  const googleAuth = getGoogleAuth()
+  if (googleAuth) {
+    const authClient = await googleAuth.getClient()
+    const tokenResponse = await authClient.getAccessToken()
+    const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token
+    if (!token) throw new Error('Google Drive service account access token could not be created')
+    return token
+  }
+
   const oauthClient = getOAuthClient()
   if (oauthClient) {
     const tokenResponse = await oauthClient.getAccessToken()
@@ -88,16 +97,7 @@ async function getAccessToken() {
     return token
   }
 
-  const googleAuth = getGoogleAuth()
-  if (!googleAuth) {
-    throw new Error('Google Drive OAuth env vars are not set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN)')
-  }
-
-  const authClient = await googleAuth.getClient()
-  const tokenResponse = await authClient.getAccessToken()
-  const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token
-  if (!token) throw new Error('Google Drive service account access token could not be created')
-  return token
+  throw new Error('Google Drive env vars are not set (GOOGLE_SERVICE_ACCOUNT_KEY or GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET/GOOGLE_DRIVE_REFRESH_TOKEN)')
 }
 
 export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mimeType: string) {
