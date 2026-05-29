@@ -1,3 +1,4 @@
+// /app/api/admin/members/route.ts ver.2
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
@@ -27,19 +28,27 @@ export async function GET(request: NextRequest) {
   }
 
   // グループのメンバー一覧
-  const { data: members } = await adminClient
+  const { data: members, error: membersError } = await adminClient
     .from('gw_group_members')
-    .select('user_id, role, created_at')
+    .select('user_id, role, joined_at')
     .eq('group_id', groupId)
+
+  if (membersError) {
+    return NextResponse.json({ error: membersError.message }, { status: 500 })
+  }
 
   const explicitMemberUserIds = (members || []).map(m => m.user_id)
 
   // 全ユーザー
-  const { data: allUsers } = await adminClient
+  const { data: allUsers, error: usersError } = await adminClient
     .from('gw_users')
     .select('id, display_name, real_name, picture_url, role, status')
     .eq('status', 'approved')
     .order('display_name', { ascending: true })
+
+  if (usersError) {
+    return NextResponse.json({ error: usersError.message }, { status: 500 })
+  }
 
   // メンバーに含まれるユーザー / 含まれないユーザー
   const memberUsers = (allUsers || [])
