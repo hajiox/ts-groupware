@@ -5,6 +5,7 @@ import { getUserSession } from '@/lib/session'
 /**
  * 管理者用グループ管理 API
  *
+ * GET    /api/admin/groups — 全グループ一覧
  * DELETE /api/admin/groups — グループ削除
  */
 
@@ -13,6 +14,26 @@ async function requireAdmin() {
   if (!user) return { error: '認証が必要です', status: 401 }
   if (user.role !== 'admin') return { error: '管理者権限が必要です', status: 403 }
   return { error: null, status: 0 }
+}
+
+function isDirectChat(group: { type?: string; description?: string | null }) {
+  return group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:')
+}
+
+export async function GET() {
+  const { error, status } = await requireAdmin()
+  if (error) return NextResponse.json({ error }, { status })
+
+  const { data: groups, error: dbError } = await adminClient
+    .from('gw_groups')
+    .select('*')
+    .order('updated_at', { ascending: false })
+
+  if (dbError) {
+    return NextResponse.json({ error: dbError.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ groups: (groups || []).filter(group => !isDirectChat(group)) })
 }
 
 export async function DELETE(request: NextRequest) {

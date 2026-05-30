@@ -9,6 +9,31 @@ import { getUserSession } from '@/lib/session'
  * 既にリアクション済みの場合は削除（トグル動作）
  */
 
+async function getPostAccess(postId: string, userId: string) {
+  const { data: post } = await adminClient
+    .from('gw_posts')
+    .select('id, user_id, group_id, content, parent_id')
+    .eq('id', postId)
+    .single()
+
+  if (!post) {
+    return { post: null, error: '投稿が見つかりません', status: 404 }
+  }
+
+  const { data: membership } = await adminClient
+    .from('gw_group_members')
+    .select('role')
+    .eq('group_id', post.group_id)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (!membership) {
+    return { post: null, error: 'このグループに参加していません', status: 403 }
+  }
+
+  return { post, error: null, status: 0 }
+}
+
 export async function POST(request: NextRequest) {
   const user = await getUserSession()
   if (!user) {
@@ -20,6 +45,11 @@ export async function POST(request: NextRequest) {
 
   if (!post_id || !emoji) {
     return NextResponse.json({ error: 'post_id と emoji が必要です' }, { status: 400 })
+  }
+
+  const access = await getPostAccess(post_id, user.id)
+  if (access.error || !access.post) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   // 既存チェック
@@ -51,12 +81,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    const { data: post } = await adminClient
-      .from('gw_posts')
-      .select('id, user_id, group_id, content, parent_id')
-      .eq('id', post_id)
-      .single()
-
+    const post = access.post
     if (post && post.user_id !== user.id) {
       await import('@/lib/web-push')
         .then(({ sendPushNotificationToUser }) => {

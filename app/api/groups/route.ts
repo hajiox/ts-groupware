@@ -26,17 +26,15 @@ export async function GET(request: NextRequest) {
 
   const explicitGroupIds = memberships?.map(m => m.group_id) || []
 
+  if (explicitGroupIds.length === 0) {
+    return NextResponse.json({ groups: [] })
+  }
+
   let groupsQuery = adminClient
     .from('gw_groups')
     .select('*')
     .order('updated_at', { ascending: false })
-
-  if (user.role !== 'admin') {
-    if (explicitGroupIds.length === 0) {
-      return NextResponse.json({ groups: [] })
-    }
-    groupsQuery = groupsQuery.in('id', explicitGroupIds)
-  }
+    .in('id', explicitGroupIds)
 
   const { data: rawGroups } = await groupsQuery
   const groups = (rawGroups || []).filter(group => !isDirectChat(group))
@@ -151,14 +149,41 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error?.message || '作成失敗' }, { status: 500 })
   }
 
-  // 作成者をメンバーに追加（admin）
-  await adminClient
-    .from('gw_group_members')
-    .insert({
+  // 作成時点の承認済み管理者を全員参加にする。
+  // 以後は管理画面のメンバー管理で個別に除外できる。
+  const { data: adminUsers, error: adminUsersError } = await adminClient
+    .from('gw_users')
+    .select('id')
+    .eq('role', 'admin')
+    .eq('status', 'approved')
+
+  if (adminUsersError) {
+    await adminClient.from('gw_groups').delete().eq('id', group.id)
+    return NextResponse.json({ error: adminUsersError.message }, { status: 500 })
+  }
+
+  const adminMemberRows = new Map<string, { group_id: string; user_id: string; role: 'admin' }>()
+  for (const adminUser of adminUsers || []) {
+    adminMemberRows.set(adminUser.id, {
       group_id: group.id,
-      user_id: user.id,
+      user_id: adminUser.id,
       role: 'admin',
     })
+  }
+  adminMemberRows.set(user.id, {
+    group_id: group.id,
+    user_id: user.id,
+    role: 'admin',
+  })
+
+  const { error: memberError } = await adminClient
+    .from('gw_group_members')
+    .upsert([...adminMemberRows.values()], { onConflict: 'group_id,user_id' })
+
+  if (memberError) {
+    await adminClient.from('gw_groups').delete().eq('id', group.id)
+    return NextResponse.json({ error: memberError.message }, { status: 500 })
+  }
 
   return NextResponse.json({ group }, { status: 201 })
 }

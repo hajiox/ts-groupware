@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: membersError.message }, { status: 500 })
   }
 
+  const memberByUserId = new Map((members || []).map(m => [m.user_id, m]))
   const explicitMemberUserIds = (members || []).map(m => m.user_id)
 
   // 全ユーザー
@@ -52,18 +53,15 @@ export async function GET(request: NextRequest) {
 
   // メンバーに含まれるユーザー / 含まれないユーザー
   const memberUsers = (allUsers || [])
-    .filter(u => u.role === 'admin' || explicitMemberUserIds.includes(u.id))
+    .filter(u => explicitMemberUserIds.includes(u.id))
     .map(u => ({
       ...u,
       display_name: u.real_name || u.display_name,
-      group_role: u.role === 'admin'
-        ? 'admin'
-        : (members || []).find(m => m.user_id === u.id)?.role || 'member',
-      implicit_member: u.role === 'admin' && !explicitMemberUserIds.includes(u.id),
+      group_role: memberByUserId.get(u.id)?.role || 'member',
     }))
 
   const nonMembers = (allUsers || [])
-    .filter(u => u.role !== 'admin' && !explicitMemberUserIds.includes(u.id))
+    .filter(u => !explicitMemberUserIds.includes(u.id))
     .map(u => ({ ...u, display_name: u.real_name || u.display_name }))
 
   return NextResponse.json({ members: memberUsers, nonMembers })
@@ -82,11 +80,12 @@ export async function POST(request: NextRequest) {
 
   const { data: approvedUsers } = await adminClient
     .from('gw_users')
-    .select('id')
+    .select('id, role')
     .in('id', user_ids)
     .eq('status', 'approved')
 
-  const approvedUserIds = new Set((approvedUsers || []).map(u => u.id))
+  const approvedUserById = new Map((approvedUsers || []).map(u => [u.id, u]))
+  const approvedUserIds = new Set(approvedUserById.keys())
   if (approvedUserIds.size !== user_ids.length) {
     return NextResponse.json({ error: '未承認または停止中のユーザーはメンバーに追加できません' }, { status: 400 })
   }
@@ -94,7 +93,7 @@ export async function POST(request: NextRequest) {
   const inserts = user_ids.map((uid: string) => ({
     group_id,
     user_id: uid,
-    role: 'member',
+    role: approvedUserById.get(uid)?.role === 'admin' ? 'admin' : 'member',
   }))
 
   const { error: dbError } = await adminClient

@@ -12,7 +12,7 @@ type Attachment = {
   webViewLink?: string
 }
 
-async function getChatAccess(groupId: string, userId: string, userRole: string) {
+async function getChatAccess(groupId: string, userId: string) {
   const [{ data: group }, { data: membership }] = await Promise.all([
     adminClient
       .from('gw_groups')
@@ -24,19 +24,18 @@ async function getChatAccess(groupId: string, userId: string, userRole: string) 
       .select('role')
       .eq('group_id', groupId)
       .eq('user_id', userId)
-      .single(),
+      .maybeSingle(),
   ])
 
   if (!group || group.type !== 'chat') {
     return { group: null, membership: null, error: 'チャットが見つかりません', status: 404 }
   }
 
-  const isDirectChat = typeof group.description === 'string' && group.description.startsWith('direct:')
-  if (!membership && (userRole !== 'admin' || isDirectChat)) {
+  if (!membership) {
     return { group: null, membership: null, error: 'このチャットに参加していません', status: 403 }
   }
 
-  return { group, membership: membership || { role: 'admin' }, error: null, status: 0 }
+  return { group, membership, error: null, status: 0 }
 }
 
 function normalizeAttachments(value: unknown): Attachment[] {
@@ -66,7 +65,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'group_id が必要です' }, { status: 400 })
   }
 
-  const access = await getChatAccess(groupId, user.id, user.role)
+  const access = await getChatAccess(groupId, user.id)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -181,7 +180,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'メッセージまたは添付ファイルが必要です' }, { status: 400 })
   }
 
-  const access = await getChatAccess(groupId, user.id, user.role)
+  const access = await getChatAccess(groupId, user.id)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

@@ -49,6 +49,32 @@ function getAttachmentDriveIds(posts: { attachments?: Attachment[] | null }[]) {
   return [...ids]
 }
 
+async function getGroupAccess(groupId: string, userId: string) {
+  const [{ data: group }, { data: membership }] = await Promise.all([
+    adminClient
+      .from('gw_groups')
+      .select('id, name, type')
+      .eq('id', groupId)
+      .maybeSingle(),
+    adminClient
+      .from('gw_group_members')
+      .select('role')
+      .eq('group_id', groupId)
+      .eq('user_id', userId)
+      .maybeSingle(),
+  ])
+
+  if (!group) {
+    return { group: null, error: 'グループが見つかりません', status: 404 }
+  }
+
+  if (!membership) {
+    return { group: null, error: 'このグループに参加していません', status: 403 }
+  }
+
+  return { group, error: null, status: 0 }
+}
+
 export async function GET(request: NextRequest) {
   const user = await getUserSession()
   if (!user) {
@@ -64,6 +90,11 @@ export async function GET(request: NextRequest) {
   const parentId = request.nextUrl.searchParams.get('parent_id')
   const limit = parseInt(request.nextUrl.searchParams.get('limit') || '50')
   const deviceId = getDeviceIdFromRequest(request)
+
+  const access = await getGroupAccess(groupId, user.id)
+  if (access.error) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
 
   let query = adminClient
     .from('gw_posts')
@@ -167,6 +198,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '内容が必要です' }, { status: 400 })
   }
 
+  const access = await getGroupAccess(group_id, user.id)
+  if (access.error) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
+
   const { data: post, error } = await adminClient
     .from('gw_posts')
     .insert({
@@ -250,6 +286,11 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: '自分の投稿のみ編集できます' }, { status: 403 })
   }
 
+  const access = await getGroupAccess(existing.group_id, user.id)
+  if (access.error) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
+
   if (!trimmedContent && (!existing.attachments || existing.attachments.length === 0)) {
     return NextResponse.json({ error: '内容が必要です' }, { status: 400 })
   }
@@ -295,6 +336,11 @@ export async function DELETE(request: NextRequest) {
 
   if (post.user_id !== user.id && user.role !== 'admin') {
     return NextResponse.json({ error: '削除権限がありません' }, { status: 403 })
+  }
+
+  const access = await getGroupAccess(post.group_id, user.id)
+  if (access.error) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   const { data: comments } = await adminClient

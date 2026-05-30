@@ -26,7 +26,6 @@ type GroupMember = {
   picture_url: string | null;
   role: string;
   group_role: string;
-  implicit_member?: boolean;
 };
 
 type Tab = "users" | "groups";
@@ -225,7 +224,7 @@ function GroupsTab() {
 
   function loadGroups() {
     setLoading(true);
-    fetch("/api/groups")
+    fetch("/api/admin/groups")
       .then(r => r.ok ? r.json() : { groups: [] })
       .then(d => setGroups(d.groups))
       .catch(() => {})
@@ -358,20 +357,16 @@ function GroupsTab() {
                       <div className="admin-item__name">{m.display_name}</div>
                       <div className="admin-item__sub">
                         {m.role === "admin" ? "管理者" : "スタッフ"}
-                        {m.implicit_member ? "・自動参加" : ""}
+                        {m.group_role === "admin" ? "・グループ管理者" : ""}
                       </div>
                     </div>
-                    {m.role === "admin" ? (
-                      <span className="admin-member-lock">全グループ参加</span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="admin-btn-outline"
-                        onClick={() => handleRemoveMember(m.id)}
-                      >
-                        除外
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="admin-btn-outline"
+                      onClick={() => handleRemoveMember(m.id)}
+                    >
+                      除外
+                    </button>
                   </div>
                 ))
               )}
