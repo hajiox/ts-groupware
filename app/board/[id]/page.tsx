@@ -304,7 +304,6 @@ export default function BoardPage() {
     const normalizedQuery = query.trim().toLowerCase();
 
     return members
-      .filter((member) => member.id !== currentUser?.id)
       .filter((member) => {
         if (!normalizedQuery) return true;
         return member.display_name.toLowerCase().includes(normalizedQuery);
