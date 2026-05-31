@@ -17,6 +17,38 @@ async function requireAdmin() {
   return { error: null, status: 0, user }
 }
 
+function isDirectChat(group: { type?: string; description?: string | null }) {
+  return group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:')
+}
+
+async function addAdminToAllRegularGroups(userId: string) {
+  const { data: groups, error: groupsError } = await adminClient
+    .from('gw_groups')
+    .select('id, type, description')
+
+  if (groupsError) {
+    return groupsError
+  }
+
+  const rows = (groups || [])
+    .filter(group => !isDirectChat(group))
+    .map(group => ({
+      group_id: group.id,
+      user_id: userId,
+      role: 'admin',
+    }))
+
+  if (rows.length === 0) {
+    return null
+  }
+
+  const { error } = await adminClient
+    .from('gw_group_members')
+    .upsert(rows, { onConflict: 'group_id,user_id' })
+
+  return error
+}
+
 export async function GET() {
   const { error, status } = await requireAdmin()
   if (error) return NextResponse.json({ error }, { status })
@@ -81,6 +113,16 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: '自分自身の管理者権限は外せません' }, { status: 400 })
   }
 
+  const { data: existingUser, error: existingUserError } = await adminClient
+    .from('gw_users')
+    .select('role, status')
+    .eq('id', user_id)
+    .single()
+
+  if (existingUserError || !existingUser) {
+    return NextResponse.json({ error: existingUserError?.message || 'ユーザーが見つかりません' }, { status: 404 })
+  }
+
   const updates: Record<string, string | null> = {
     updated_at: new Date().toISOString(),
   }
@@ -96,6 +138,19 @@ export async function PUT(request: NextRequest) {
 
   if (dbError) {
     return NextResponse.json({ error: dbError.message }, { status: 500 })
+  }
+
+  const nextRole = role || existingUser.role
+  const nextStatus = userStatus || existingUser.status
+  const becameApprovedAdmin = nextRole === 'admin'
+    && nextStatus === 'approved'
+    && (existingUser.role !== 'admin' || existingUser.status !== 'approved')
+
+  if (becameApprovedAdmin) {
+    const memberError = await addAdminToAllRegularGroups(user_id)
+    if (memberError) {
+      return NextResponse.json({ error: memberError.message }, { status: 500 })
+    }
   }
 
   return NextResponse.json({ success: true })
