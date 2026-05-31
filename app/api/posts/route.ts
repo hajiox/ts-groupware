@@ -302,7 +302,7 @@ export async function POST(request: NextRequest) {
       .eq('id', group_id),
   ])
 
-  await import('@/lib/web-push')
+  void import('@/lib/web-push')
     .then(async ({ sendPushNotificationToGroup, sendPushNotificationToUser }) => {
       const authorName = user.display_name || 'メンバー'
       const messageBody = content?.trim() ? content.trim().substring(0, 50) : 'ファイルを送信しました'
