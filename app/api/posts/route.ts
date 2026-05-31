@@ -23,6 +23,24 @@ type GroupMember = {
   group_role: string
 }
 
+async function withTimeout(promise: PromiseLike<unknown>, ms: number, fallback: unknown, label: string): Promise<any> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  try {
+    return await Promise.race([
+      Promise.resolve(promise),
+      new Promise<unknown>(resolve => {
+        timer = setTimeout(() => {
+          console.error(`[Posts API timeout] ${label}`)
+          resolve(fallback)
+        }, ms)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 function getDriveFileIdFromUrl(url: string) {
   try {
     const parsed = new URL(url)
@@ -158,7 +176,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  const membersPromise = getGroupMembers(groupId)
+  const membersPromise = withTimeout(getGroupMembers(groupId), 3000, [], 'group members')
 
   let query = adminClient
     .from('gw_posts')
@@ -173,7 +191,15 @@ export async function GET(request: NextRequest) {
     query = query.is('parent_id', null)
   }
 
-  const [{ data: posts, error }, members] = await Promise.all([query, membersPromise])
+  const [{ data: posts, error }, members] = await Promise.all([
+    withTimeout(
+      query,
+      8000,
+      { data: null, error: { message: '投稿取得がタイムアウトしました' } },
+      'posts query'
+    ),
+    membersPromise,
+  ])
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
@@ -187,24 +213,24 @@ export async function GET(request: NextRequest) {
   }
 
   // ユーザー情報を取得
-  const userIds = [...new Set((posts || []).map(p => p.user_id))]
-  const postIds = (posts || []).map(p => p.id)
+  const userIds = [...new Set((posts || []).map((post: { user_id: string }) => post.user_id))]
+  const postIds = (posts || []).map((post: { id: string }) => post.id)
   const [{ data: users }, { data: reactions }, { data: commentCounts }] = await Promise.all([
-    adminClient
+    withTimeout(adminClient
       .from('gw_users')
       .select('id, display_name, real_name, picture_url')
-      .in('id', userIds),
-    adminClient
+      .in('id', userIds), 3000, { data: [], error: null }, 'post authors'),
+    withTimeout(adminClient
       .from('gw_reactions')
       .select('post_id, emoji, user_id')
-      .in('post_id', postIds),
-    adminClient
+      .in('post_id', postIds), 3000, { data: [], error: null }, 'post reactions'),
+    withTimeout(adminClient
       .from('gw_posts')
       .select('parent_id')
-      .in('parent_id', postIds),
+      .in('parent_id', postIds), 3000, { data: [], error: null }, 'comment counts'),
   ])
 
-  const userMap = Object.fromEntries((users || []).map(u => [
+  const userMap = Object.fromEntries((users || []).map((u: { id: string; display_name: string; real_name?: string | null; picture_url: string | null }) => [
     u.id, 
     { ...u, display_name: u.real_name || u.display_name }
   ]))
@@ -226,24 +252,17 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 既読更新 + グループ名取得を並列
-  const [, { data: groupInfo }] = await Promise.all([
-    markGroupRead(user.id, groupId, deviceId),
-    adminClient
-      .from('gw_groups')
-      .select('name')
-      .eq('id', groupId)
-      .single(),
-  ])
+  markGroupRead(user.id, groupId, deviceId)
+    .then(undefined, e => console.error('[Read status update error]', e))
 
-  const enrichedPosts = (posts || []).map(post => ({
+  const enrichedPosts = (posts || []).map((post: { id: string; user_id: string }) => ({
     ...post,
     author: userMap[post.user_id] || { display_name: '不明', picture_url: null },
     reactions: reactionMap[post.id] || {},
     commentCount: commentCountMap[post.id] || 0,
   }))
 
-  return NextResponse.json({ posts: enrichedPosts, groupName: groupInfo?.name || null, members })
+  return NextResponse.json({ posts: enrichedPosts, groupName: access.group?.name || null, members })
 }
 
 export async function POST(request: NextRequest) {

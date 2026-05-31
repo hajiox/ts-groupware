@@ -275,7 +275,13 @@ export default function BoardPage() {
 
   function loadPosts() {
     setLoading(true);
-    fetch(`/api/posts?group_id=${id}`, { headers: getDeviceHeaders() })
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+
+    fetch(`/api/posts?group_id=${id}`, {
+      headers: getDeviceHeaders(),
+      signal: controller.signal,
+    })
       .then((res) => (res.ok ? res.json() : { posts: [], groupName: null }))
       .then((data) => {
         setPosts(data.posts || []);
@@ -283,7 +289,10 @@ export default function BoardPage() {
         if (Array.isArray(data.members)) setMembers(data.members);
       })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => {
+        window.clearTimeout(timeoutId);
+        setLoading(false);
+      });
   }
 
   async function uploadFile(file: File, uploadOriginalFile: boolean): Promise<Attachment[]> {
