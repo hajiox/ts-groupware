@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
+import { withTimeout } from '@/lib/timeout'
 
 function directChatKey(userIdA: string, userIdB: string) {
   return `direct:${[userIdA, userIdB].sort().join(':')}`
+}
+
+function getOtherDirectUserId(description: string | null, currentUserId: string) {
+  if (!description?.startsWith('direct:')) return null
+  const parts = description.split(':')
+  if (parts.length < 3) return null
+  const [userIdA, userIdB] = [parts[1], parts[2]]
+  return userIdA === currentUserId ? userIdB : userIdA
 }
 
 export async function GET() {
@@ -22,18 +31,88 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const sortedUsers = (users || []).sort((a, b) => {
-    if (a.id === user.id) return -1
-    if (b.id === user.id) return 1
+  const { data: memberships } = await withTimeout(
+    adminClient
+      .from('gw_group_members')
+      .select('group_id')
+      .eq('user_id', user.id),
+    5000,
+    { data: [], error: null },
+    'direct memberships'
+  )
+  const groupIds = memberships?.map(m => m.group_id) || []
+
+  const { data: directGroups } = groupIds.length > 0
+    ? await withTimeout(
+      adminClient
+        .from('gw_groups')
+        .select('id, description, created_at, updated_at')
+        .in('id', groupIds)
+        .eq('type', 'chat')
+        .like('description', 'direct:%'),
+      5000,
+      { data: [], error: null },
+      'direct groups'
+    )
+    : { data: [] }
+
+  const directGroupIds = (directGroups || []).map(group => group.id)
+  const { data: latestPosts } = directGroupIds.length > 0
+    ? await withTimeout(
+      adminClient
+        .from('gw_posts')
+        .select('group_id, created_at')
+        .in('group_id', directGroupIds)
+        .is('parent_id', null)
+        .order('created_at', { ascending: false })
+        .limit(directGroupIds.length * 3),
+      5000,
+      { data: [], error: null },
+      'direct latest posts'
+    )
+    : { data: [] }
+
+  const latestPostAtByGroup = new Map<string, string>()
+  for (const post of latestPosts || []) {
+    if (!latestPostAtByGroup.has(post.group_id)) {
+      latestPostAtByGroup.set(post.group_id, post.created_at)
+    }
+  }
+
+  const directMetaByUser = new Map<string, { groupId: string; lastMessageAt: string }>()
+  for (const group of directGroups || []) {
+    const otherUserId = getOtherDirectUserId(group.description, user.id)
+    if (!otherUserId) continue
+    directMetaByUser.set(otherUserId, {
+      groupId: group.id,
+      lastMessageAt: latestPostAtByGroup.get(group.id) || group.updated_at || group.created_at,
+    })
+  }
+
+  const normalizedUsers = (users || []).map(member => ({
+    ...member,
+    display_name: member.real_name || member.display_name,
+    isSelf: member.id === user.id,
+    isTsgAi: member.display_name === 'TSG君' || member.real_name === 'TSG君',
+    directGroupId: directMetaByUser.get(member.id)?.groupId || null,
+    lastMessageAt: directMetaByUser.get(member.id)?.lastMessageAt || null,
+  }))
+
+  const sortedUsers = normalizedUsers.sort((a, b) => {
+    const pinA = a.isSelf ? 0 : a.isTsgAi ? 1 : 2
+    const pinB = b.isSelf ? 0 : b.isTsgAi ? 1 : 2
+    if (pinA !== pinB) return pinA - pinB
+
+    if (a.lastMessageAt && b.lastMessageAt && a.lastMessageAt !== b.lastMessageAt) {
+      return b.lastMessageAt.localeCompare(a.lastMessageAt)
+    }
+    if (a.lastMessageAt && !b.lastMessageAt) return -1
+    if (!a.lastMessageAt && b.lastMessageAt) return 1
     return a.display_name.localeCompare(b.display_name, 'ja')
   })
 
   return NextResponse.json({
-    users: sortedUsers.map(member => ({
-      ...member,
-      display_name: member.real_name || member.display_name,
-      isSelf: member.id === user.id,
-    })),
+    users: sortedUsers,
   })
 }
 
