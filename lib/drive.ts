@@ -43,11 +43,16 @@ function getOAuthClient() {
   const clientId = process.env.GOOGLE_CLIENT_ID
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET
   const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN
+  const hasOAuthConfig = Boolean(clientId || clientSecret || refreshToken)
 
   if (clientId && clientSecret && refreshToken) {
     const auth = new google.auth.OAuth2(clientId, clientSecret)
     auth.setCredentials({ refresh_token: refreshToken.trim() })
     return auth
+  }
+
+  if (hasOAuthConfig) {
+    throw new Error('Google Drive OAuth env vars are incomplete (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN)')
   }
 
   return null
