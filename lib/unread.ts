@@ -1,5 +1,6 @@
 import { adminClient } from '@/lib/supabase/admin'
 import { shouldFallbackDeviceRead } from '@/lib/read-status'
+import { withTimeout } from '@/lib/timeout'
 
 type GroupRow = {
   id: string
@@ -27,18 +28,33 @@ async function getReadMap(userId: string, groupIds: string[], deviceId?: string 
     .in('group_id', groupIds)
 
   if (!deviceId) {
-    const { data } = await userReadPromise
+    const { data } = await withTimeout(
+      userReadPromise,
+      3000,
+      { data: [], error: null },
+      'user read map'
+    )
     return new Map((data || []).map(row => [row.group_id, row.last_read_at]))
   }
 
   const [{ data: userRows }, { data: deviceRows, error: deviceError }] = await Promise.all([
-    userReadPromise,
-    adminClient
-      .from('gw_device_read_status')
-      .select('group_id, last_read_at')
-      .eq('user_id', userId)
-      .eq('device_id', deviceId)
-      .in('group_id', groupIds),
+    withTimeout(
+      userReadPromise,
+      3000,
+      { data: [], error: null },
+      'user read map'
+    ),
+    withTimeout(
+      adminClient
+        .from('gw_device_read_status')
+        .select('group_id, last_read_at')
+        .eq('user_id', userId)
+        .eq('device_id', deviceId)
+        .in('group_id', groupIds),
+      3000,
+      { data: [], error: null },
+      'device read map'
+    ),
   ])
 
   const readMap = new Map((userRows || []).map(row => [row.group_id, row.last_read_at]))
@@ -76,7 +92,12 @@ export async function getUnreadCountsByGroup(userId: string, groupIds: string[],
       query = query.gt('created_at', lastRead)
     }
 
-    const { count, error } = await query
+    const { count, error } = await withTimeout(
+      query,
+      3000,
+      { count: 0, error: null },
+      `unread count ${groupId}`
+    )
     if (error) {
       console.error('[Unread count error]', { groupId, userId, error: error.message })
       return [groupId, 0] as const
@@ -88,20 +109,30 @@ export async function getUnreadCountsByGroup(userId: string, groupIds: string[],
 }
 
 export async function getUnreadSummary(userId: string, deviceId?: string | null): Promise<UnreadSummary> {
-  const { data: memberships } = await adminClient
-    .from('gw_group_members')
-    .select('group_id')
-    .eq('user_id', userId)
+  const { data: memberships } = await withTimeout(
+    adminClient
+      .from('gw_group_members')
+      .select('group_id')
+      .eq('user_id', userId),
+    3000,
+    { data: [], error: null },
+    'unread memberships'
+  )
 
   const groupIds = [...new Set((memberships || []).map(row => row.group_id))]
   if (groupIds.length === 0) {
     return { dmUnread: 0, groupUnread: 0, totalUnread: 0 }
   }
 
-  const { data: groups } = await adminClient
-    .from('gw_groups')
-    .select('id, type, description')
-    .in('id', groupIds)
+  const { data: groups } = await withTimeout(
+    adminClient
+      .from('gw_groups')
+      .select('id, type, description')
+      .in('id', groupIds),
+    3000,
+    { data: [], error: null },
+    'unread groups'
+  )
 
   const unreadByGroup = await getUnreadCountsByGroup(userId, groupIds, deviceId)
   let dmUnread = 0

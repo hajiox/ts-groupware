@@ -3,6 +3,7 @@ import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
 import { getUnreadCountsByGroup } from '@/lib/unread'
 import { getDeviceIdFromRequest } from '@/lib/read-status'
+import { withTimeout } from '@/lib/timeout'
 
 /**
  * GET /api/groups — 自分が参加しているグループ一覧
@@ -19,10 +20,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
   }
 
-  const { data: memberships } = await adminClient
-    .from('gw_group_members')
-    .select('group_id')
-    .eq('user_id', user.id)
+  const { data: memberships } = await withTimeout(
+    adminClient
+      .from('gw_group_members')
+      .select('group_id')
+      .eq('user_id', user.id),
+    5000,
+    { data: [], error: null },
+    'groups memberships'
+  )
 
   const explicitGroupIds = memberships?.map(m => m.group_id) || []
 
@@ -36,7 +42,12 @@ export async function GET(request: NextRequest) {
     .order('updated_at', { ascending: false })
     .in('id', explicitGroupIds)
 
-  const { data: rawGroups } = await groupsQuery
+  const { data: rawGroups } = await withTimeout(
+    groupsQuery,
+    5000,
+    { data: [], error: null },
+    'groups list'
+  )
   const groups = (rawGroups || []).filter(group => !isDirectChat(group))
   const groupIds = groups.map(group => group.id)
 
@@ -44,10 +55,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ groups: [] })
   }
 
-  const { data: groupMembers } = await adminClient
-    .from('gw_group_members')
-    .select('group_id, user_id')
-    .in('group_id', groupIds)
+  const { data: groupMembers } = await withTimeout(
+    adminClient
+      .from('gw_group_members')
+      .select('group_id, user_id')
+      .in('group_id', groupIds),
+    5000,
+    { data: [], error: null },
+    'groups members'
+  )
 
   const explicitGroupIdSet = new Set(explicitGroupIds)
   const directOtherUserIds = groups
@@ -57,10 +73,15 @@ export async function GET(request: NextRequest) {
     .filter(Boolean)
 
   const { data: directUsers } = directOtherUserIds.length > 0
-    ? await adminClient
-      .from('gw_users')
-      .select('id, display_name, real_name, picture_url')
-      .in('id', directOtherUserIds)
+    ? await withTimeout(
+      adminClient
+        .from('gw_users')
+        .select('id, display_name, real_name, picture_url')
+        .in('id', directOtherUserIds),
+      5000,
+      { data: [], error: null },
+      'direct users'
+    )
     : { data: [] }
 
   const directUserMap = Object.fromEntries((directUsers || []).map(directUser => [
@@ -71,14 +92,24 @@ export async function GET(request: NextRequest) {
   const [{ data: allPosts }, unreadMap] = await Promise.all([
     // 最新投稿を新しい順に取得（各グループの最新1件抽出用）
     // limit制限で全件スキャンを回避
-    adminClient
-      .from('gw_posts')
-      .select('group_id, content, created_at')
-      .in('group_id', groupIds)
-      .is('parent_id', null)
-      .order('created_at', { ascending: false })
-      .limit(groupIds.length * 3),
-    getUnreadCountsByGroup(user.id, groupIds, getDeviceIdFromRequest(request)),
+    withTimeout(
+      adminClient
+        .from('gw_posts')
+        .select('group_id, content, created_at')
+        .in('group_id', groupIds)
+        .is('parent_id', null)
+        .order('created_at', { ascending: false })
+        .limit(groupIds.length * 3),
+      5000,
+      { data: [], error: null },
+      'groups latest posts'
+    ),
+    withTimeout(
+      getUnreadCountsByGroup(user.id, groupIds, getDeviceIdFromRequest(request)),
+      8000,
+      {},
+      'groups unread counts'
+    ),
   ])
 
   // グループごとの最新投稿をマップ化

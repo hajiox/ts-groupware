@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers'
 import { adminClient } from '@/lib/supabase/admin'
+import { withTimeout } from '@/lib/timeout'
 
 /**
  * セッション管理（Cookie ベース）
@@ -38,11 +39,16 @@ export async function getUserSession() {
   if (!session?.value) return null
 
   // DB から user を取得して存在確認
-  const { data: user } = await adminClient
-    .from('gw_users')
-    .select('*')
-    .eq('id', session.value)
-    .single()
+  const { data: user } = await withTimeout(
+    adminClient
+      .from('gw_users')
+      .select('*')
+      .eq('id', session.value)
+      .single(),
+    5000,
+    { data: null, error: null },
+    'user session'
+  )
 
   if (!user) return null
   if ((user.status || 'approved') !== 'approved') return null

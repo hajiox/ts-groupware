@@ -156,7 +156,7 @@ async function getGroupMembers(groupId: string): Promise<GroupMember[]> {
 }
 
 export async function GET(request: NextRequest) {
-  const user = await getUserSession()
+  const user = await withTimeout(getUserSession(), 5000, null, 'user session')
   if (!user) {
     return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
   }
@@ -171,7 +171,12 @@ export async function GET(request: NextRequest) {
   const limit = parseInt(request.nextUrl.searchParams.get('limit') || '50')
   const deviceId = getDeviceIdFromRequest(request)
 
-  const access = await getGroupAccess(groupId, user.id)
+  const access = await withTimeout(
+    getGroupAccess(groupId, user.id),
+    5000,
+    { group: null, error: '掲示板確認がタイムアウトしました', status: 504 },
+    'group access'
+  )
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
