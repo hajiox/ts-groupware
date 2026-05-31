@@ -81,7 +81,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: '自分自身の管理者権限は外せません' }, { status: 400 })
   }
 
-  const updates: Record<string, string> = {
+  const updates: Record<string, string | null> = {
     updated_at: new Date().toISOString(),
   }
   if (display_name !== undefined) updates.display_name = String(display_name).trim()

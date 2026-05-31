@@ -727,7 +727,7 @@ img {
   background: var(--card);
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  overflow: hidden;
+  overflow: visible;
   transition: transform 0.2s, box-shadow 0.2s;
 }
 .post-card:hover {
@@ -788,6 +788,11 @@ img {
   font-size: 14px;
   color: var(--text);
   line-height: 1.6;
+}
+.mention-token {
+  display: inline;
+  color: var(--accent);
+  font-weight: 700;
 }
 .post-list__state {
   text-align: center;
@@ -1029,6 +1034,51 @@ img {
   display: flex;
   gap: 8px;
 }
+.mention-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.mention-input-wrap input,
+.mention-input-wrap textarea {
+  width: 100%;
+}
+.mention-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 150;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  padding: 4px;
+}
+.mention-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 7px 8px;
+  text-align: left;
+}
+.mention-option:hover,
+.mention-option--active {
+  background: var(--card-hover);
+}
+.mention-option__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+}
 .post-comment-form input {
   flex: 1;
   min-width: 0;
@@ -1165,7 +1215,7 @@ img {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  overflow: hidden;
+  overflow: visible;
 }
 .post-input-bar--stacked {
   align-items: stretch;

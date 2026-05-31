@@ -28,6 +28,6 @@ export function getAdminClient(): SupabaseClient {
 // 後方互換のための getter proxy
 export const adminClient = new Proxy({} as SupabaseClient, {
   get(_target, prop) {
-    return (getAdminClient() as Record<string, unknown>)[prop as string]
+    return (getAdminClient() as unknown as Record<string, unknown>)[prop as string]
   },
 })

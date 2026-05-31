@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 /**
  * URL正規表現: テキスト中のhttp/httpsリンクを検出
@@ -18,8 +18,8 @@ type OgpData = {
 /**
  * テキスト中のURLを<a>タグに変換してReact要素の配列を返す
  */
-export function linkifyText(text: string): (string | JSX.Element)[] {
-  const parts: (string | JSX.Element)[] = [];
+export function linkifyText(text: string): ReactNode[] {
+  const parts: ReactNode[] = [];
   let lastIndex = 0;
   let match;
 

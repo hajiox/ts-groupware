@@ -2,7 +2,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { linkifyText, OgpPreviews } from "@/components/link-preview";
 import { getDeviceHeaders } from "@/lib/device-id";
 import { uploadAttachmentFile } from "@/lib/upload-client";
@@ -10,6 +10,7 @@ import { uploadAttachmentFile } from "@/lib/upload-client";
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"] as const;
 const IMAGE_UPLOAD_MAX_SIZE = 1600;
 const IMAGE_UPLOAD_QUALITY = 0.82;
+const POST_COMPOSER_ID = "post";
 
 type Author = {
   id: string;
@@ -43,6 +44,17 @@ type Post = {
 type CurrentUser = {
   id: string;
   role: string;
+};
+
+type BoardMember = Author & {
+  role?: string;
+  group_role?: string;
+};
+
+type MentionState = {
+  composerId: string;
+  query: string;
+  activeIndex: number;
 };
 
 function Avatar({ user, size = 38 }: { user: Author; size?: number }) {
@@ -105,6 +117,29 @@ function getAttachmentImageUrl(attachment: Attachment) {
 
 function getAttachmentOpenUrl(attachment: Attachment) {
   return attachment.webViewLink || attachment.url || attachment.viewUrl || "#";
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function commentComposerId(postId: string) {
+  return `comment:${postId}`;
+}
+
+function commentPostIdFromComposer(composerId: string) {
+  return composerId.startsWith("comment:") ? composerId.slice("comment:".length) : null;
+}
+
+function getMentionQuery(value: string, caret: number | null | undefined) {
+  const beforeCaret = value.slice(0, caret ?? value.length);
+  const match = beforeCaret.match(/(^|\s)@([^\s@]*)$/);
+
+  return match ? match[2] : null;
+}
+
+function hasMentionToken(content: string, displayName: string) {
+  return content.includes(`@${displayName}`);
 }
 
 function getCompressedImageName(name: string) {
@@ -184,6 +219,9 @@ export default function BoardPage() {
   const [commentFilesByPost, setCommentFilesByPost] = useState<Record<string, File | null>>({});
   const [commentUploadOriginalByPost, setCommentUploadOriginalByPost] = useState<Record<string, boolean>>({});
   const [text, setText] = useState("");
+  const [members, setMembers] = useState<BoardMember[]>([]);
+  const [mentionState, setMentionState] = useState<MentionState | null>(null);
+  const [mentionedIdsByComposer, setMentionedIdsByComposer] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [isPosting, setIsPosting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -203,6 +241,12 @@ export default function BoardPage() {
   const commentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const commentSectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const commentFileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+  const mentionNames = useMemo(() => (
+    [...new Set(members.map((member) => member.display_name).filter(Boolean))]
+      .sort((a, b) => b.length - a.length)
+  ), [members]);
 
   useEffect(() => {
     // 初期データを並列取得（/api/groups全件取得を廃止し高速化）
@@ -236,6 +280,7 @@ export default function BoardPage() {
       .then((data) => {
         setPosts(data.posts || []);
         if (data.groupName) setGroupName(data.groupName);
+        if (Array.isArray(data.members)) setMembers(data.members);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -255,17 +300,181 @@ export default function BoardPage() {
     }];
   }
 
+  function getMentionCandidates(query: string) {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    return members
+      .filter((member) => member.id !== currentUser?.id)
+      .filter((member) => {
+        if (!normalizedQuery) return true;
+        return member.display_name.toLowerCase().includes(normalizedQuery);
+      })
+      .slice(0, 8);
+  }
+
+  function updateMentionSearch(composerId: string, value: string, caret: number | null | undefined) {
+    const query = getMentionQuery(value, caret);
+
+    if (query === null || members.length === 0) {
+      setMentionState((current) => current?.composerId === composerId ? null : current);
+      return;
+    }
+
+    setMentionState({ composerId, query, activeIndex: 0 });
+  }
+
+  function rememberMention(composerId: string, userId: string) {
+    setMentionedIdsByComposer((current) => {
+      const ids = new Set(current[composerId] || []);
+      ids.add(userId);
+      return { ...current, [composerId]: [...ids] };
+    });
+  }
+
+  function clearComposerMentions(composerId: string) {
+    setMentionedIdsByComposer((current) => {
+      const next = { ...current };
+      delete next[composerId];
+      return next;
+    });
+  }
+
+  function getMentionedUserIds(composerId: string, content: string) {
+    const ids = new Set<string>();
+
+    for (const userId of mentionedIdsByComposer[composerId] || []) {
+      const member = memberById.get(userId);
+      if (member && member.id !== currentUser?.id && hasMentionToken(content, member.display_name)) {
+        ids.add(member.id);
+      }
+    }
+
+    for (const member of members) {
+      if (member.id !== currentUser?.id && hasMentionToken(content, member.display_name)) {
+        ids.add(member.id);
+      }
+    }
+
+    return [...ids];
+  }
+
+  function selectMention(composerId: string, member: BoardMember) {
+    const postId = commentPostIdFromComposer(composerId);
+    const input = composerId === POST_COMPOSER_ID
+      ? textareaRef.current
+      : (postId ? commentInputRefs.current[postId] : null);
+    const value = composerId === POST_COMPOSER_ID
+      ? text
+      : (postId ? commentTextByPost[postId] || "" : "");
+    const caret = input?.selectionStart ?? value.length;
+    const beforeCaret = value.slice(0, caret);
+    const match = beforeCaret.match(/(^|\s)@([^\s@]*)$/);
+
+    if (!match) return;
+
+    const start = beforeCaret.length - match[0].length + match[1].length;
+    const suffix = value.slice(caret);
+    const spaceAfterMention = suffix.startsWith(" ") ? "" : " ";
+    const mentionText = `@${member.display_name}${spaceAfterMention}`;
+    const nextValue = `${value.slice(0, start)}${mentionText}${suffix}`;
+    const nextCaret = start + mentionText.length;
+
+    if (composerId === POST_COMPOSER_ID) {
+      setText(nextValue);
+      window.requestAnimationFrame(() => {
+        if (!textareaRef.current) return;
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(nextCaret, nextCaret);
+        textareaRef.current.style.height = "38px";
+        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      });
+    } else if (postId) {
+      setCommentTextByPost((current) => ({ ...current, [postId]: nextValue }));
+      window.requestAnimationFrame(() => {
+        const target = commentInputRefs.current[postId];
+        if (!target) return;
+        target.focus();
+        target.setSelectionRange(nextCaret, nextCaret);
+      });
+    }
+
+    rememberMention(composerId, member.id);
+    setMentionState(null);
+  }
+
+  function handleMentionKeyDown(
+    e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+    composerId: string,
+  ) {
+    if (mentionState?.composerId !== composerId) return false;
+
+    const candidates = getMentionCandidates(mentionState.query);
+    if (candidates.length === 0) return false;
+    const activeIndex = Math.min(mentionState.activeIndex, candidates.length - 1);
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setMentionState((current) => current?.composerId === composerId
+        ? { ...current, activeIndex: (activeIndex + 1) % candidates.length }
+        : current);
+      return true;
+    }
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setMentionState((current) => current?.composerId === composerId
+        ? { ...current, activeIndex: (activeIndex - 1 + candidates.length) % candidates.length }
+        : current);
+      return true;
+    }
+
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      selectMention(composerId, candidates[activeIndex]);
+      return true;
+    }
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setMentionState(null);
+      return true;
+    }
+
+    return false;
+  }
+
+  function handlePostTextChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setText(e.target.value);
+    updateMentionSearch(POST_COMPOSER_ID, e.target.value, e.target.selectionStart);
+
+    const el = e.target;
+    el.style.height = "38px";
+    el.style.height = `${el.scrollHeight}px`;
+  }
+
+  function handleCommentTextChange(postId: string, e: React.ChangeEvent<HTMLInputElement>) {
+    const composerId = commentComposerId(postId);
+    setCommentTextByPost((current) => ({ ...current, [postId]: e.target.value }));
+    updateMentionSearch(composerId, e.target.value, e.target.selectionStart);
+  }
+
   async function handlePost() {
     if (isPosting || isUploading || (!text.trim() && !selectedFile)) return;
 
     setIsPosting(true);
     setIsUploading(Boolean(selectedFile));
     try {
+      const content = text.trim();
       const attachments = selectedFile ? await uploadFile(selectedFile, uploadOriginal) : [];
       const res = await fetch("/api/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ group_id: id, content: text.trim(), attachments }),
+        body: JSON.stringify({
+          group_id: id,
+          content,
+          attachments,
+          mentioned_user_ids: getMentionedUserIds(POST_COMPOSER_ID, content),
+        }),
       });
 
       if (!res.ok) {
@@ -277,6 +486,7 @@ export default function BoardPage() {
       setText("");
       setSelectedFile(null);
       setUploadOriginal(false);
+      clearComposerMentions(POST_COMPOSER_ID);
       if (fileInputRef.current) fileInputRef.current.value = "";
       if (textareaRef.current) textareaRef.current.style.height = "38px";
 
@@ -324,6 +534,7 @@ export default function BoardPage() {
   }
 
   async function handleComment(postId: string) {
+    const composerId = commentComposerId(postId);
     const content = (commentTextByPost[postId] || "").trim();
     const selectedCommentFile = commentFilesByPost[postId] || null;
     const uploadOriginalComment = commentUploadOriginalByPost[postId] || false;
@@ -338,7 +549,13 @@ export default function BoardPage() {
       const res = await fetch("/api/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ group_id: id, parent_id: postId, content, attachments }),
+        body: JSON.stringify({
+          group_id: id,
+          parent_id: postId,
+          content,
+          attachments,
+          mentioned_user_ids: getMentionedUserIds(composerId, content),
+        }),
       });
 
       if (!res.ok) {
@@ -350,6 +567,7 @@ export default function BoardPage() {
       setCommentTextByPost((current) => ({ ...current, [postId]: "" }));
       setCommentFilesByPost((current) => ({ ...current, [postId]: null }));
       setCommentUploadOriginalByPost((current) => ({ ...current, [postId]: false }));
+      clearComposerMentions(composerId);
       if (commentFileInputRefs.current[postId]) {
         commentFileInputRefs.current[postId]!.value = "";
       }
@@ -412,16 +630,11 @@ export default function BoardPage() {
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (handleMentionKeyDown(e, POST_COMPOSER_ID)) return;
+
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       handlePost();
     }
-  }
-
-  function autoResize(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setText(e.target.value);
-    const el = e.target;
-    el.style.height = "38px";
-    el.style.height = `${el.scrollHeight}px`;
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -510,6 +723,72 @@ export default function BoardPage() {
     });
   }
 
+  function renderMentionSegments(value: string, keyPrefix: string) {
+    if (mentionNames.length === 0) return [value];
+
+    const mentionRegex = new RegExp(
+      `@(${mentionNames.map(escapeRegExp).join("|")})(?=\\s|$|[、。,.!?！？)）\\]\\}]|\\n)`,
+      "g",
+    );
+    const parts: ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = mentionRegex.exec(value)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(value.slice(lastIndex, match.index));
+      }
+
+      parts.push(
+        <span key={`${keyPrefix}-${match.index}`} className="mention-token">
+          @{match[1]}
+        </span>
+      );
+      lastIndex = match.index + match[0].length;
+    }
+
+    if (lastIndex < value.length) {
+      parts.push(value.slice(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : [value];
+  }
+
+  function renderTextWithMentions(value: string) {
+    return linkifyText(value).flatMap((part, index) => (
+      typeof part === "string" ? renderMentionSegments(part, `mention-${index}`) : [part]
+    ));
+  }
+
+  function renderMentionMenu(composerId: string) {
+    if (mentionState?.composerId !== composerId) return null;
+
+    const candidates = getMentionCandidates(mentionState.query);
+    if (candidates.length === 0) return null;
+    const activeIndex = Math.min(mentionState.activeIndex, candidates.length - 1);
+
+    return (
+      <div className="mention-menu" role="listbox" aria-label="メンション候補">
+        {candidates.map((member, index) => (
+          <button
+            key={member.id}
+            type="button"
+            className={`mention-option${index === activeIndex ? " mention-option--active" : ""}`}
+            role="option"
+            aria-selected={index === activeIndex}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              selectMention(composerId, member);
+            }}
+          >
+            <Avatar user={member} size={26} />
+            <span className="mention-option__name">{member.display_name}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   function renderPostBody(post: Post) {
     if (editingPostId === post.id) {
       return (
@@ -545,7 +824,7 @@ export default function BoardPage() {
     return (
       <>
         <div className="post-card__body" style={{ whiteSpace: "pre-wrap" }}>
-          {linkifyText(post.content)}
+          {renderTextWithMentions(post.content)}
         </div>
         <OgpPreviews text={post.content} />
       </>
@@ -643,6 +922,7 @@ export default function BoardPage() {
   }
 
   function renderCommentComposer(post: Post) {
+    const composerId = commentComposerId(post.id);
     const commentFile = commentFilesByPost[post.id] || null;
     const uploadOriginalComment = commentUploadOriginalByPost[post.id] || false;
     const isCommentSubmitting = commentSubmittingByPost[post.id] || false;
@@ -696,16 +976,20 @@ export default function BoardPage() {
             handleComment(post.id);
           }}
         >
-          <input
-            ref={(element) => {
-              commentInputRefs.current[post.id] = element;
-            }}
-            value={currentCommentText}
-            onChange={(e) => setCommentTextByPost((current) => ({ ...current, [post.id]: e.target.value }))}
-            placeholder="コメントを入力..."
-            aria-label="コメントを入力"
-            disabled={isCommentSubmitting}
-          />
+          <div className="mention-input-wrap">
+            {renderMentionMenu(composerId)}
+            <input
+              ref={(element) => {
+                commentInputRefs.current[post.id] = element;
+              }}
+              value={currentCommentText}
+              onChange={(e) => handleCommentTextChange(post.id, e)}
+              onKeyDown={(e) => handleMentionKeyDown(e, composerId)}
+              placeholder="コメントを入力..."
+              aria-label="コメントを入力"
+              disabled={isCommentSubmitting}
+            />
+          </div>
           <input
             type="file"
             ref={(element) => {
@@ -949,16 +1233,19 @@ export default function BoardPage() {
         )}
 
         <form className="post-input-bar__form" onSubmit={(e) => { e.preventDefault(); handlePost(); }} aria-label="新規投稿">
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={autoResize}
-            onKeyDown={handleKeyDown}
-            placeholder="投稿内容を入力... (Ctrl+Enterで送信)"
-            rows={1}
-            aria-label="投稿テキスト"
-            disabled={isPosting || isUploading}
-          />
+          <div className="mention-input-wrap">
+            {renderMentionMenu(POST_COMPOSER_ID)}
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={handlePostTextChange}
+              onKeyDown={handleKeyDown}
+              placeholder="投稿内容を入力... @でメンション / Ctrl+Enterで送信"
+              rows={1}
+              aria-label="投稿テキスト"
+              disabled={isPosting || isUploading}
+            />
+          </div>
           <input type="file" ref={fileInputRef} onChange={handleFileChange} style={{ display: "none" }} disabled={isPosting || isUploading} />
           <button
             type="button"

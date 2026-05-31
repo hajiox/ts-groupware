@@ -15,6 +15,14 @@ type Attachment = {
   webViewLink?: string
 }
 
+type GroupMember = {
+  id: string
+  display_name: string
+  picture_url: string | null
+  role: string
+  group_role: string
+}
+
 function getDriveFileIdFromUrl(url: string) {
   try {
     const parsed = new URL(url)
@@ -49,6 +57,16 @@ function getAttachmentDriveIds(posts: { attachments?: Attachment[] | null }[]) {
   return [...ids]
 }
 
+function normalizeMentionedUserIds(value: unknown) {
+  if (!Array.isArray(value)) return []
+
+  return [...new Set(
+    value
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .slice(0, 50)
+  )]
+}
+
 async function getGroupAccess(groupId: string, userId: string) {
   const [{ data: group }, { data: membership }] = await Promise.all([
     adminClient
@@ -75,6 +93,50 @@ async function getGroupAccess(groupId: string, userId: string) {
   return { group, error: null, status: 0 }
 }
 
+async function getGroupMembers(groupId: string): Promise<GroupMember[]> {
+  const { data: memberRows, error: memberError } = await adminClient
+    .from('gw_group_members')
+    .select('user_id, role')
+    .eq('group_id', groupId)
+
+  if (memberError || !memberRows?.length) {
+    if (memberError) console.error('[Group members fetch error]', memberError.message)
+    return []
+  }
+
+  const userIds = memberRows.map(member => member.user_id)
+  const { data: users, error: usersError } = await adminClient
+    .from('gw_users')
+    .select('id, display_name, real_name, picture_url, role')
+    .in('id', userIds)
+
+  if (usersError || !users?.length) {
+    if (usersError) console.error('[Group member users fetch error]', usersError.message)
+    return []
+  }
+
+  const userById = new Map((users || []).map(memberUser => [
+    memberUser.id,
+    { ...memberUser, display_name: memberUser.real_name || memberUser.display_name },
+  ]))
+
+  return memberRows
+    .map(member => {
+      const memberUser = userById.get(member.user_id)
+      if (!memberUser) return null
+
+      return {
+        id: memberUser.id,
+        display_name: memberUser.display_name,
+        picture_url: memberUser.picture_url,
+        role: memberUser.role,
+        group_role: member.role,
+      }
+    })
+    .filter((member): member is GroupMember => Boolean(member))
+    .sort((a, b) => a.display_name.localeCompare(b.display_name, 'ja'))
+}
+
 export async function GET(request: NextRequest) {
   const user = await getUserSession()
   if (!user) {
@@ -96,6 +158,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
+  const membersPromise = getGroupMembers(groupId)
+
   let query = adminClient
     .from('gw_posts')
     .select('*')
@@ -109,7 +173,7 @@ export async function GET(request: NextRequest) {
     query = query.is('parent_id', null)
   }
 
-  const { data: posts, error } = await query
+  const [{ data: posts, error }, members] = await Promise.all([query, membersPromise])
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
@@ -119,7 +183,7 @@ export async function GET(request: NextRequest) {
     markGroupRead(user.id, groupId, deviceId)
       .then(undefined, e => console.error('[Read status update error]', e))
 
-    return NextResponse.json({ posts: [] })
+    return NextResponse.json({ posts: [], groupName: access.group?.name || null, members })
   }
 
   // ユーザー情報を取得
@@ -179,7 +243,7 @@ export async function GET(request: NextRequest) {
     commentCount: commentCountMap[post.id] || 0,
   }))
 
-  return NextResponse.json({ posts: enrichedPosts, groupName: groupInfo?.name || null })
+  return NextResponse.json({ posts: enrichedPosts, groupName: groupInfo?.name || null, members })
 }
 
 export async function POST(request: NextRequest) {
@@ -189,7 +253,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json()
-  const { group_id, content, attachments, parent_id } = body
+  const { group_id, content, attachments, parent_id, mentioned_user_ids } = body
 
   if (!group_id) {
     return NextResponse.json({ error: 'group_id が必要です' }, { status: 400 })
@@ -202,6 +266,13 @@ export async function POST(request: NextRequest) {
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
+
+  const groupMembers = await getGroupMembers(group_id)
+  const requestedMentionIds = new Set(normalizeMentionedUserIds(mentioned_user_ids))
+  const mentionedMembers = groupMembers.filter(member => (
+    member.id !== user.id && requestedMentionIds.has(member.id)
+  ))
+  const mentionedUserIds = mentionedMembers.map(member => member.id)
 
   const { data: post, error } = await adminClient
     .from('gw_posts')
@@ -232,15 +303,28 @@ export async function POST(request: NextRequest) {
   ])
 
   await import('@/lib/web-push')
-    .then(({ sendPushNotificationToGroup }) => {
+    .then(async ({ sendPushNotificationToGroup, sendPushNotificationToUser }) => {
       const authorName = user.display_name || 'メンバー'
       const messageBody = content?.trim() ? content.trim().substring(0, 50) : 'ファイルを送信しました'
+      const postNotificationId = post.parent_id || post.id
+      const url = `/board/${group_id}`
 
-      return sendPushNotificationToGroup(group_id, user.id, {
+      await sendPushNotificationToGroup(group_id, user.id, {
         title: group?.name ? `${group.name} - ${authorName}` : authorName,
         body: messageBody,
-        url: `/board/${group_id}`,
-      }, post.parent_id || post.id)
+        url,
+      }, postNotificationId, { excludeUserIds: mentionedUserIds })
+
+      await Promise.all(mentionedMembers.map(member => (
+        sendPushNotificationToUser(member.id, {
+          title: parent_id
+            ? `${authorName} さんがコメントであなたをメンションしました`
+            : `${authorName} さんがあなたをメンションしました`,
+          body: messageBody,
+          url,
+          tag: `tsg-mention-${post.id}-${member.id}`,
+        }, postNotificationId, { ignorePostMute: true })
+      )))
     })
     .catch(e => console.error('[Push Error]', e))
 

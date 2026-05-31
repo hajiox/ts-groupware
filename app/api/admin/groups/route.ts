@@ -48,10 +48,22 @@ export async function DELETE(request: NextRequest) {
   }
 
   // 関連データを削除
-  await adminClient.from('gw_reactions').delete().in(
-    'post_id',
-    adminClient.from('gw_posts').select('id').eq('group_id', group_id).then(r => (r.data || []).map(p => p.id))
-  ).catch(() => {})
+  const { data: posts } = await adminClient
+    .from('gw_posts')
+    .select('id')
+    .eq('group_id', group_id)
+
+  const postIds = (posts || []).map(post => post.id)
+  if (postIds.length > 0) {
+    const { error: reactionsError } = await adminClient
+      .from('gw_reactions')
+      .delete()
+      .in('post_id', postIds)
+
+    if (reactionsError) {
+      console.error('[Admin group delete reactions error]', reactionsError.message)
+    }
+  }
 
   // 投稿を削除
   await adminClient.from('gw_posts').delete().eq('group_id', group_id)
