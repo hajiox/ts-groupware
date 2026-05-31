@@ -307,8 +307,7 @@ export default function BoardPage() {
       .filter((member) => {
         if (!normalizedQuery) return true;
         return member.display_name.toLowerCase().includes(normalizedQuery);
-      })
-      .slice(0, 8);
+      });
   }
 
   function updateMentionSearch(composerId: string, value: string, caret: number | null | undefined) {
