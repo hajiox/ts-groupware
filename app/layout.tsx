@@ -23,15 +23,20 @@ function BottomNav() {
       .catch(() => {});
   }, [hide]);
 
-  // 全体未読カウントのポーリング（30秒間隔）
+  // 全体未読カウントのポーリング（DB負荷を避けるため低頻度）
   useEffect(() => {
     if (hide) return;
     let active = true;
+    let failures = 0;
 
     const fetchUnread = () => {
-      fetch("/api/unread", { headers: getDeviceHeaders() })
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 6000);
+
+      fetch("/api/unread", { headers: getDeviceHeaders(), signal: controller.signal })
         .then(r => r.ok ? r.json() : { dmUnread: 0, groupUnread: 0, totalUnread: 0 })
         .then(data => {
+          failures = 0;
           if (active) {
             setDmUnread(data.dmUnread || 0);
             
@@ -46,11 +51,19 @@ function BottomNav() {
             }
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          failures += 1;
+        })
+        .finally(() => {
+          window.clearTimeout(timeoutId);
+        });
     };
 
     fetchUnread();
-    const timer = setInterval(fetchUnread, 30000);
+    const timer = setInterval(() => {
+      if (failures >= 3) return;
+      fetchUnread();
+    }, 5 * 60 * 1000);
     return () => { active = false; clearInterval(timer); };
   }, [hide, pathname]);
 
