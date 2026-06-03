@@ -1073,3 +1073,25 @@ avigator.setAppBadge() でホーム画面アイコンの赤丸に反映するよ
   - `npm run build` 成功。
 - **関連ファイル**:
   - `app/api/chat/direct/route.ts`
+
+### 2026-06-03 スマホ下部ナビ・Chat/掲示板入力欄の安定化
+- **症状**: スマホ画面でChatグループ、掲示板の下部メニューバーと入力欄がスクロールに追従して動く/位置が安定しない。
+- **原因**:
+  - `body` がスクロール所有者になっていた。
+  - 下部ナビは `position: sticky`、Chat/掲示板入力欄は `position: fixed` で、座標基準が混在していた。
+  - iOS Safari/モバイルChromeの動的ビューポート、アドレスバー、キーボード表示時に `sticky` と `fixed` が別々に再計算され、ズレや移動が発生しやすい構造だった。
+- **修正**:
+  - `app/layout.tsx` で `visualViewport.height` を `--app-height` に反映し、`.app-shell` を固定ビューポート化。
+  - `body` のスクロールを止め、通常ページは `.app-main`、Chat/掲示板は各リストだけをスクロール所有者にした。
+  - 下部ナビを `sticky` からアプリシェル内の固定行に変更。
+  - `/chat/[id]` と `/board/[id]` を `.chat-page` / `.board-page` の縦flexレイアウトにし、ヘッダー・リスト・入力欄を同一座標系で積む形に変更。
+  - 掲示板入力欄の長いプレースホルダーを短縮し、textareaの不要なスクロールバー表示を抑制。
+- **確認**:
+  - `npx tsc --noEmit` 成功。
+  - `npm run build` 成功。
+  - 390x844のスマホ幅で、掲示板/Chatともスクロール操作後に `windowScrollY=0` のまま、入力欄と下部ナビの座標が変化しないことを確認。
+- **関連ファイル**:
+  - `app/layout.tsx`
+  - `app/globals.css`
+  - `app/chat/[id]/page.tsx`
+  - `app/board/[id]/page.tsx`

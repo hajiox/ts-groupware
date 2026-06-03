@@ -113,12 +113,38 @@ function BottomNav() {
   );
 }
 
+function useAppViewportHeight() {
+  useEffect(() => {
+    const setHeight = () => {
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      document.documentElement.style.setProperty("--app-height", `${Math.round(viewportHeight)}px`);
+    };
+
+    setHeight();
+    window.addEventListener("resize", setHeight);
+    window.addEventListener("orientationchange", setHeight);
+    window.visualViewport?.addEventListener("resize", setHeight);
+    window.visualViewport?.addEventListener("scroll", setHeight);
+
+    return () => {
+      window.removeEventListener("resize", setHeight);
+      window.removeEventListener("orientationchange", setHeight);
+      window.visualViewport?.removeEventListener("resize", setHeight);
+      window.visualViewport?.removeEventListener("scroll", setHeight);
+    };
+  }, []);
+}
+
 // ─── Root Layout ─────────────────────────────────────────────────────────────
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+  const isFixedScreen = pathname.startsWith("/chat") || pathname.startsWith("/board");
+  useAppViewportHeight();
+
   return (
     <html lang="ja" suppressHydrationWarning>
       <head>
@@ -143,7 +169,7 @@ export default function RootLayout({
       </head>
       <body>
         <div className="app-shell">
-          <main style={{ flex: 1 }}>{children}</main>
+          <main className={`app-main${isFixedScreen ? " app-main--fixed-screen" : ""}`}>{children}</main>
           <BottomNav />
         </div>
       </body>

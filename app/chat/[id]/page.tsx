@@ -262,7 +262,7 @@ export default function ChatPage() {
   }
 
   return (
-    <>
+    <div className="chat-page">
       <header className="top-header" role="banner">
         <button
           type="button"
@@ -455,6 +455,6 @@ export default function ChatPage() {
           <img src={previewImage} alt="添付画像プレビュー" onClick={e => e.stopPropagation()} />
         </div>
       )}
-    </>
+    </div>
   );
 }

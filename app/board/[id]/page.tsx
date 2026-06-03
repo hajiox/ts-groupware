@@ -1171,7 +1171,7 @@ export default function BoardPage() {
   }
 
   return (
-    <>
+    <div className="board-page">
       <header className="top-header" role="banner">
         <button
           type="button"
@@ -1247,7 +1247,7 @@ export default function BoardPage() {
               value={text}
               onChange={handlePostTextChange}
               onKeyDown={handleKeyDown}
-              placeholder="投稿内容を入力... @でメンション / Ctrl+Enterで送信"
+              placeholder="投稿内容を入力... @でメンション"
               rows={1}
               aria-label="投稿テキスト"
               disabled={isPosting || isUploading}
@@ -1299,6 +1299,6 @@ export default function BoardPage() {
           />
         </div>
       )}
-    </>
+    </div>
   );
 }
