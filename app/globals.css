@@ -1792,6 +1792,7 @@ img {
   font-size: 14px;
   line-height: 1.5;
   max-width: 100%;
+  white-space: pre-wrap;
   word-break: break-word;
 }
 .msg--own .msg__bubble {
@@ -2005,21 +2006,27 @@ img {
   font-size: 18px;
   line-height: 1;
 }
-.chat-input-bar input {
+.chat-input-bar textarea {
   flex: 1;
   min-width: 0;
+  min-height: 40px;
+  max-height: 132px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 8px 16px;
+  border-radius: 20px;
+  padding: 9px 16px;
   color: var(--text);
   outline: none;
+  resize: none;
+  overflow-y: auto;
+  line-height: 1.35;
+  font: inherit;
   transition: border-color 0.15s;
 }
-.chat-input-bar input:focus {
+.chat-input-bar textarea:focus {
   border-color: var(--accent);
 }
-.chat-input-bar input::placeholder {
+.chat-input-bar textarea::placeholder {
   color: var(--text-muted);
 }
 
@@ -2729,7 +2736,7 @@ img {
 .post-card__file,
 .post-comment-form textarea,
 .post-input-bar textarea,
-.chat-input-bar input,
+.chat-input-bar textarea,
 .msg__file,
 .settings-action-btn,
 .mention-chip,
@@ -3549,7 +3556,7 @@ html[data-theme="light"] .chat-input-bar {
   background: rgba(255, 255, 255, 0.95);
   border-top: 1px solid var(--border);
 }
-html[data-theme="light"] .chat-input-bar__input {
+html[data-theme="light"] .chat-input-bar textarea {
   background: #f1f5f9;
   color: #1e293b;
 }
@@ -3689,7 +3696,7 @@ body,
 .post-card__file,
 .post-comment-form textarea,
 .post-input-bar textarea,
-.chat-input-bar input,
+.chat-input-bar textarea,
 .msg__file,
 .settings-action-btn,
 .mention-chip,

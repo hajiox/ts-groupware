@@ -92,7 +92,7 @@ export default function ChatPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const messageInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageIdsRef = useRef<Set<string>>(new Set());
 
@@ -258,6 +258,14 @@ export default function ChatPage() {
     }];
   }
 
+  function resizeMessageInput() {
+    const element = messageInputRef.current;
+    if (!element) return;
+
+    element.style.height = "40px";
+    element.style.height = `${Math.min(element.scrollHeight, 132)}px`;
+  }
+
   async function handleSend() {
     const content = input.trim();
     if ((!content && !selectedFile) || sending) return;
@@ -283,6 +291,7 @@ export default function ChatPage() {
       setSelectedFile(null);
       setMentionPickerOpen(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+      window.setTimeout(resizeMessageInput, 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "メッセージ送信に失敗しました");
     } finally {
@@ -306,10 +315,23 @@ export default function ChatPage() {
       if (!messageInputRef.current) return;
       messageInputRef.current.focus();
       messageInputRef.current.setSelectionRange(cursor, cursor);
+      resizeMessageInput();
     }, 0);
   }
 
-  function handleMessagePaste(e: React.ClipboardEvent<HTMLInputElement>) {
+  function handleMessageChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setInput(e.target.value);
+    resizeMessageInput();
+  }
+
+  function handleMessageKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || e.nativeEvent.isComposing) return;
+
+    e.preventDefault();
+    void handleSend();
+  }
+
+  function handleMessagePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const file = getClipboardImageFile(e.clipboardData);
     if (!file) return;
 
@@ -742,15 +764,15 @@ export default function ChatPage() {
         >
           📎
         </button>
-        <input
+        <textarea
           ref={messageInputRef}
-          type="text"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={handleMessageChange}
+          onKeyDown={handleMessageKeyDown}
           onPaste={handleMessagePaste}
           placeholder="メッセージを入力..."
           aria-label="メッセージ"
-          autoComplete="off"
+          rows={1}
           disabled={sending}
         />
         <button
