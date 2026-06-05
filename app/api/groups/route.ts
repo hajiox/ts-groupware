@@ -13,6 +13,11 @@ function isDirectChat(group: { type?: string; description?: string | null }) {
   return group.type === 'chat' && typeof group.description === 'string' && group.description.startsWith('direct:')
 }
 
+function isAllStaffGroupName(name: string) {
+  const normalized = name.replace(/\s+/g, '')
+  return normalized.includes('オールスタッフ') || normalized.includes('全スタッフ')
+}
+
 export async function GET(request: NextRequest) {
   const user = await getUserSession()
   if (!user) {
@@ -130,6 +135,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'グループ名は必須です' }, { status: 400 })
   }
 
+  const trimmedName = name.trim()
+  const addAllMembers = Boolean(body.add_all_members || body.addAllMembers || isAllStaffGroupName(trimmedName))
+
   // チャットタイプはアイコン💬固定
   const resolvedType = type || 'board'
   const resolvedIcon = resolvedType === 'chat' ? '💬' : (icon || '📢')
@@ -138,7 +146,7 @@ export async function POST(request: NextRequest) {
   const { data: group, error } = await adminClient
     .from('gw_groups')
     .insert({
-      name: name.trim(),
+      name: trimmedName,
       description: description || null,
       type: resolvedType,
       icon: resolvedIcon,
@@ -151,14 +159,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error?.message || '作成失敗' }, { status: 500 })
   }
 
-  // 作成者をメンバーに追加（admin）
-  await adminClient
-    .from('gw_group_members')
-    .insert({
-      group_id: group.id,
-      user_id: user.id,
-      role: 'admin',
-    })
+  let memberRows = [{
+    group_id: group.id,
+    user_id: user.id,
+    role: 'admin',
+  }]
 
-  return NextResponse.json({ group }, { status: 201 })
+  if (addAllMembers) {
+    const { data: approvedUsers, error: usersError } = await adminClient
+      .from('gw_users')
+      .select('id, role')
+      .or('status.eq.approved,status.is.null')
+
+    if (usersError) {
+      await adminClient.from('gw_groups').delete().eq('id', group.id)
+      return NextResponse.json({ error: usersError.message }, { status: 500 })
+    }
+
+    memberRows = (approvedUsers || []).map(approvedUser => ({
+      group_id: group.id,
+      user_id: approvedUser.id,
+      role: approvedUser.id === user.id || approvedUser.role === 'admin' ? 'admin' : 'member',
+    }))
+  }
+
+  // 作成者、または全スタッフ指定時は承認済みユーザー全員をメンバーに追加
+  const { error: memberError } = await adminClient
+    .from('gw_group_members')
+    .upsert(memberRows, { onConflict: 'group_id,user_id' })
+
+  if (memberError) {
+    await adminClient.from('gw_groups').delete().eq('id', group.id)
+    return NextResponse.json({ error: memberError.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ group: { ...group, memberCount: memberRows.length } }, { status: 201 })
 }

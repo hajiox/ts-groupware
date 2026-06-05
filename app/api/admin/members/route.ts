@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   // グループのメンバー一覧
   const { data: members } = await adminClient
     .from('gw_group_members')
-    .select('user_id, role, created_at')
+    .select('user_id, role, joined_at')
     .eq('group_id', groupId)
 
   const explicitMemberUserIds = (members || []).map(m => m.user_id)
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
   const { data: allUsers } = await adminClient
     .from('gw_users')
     .select('id, display_name, real_name, picture_url, role, status')
-    .eq('status', 'approved')
+    .or('status.eq.approved,status.is.null')
     .order('display_name', { ascending: true })
 
   // メンバーに含まれるユーザー / 含まれないユーザー
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
     .from('gw_users')
     .select('id')
     .in('id', user_ids)
-    .eq('status', 'approved')
+    .or('status.eq.approved,status.is.null')
 
   const approvedUserIds = new Set((approvedUsers || []).map(u => u.id))
   if (approvedUserIds.size !== user_ids.length) {

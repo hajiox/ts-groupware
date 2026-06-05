@@ -25,6 +25,11 @@ type Group = {
   unread: number;
 };
 
+function isAllStaffGroupName(name: string) {
+  const normalized = name.replace(/\s+/g, "");
+  return normalized.includes("オールスタッフ") || normalized.includes("全スタッフ");
+}
+
 function AvatarPlaceholder({
   initials,
   color,
@@ -57,6 +62,7 @@ function CreateGroupModal({
   const [name, setName] = useState("");
   const [type, setType] = useState<"board" | "chat">("board");
   const [icon, setIcon] = useState("📢");
+  const [addAllMembers, setAddAllMembers] = useState(false);
   const [loading, setLoading] = useState(false);
 
   if (!open) return null;
@@ -69,13 +75,14 @@ function CreateGroupModal({
     const res = await fetch("/api/groups", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), type, icon }),
+      body: JSON.stringify({ name: name.trim(), type, icon, add_all_members: addAllMembers }),
     });
 
     if (res.ok) {
       setName("");
       setType("board");
       setIcon("📢");
+      setAddAllMembers(false);
       onClose();
       onCreated();
     } else {
@@ -97,7 +104,11 @@ function CreateGroupModal({
               type="text"
               className="form-input"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                const nextName = e.target.value;
+                setName(nextName);
+                if (isAllStaffGroupName(nextName)) setAddAllMembers(true);
+              }}
               placeholder="例: 全社アナウンス"
               autoFocus
             />
@@ -141,6 +152,15 @@ function CreateGroupModal({
           </div>
           )}
 
+          <label className="form-check">
+            <input
+              type="checkbox"
+              checked={addAllMembers}
+              onChange={(e) => setAddAllMembers(e.target.checked)}
+            />
+            <span>承認済みスタッフ全員をメンバーに追加</span>
+          </label>
+
           <div className="modal-actions">
             <button type="button" className="btn-cancel" onClick={onClose}>
               キャンセル
@@ -167,6 +187,7 @@ export default function GroupsPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [openTaskCount, setOpenTaskCount] = useState(0);
 
   function loadData() {
     fetch("/api/auth/me")
@@ -182,6 +203,11 @@ export default function GroupsPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+
+    fetch("/api/tasks?summary=1", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { openCount: 0 }))
+      .then((data) => setOpenTaskCount(data.openCount || 0))
+      .catch(() => {});
   }
 
   useEffect(() => {
@@ -254,6 +280,13 @@ export default function GroupsPage() {
         aria-label="グループ一覧"
         style={{ paddingTop: 16 }}
       >
+        {openTaskCount > 0 && (
+          <Link href="/tasks" className="task-alert-banner">
+            <span>未完了のタスクがあります</span>
+            <strong>{openTaskCount}件</strong>
+          </Link>
+        )}
+
         {loading ? (
           <p style={{ textAlign: "center", color: "var(--text-sub)", padding: "40px 0" }}>
             読み込み中...

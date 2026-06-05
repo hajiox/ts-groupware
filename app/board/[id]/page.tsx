@@ -3,6 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { linkifyText, OgpPreviews } from "@/components/link-preview";
+import { getClipboardImageFile } from "@/lib/clipboard-image";
 import { getDeviceHeaders } from "@/lib/device-id";
 
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"] as const;
@@ -36,12 +37,53 @@ type Post = {
   author: Author;
   reactions: Record<string, { count: number; hasOwn: boolean }>;
   commentCount: number;
+  tasks?: TaskSummary[];
 };
 
 type CurrentUser = {
   id: string;
   role: string;
 };
+
+type TaskSummary = {
+  id: string;
+  post_id: string;
+  group_id: string;
+  requester_id: string;
+  assignee_id: string;
+  due_date: string;
+  completed_at: string | null;
+  completed_by: string | null;
+  assignee?: Author | null;
+  requester?: Author | null;
+  completedBy?: Author | null;
+};
+
+type GroupMember = Author & {
+  groupRole?: string;
+  role?: string;
+  isSelf?: boolean;
+};
+
+function isAdminMember(member: GroupMember) {
+  return member.role === "admin" || member.groupRole === "admin";
+}
+
+function sortTaskMembers(members: GroupMember[]) {
+  return [...members].sort((a, b) => {
+    const aIsAdmin = isAdminMember(a);
+    const bIsAdmin = isAdminMember(b);
+    if (aIsAdmin !== bIsAdmin) return aIsAdmin ? -1 : 1;
+    if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1;
+    return a.display_name.localeCompare(b.display_name, "ja");
+  });
+}
+
+function formatMentionName(name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) return "";
+  return /(さん|様|さま|君|くん|ちゃん)$/.test(trimmed) ? trimmed : `${trimmed}さん`;
+}
 
 function Avatar({ user, size = 38 }: { user: Author; size?: number }) {
   if (user.picture_url) {
@@ -75,6 +117,18 @@ function formatDate(dateStr: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatDueDate(dateStr: string) {
+  if (!dateStr) return "";
+  const date = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", weekday: "short" });
+}
+
+function todayDateInputValue() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function getDriveFileId(url: string) {
@@ -195,10 +249,18 @@ export default function BoardPage() {
   const [notifToggling, setNotifToggling] = useState(false);
   const [postMutedSettings, setPostMutedSettings] = useState<Record<string, boolean>>({});
   const [postNotifToggling, setPostNotifToggling] = useState<Record<string, boolean>>({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const [taskEnabled, setTaskEnabled] = useState(false);
+  const [taskMembers, setTaskMembers] = useState<GroupMember[]>([]);
+  const [taskMembersLoading, setTaskMembersLoading] = useState(false);
+  const [taskAssigneeIds, setTaskAssigneeIds] = useState<string[]>([]);
+  const [taskDueDate, setTaskDueDate] = useState("");
+  const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
+  const [commentMentionPickerPostId, setCommentMentionPickerPostId] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const commentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const commentInputRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const commentSectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const commentFileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -227,6 +289,25 @@ export default function BoardPage() {
       .catch(() => {});
   }, [posts]);
 
+  useEffect(() => {
+    if (!taskEnabled) return;
+    if (!taskDueDate) setTaskDueDate(todayDateInputValue());
+    void loadGroupMembers();
+  }, [id, taskEnabled, taskDueDate, taskMembers.length, taskMembersLoading]);
+
+  const filteredPosts = posts.filter((post) => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return true;
+
+    const target = [
+      post.content || "",
+      post.author?.display_name || "",
+      ...(post.attachments || []).map((attachment) => attachment.name || ""),
+    ].join(" ").toLowerCase();
+
+    return target.includes(query);
+  });
+
   function loadPosts() {
     setLoading(true);
     fetch(`/api/posts?group_id=${id}`, { headers: getDeviceHeaders() })
@@ -237,6 +318,21 @@ export default function BoardPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  }
+
+  async function loadGroupMembers() {
+    if (taskMembers.length > 0 || taskMembersLoading) return;
+
+    setTaskMembersLoading(true);
+    try {
+      const res = await fetch(`/api/groups/${id}/members`);
+      const data = res.ok ? await res.json() : { members: [] };
+      setTaskMembers(sortTaskMembers(data.members || []));
+    } catch {
+      setTaskMembers([]);
+    } finally {
+      setTaskMembersLoading(false);
+    }
   }
 
   async function uploadFile(file: File, uploadOriginalFile: boolean): Promise<Attachment[]> {
@@ -266,6 +362,14 @@ export default function BoardPage() {
 
   async function handlePost() {
     if (isPosting || isUploading || (!text.trim() && !selectedFile)) return;
+    if (taskEnabled && taskAssigneeIds.length === 0) {
+      alert("タスク担当者を選択してください");
+      return;
+    }
+    if (taskEnabled && !taskDueDate) {
+      alert("タスク期限を選択してください");
+      return;
+    }
 
     setIsPosting(true);
     setIsUploading(Boolean(selectedFile));
@@ -274,7 +378,12 @@ export default function BoardPage() {
       const res = await fetch("/api/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ group_id: id, content: text.trim(), attachments }),
+        body: JSON.stringify({
+          group_id: id,
+          content: text.trim(),
+          attachments,
+          task: taskEnabled ? { assignee_ids: taskAssigneeIds, due_date: taskDueDate } : undefined,
+        }),
       });
 
       if (!res.ok) {
@@ -286,6 +395,10 @@ export default function BoardPage() {
       setText("");
       setSelectedFile(null);
       setUploadOriginal(false);
+      setTaskEnabled(false);
+      setTaskAssigneeIds([]);
+      setTaskDueDate("");
+      setMentionPickerOpen(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
       if (textareaRef.current) textareaRef.current.style.height = "38px";
 
@@ -359,6 +472,7 @@ export default function BoardPage() {
       setCommentTextByPost((current) => ({ ...current, [postId]: "" }));
       setCommentFilesByPost((current) => ({ ...current, [postId]: null }));
       setCommentUploadOriginalByPost((current) => ({ ...current, [postId]: false }));
+      setCommentMentionPickerPostId((current) => (current === postId ? null : current));
       if (commentFileInputRefs.current[postId]) {
         commentFileInputRefs.current[postId]!.value = "";
       }
@@ -433,15 +547,100 @@ export default function BoardPage() {
     el.style.height = `${el.scrollHeight}px`;
   }
 
+  function toggleMentionPicker() {
+    setCommentMentionPickerPostId(null);
+    setMentionPickerOpen((current) => {
+      const next = !current;
+      if (next) void loadGroupMembers();
+      return next;
+    });
+  }
+
+  function toggleCommentMentionPicker(postId: string) {
+    setMentionPickerOpen(false);
+    setCommentMentionPickerPostId((current) => {
+      const next = current === postId ? null : postId;
+      if (next) {
+        setActiveCommentPostId(postId);
+        void loadGroupMembers();
+      }
+      return next;
+    });
+  }
+
+  function insertMention(member: GroupMember) {
+    const input = textareaRef.current;
+    const start = input?.selectionStart ?? text.length;
+    const end = input?.selectionEnd ?? text.length;
+    const needsLeadingSpace = start > 0 && !/\s/.test(text.charAt(start - 1));
+    const mention = `${needsLeadingSpace ? " " : ""}@${formatMentionName(member.display_name)} `;
+    const nextText = `${text.slice(0, start)}${mention}${text.slice(end)}`;
+    const cursor = start + mention.length;
+
+    setText(nextText);
+    setMentionPickerOpen(false);
+
+    window.setTimeout(() => {
+      if (!textareaRef.current) return;
+      textareaRef.current.focus();
+      textareaRef.current.setSelectionRange(cursor, cursor);
+      textareaRef.current.style.height = "38px";
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }, 0);
+  }
+
+  function insertCommentMention(postId: string, member: GroupMember) {
+    const input = commentInputRefs.current[postId];
+    const currentText = commentTextByPost[postId] || "";
+    const start = input?.selectionStart ?? currentText.length;
+    const end = input?.selectionEnd ?? currentText.length;
+    const needsLeadingSpace = start > 0 && !/\s/.test(currentText.charAt(start - 1));
+    const mention = `${needsLeadingSpace ? " " : ""}@${formatMentionName(member.display_name)} `;
+    const nextText = `${currentText.slice(0, start)}${mention}${currentText.slice(end)}`;
+    const cursor = start + mention.length;
+
+    setCommentTextByPost((current) => ({ ...current, [postId]: nextText }));
+    setCommentMentionPickerPostId(null);
+    setActiveCommentPostId(postId);
+
+    window.setTimeout(() => {
+      const target = commentInputRefs.current[postId];
+      if (!target) return;
+      target.focus();
+      target.setSelectionRange(cursor, cursor);
+    }, 0);
+  }
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] || null;
     setSelectedFile(file);
     setUploadOriginal(false);
   }
 
+  function handlePostPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const file = getClipboardImageFile(e.clipboardData);
+    if (!file) return;
+
+    e.preventDefault();
+    setSelectedFile(file);
+    setUploadOriginal(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   function handleCommentFileChange(postId: string, file: File | null) {
     setCommentFilesByPost((current) => ({ ...current, [postId]: file }));
     setCommentUploadOriginalByPost((current) => ({ ...current, [postId]: false }));
+  }
+
+  function handleCommentPaste(postId: string, e: React.ClipboardEvent<HTMLInputElement>) {
+    const file = getClipboardImageFile(e.clipboardData);
+    if (!file) return;
+
+    e.preventDefault();
+    handleCommentFileChange(postId, file);
+    if (commentFileInputRefs.current[postId]) {
+      commentFileInputRefs.current[postId]!.value = "";
+    }
   }
 
   function canEditPost(post: Post) {
@@ -450,6 +649,21 @@ export default function BoardPage() {
 
   function canDeletePost(post: Post) {
     return currentUser?.id === post.user_id || currentUser?.role === "admin";
+  }
+
+  function toggleTaskAssignee(memberId: string) {
+    setTaskAssigneeIds((current) => (
+      current.includes(memberId)
+        ? current.filter((id) => id !== memberId)
+        : [...current, memberId]
+    ));
+  }
+
+  function toggleTaskRequestPanel() {
+    const nextEnabled = !taskEnabled;
+    setTaskEnabled(nextEnabled);
+    setTaskAssigneeIds([]);
+    if (!nextEnabled) setTaskDueDate("");
   }
 
   function startEditing(post: Post) {
@@ -600,6 +814,41 @@ export default function BoardPage() {
     );
   }
 
+  function renderTaskSummary(post: Post) {
+    const tasks = post.tasks || [];
+    if (tasks.length === 0) return null;
+
+    const completedCount = tasks.filter(task => task.completed_at).length;
+    const allCompleted = completedCount === tasks.length;
+    const dueLabel = tasks[0]?.due_date ? formatDueDate(tasks[0].due_date) : "";
+
+    return (
+      <section className={`post-task-box${allCompleted ? " post-task-box--completed" : ""}`} aria-label="タスク依頼">
+        <div className="post-task-box__header">
+          <span className="post-task-badge">タスク依頼</span>
+          <span className="post-task-box__meta">
+            {dueLabel && <>期限 {dueLabel} ・ </>}
+            {completedCount}/{tasks.length} 完了
+          </span>
+        </div>
+        <div className="post-task-box__list">
+          {tasks.map((task) => (
+            <div key={task.id} className="post-task-box__assignee">
+              <span className="post-task-box__dot" aria-hidden="true">{task.completed_at ? "✓" : ""}</span>
+              <span className="post-task-box__name">{task.assignee?.display_name || "不明"}</span>
+              <span className="post-task-box__status">
+                {task.completed_at ? "完了" : "未完了"}
+              </span>
+            </div>
+          ))}
+        </div>
+        {allCompleted && (
+          <div className="post-task-box__done">このタスク依頼は完了しました</div>
+        )}
+      </section>
+    );
+  }
+
   function renderComment(post: Post) {
     return (
       <article key={post.id} className="post-comment">
@@ -698,6 +947,32 @@ export default function BoardPage() {
           </div>
         )}
 
+        {commentMentionPickerPostId === post.id && (
+          <div className="mention-picker mention-picker--comment" role="listbox" aria-label="comment mention candidates">
+            {taskMembersLoading ? (
+              <span className="mention-picker__empty">Loading members...</span>
+            ) : taskMembers.length === 0 ? (
+              <span className="mention-picker__empty">No mentionable members</span>
+            ) : (
+              taskMembers.map((member) => (
+                <button
+                  key={member.id}
+                  type="button"
+                  className="mention-chip"
+                  onClick={() => insertCommentMention(post.id, member)}
+                  disabled={isCommentSubmitting}
+                  role="option"
+                  aria-selected="false"
+                >
+                  <Avatar user={member} size={24} />
+                  <span>{member.display_name}</span>
+                  {isAdminMember(member) && <small>admin</small>}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+
         <form
           className="post-comment-form"
           onSubmit={(e) => {
@@ -705,12 +980,30 @@ export default function BoardPage() {
             handleComment(post.id);
           }}
         >
-          <input
+          <button
+            type="button"
+            className={`mention-toggle-btn mention-toggle-btn--comment${commentMentionPickerPostId === post.id ? " mention-toggle-btn--active" : ""}`}
+            aria-label="show comment mention candidates"
+            aria-pressed={commentMentionPickerPostId === post.id}
+            onClick={() => toggleCommentMentionPicker(post.id)}
+            disabled={isCommentSubmitting}
+          >
+            @
+          </button>
+          <textarea
             ref={(element) => {
               commentInputRefs.current[post.id] = element;
             }}
             value={currentCommentText}
             onChange={(e) => setCommentTextByPost((current) => ({ ...current, [post.id]: e.target.value }))}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                handleComment(post.id);
+              }
+            }}
+            onPaste={(e) => handleCommentPaste(post.id, e)}
+            rows={1}
             placeholder="コメントを入力..."
             aria-label="コメントを入力"
             disabled={isCommentSubmitting}
@@ -747,7 +1040,7 @@ export default function BoardPage() {
     const isCommentLoading = commentLoadingByPost[post.id] || false;
 
     return (
-      <article key={post.id} className="post-card">
+      <article key={post.id} id={`post-${post.id}`} className={`post-card${post.tasks?.length ? " post-card--task" : ""}`}>
         {post.is_pinned && (
           <div className="post-card__pinned">
             📌 ピン留め
@@ -758,7 +1051,10 @@ export default function BoardPage() {
           <Avatar user={post.author} size={40} />
           <div className="post-card__user-info">
             <div className="post-card__username">{post.author.display_name}</div>
-            <div className="post-card__time">{formatDate(post.created_at)}</div>
+            <div className="post-card__time">
+              {formatDate(post.created_at)}
+              {!!post.tasks?.length && <span className="post-task-inline-badge">タスク依頼</span>}
+            </div>
           </div>
           <div className="post-card__actions" aria-label="投稿操作">
             <button
@@ -787,6 +1083,7 @@ export default function BoardPage() {
           </div>
         </header>
 
+        {renderTaskSummary(post)}
         {renderPostBody(post)}
         {renderAttachments(post)}
 
@@ -912,13 +1209,30 @@ export default function BoardPage() {
         </button>
       </header>
 
+      <div className="thread-search" role="search">
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="掲示板を検索"
+          aria-label="掲示板を検索"
+        />
+        {searchQuery && (
+          <button type="button" onClick={() => setSearchQuery("")} aria-label="検索をクリア">
+            クリア
+          </button>
+        )}
+      </div>
+
       <section className="post-list" aria-label="投稿一覧">
         {loading ? (
           <p className="post-list__state">読み込み中...</p>
         ) : posts.length === 0 ? (
           <p className="post-list__state">投稿がありません。最初の投稿をしてみましょう。</p>
+        ) : filteredPosts.length === 0 ? (
+          <p className="post-list__state">検索条件に一致する投稿はありません。</p>
         ) : (
-          posts.map(renderPost)
+          filteredPosts.map(renderPost)
         )}
       </section>
 
@@ -957,12 +1271,91 @@ export default function BoardPage() {
           </div>
         )}
 
+        {taskEnabled && (
+          <div className="task-request-panel">
+            <div className="task-request-panel__row">
+              <label className="task-request-panel__date">
+                <span>期限</span>
+                <input
+                  type="date"
+                  value={taskDueDate}
+                  onChange={(event) => setTaskDueDate(event.target.value)}
+                  disabled={isPosting || isUploading}
+                />
+              </label>
+              <span className="task-request-panel__hint">担当者は複数選択できます</span>
+            </div>
+            <div className="task-request-members" aria-label="タスク担当者">
+              {taskMembersLoading ? (
+                <span className="task-request-members__empty">メンバーを読み込み中...</span>
+              ) : taskMembers.length === 0 ? (
+                <span className="task-request-members__empty">選択できるメンバーがいません</span>
+              ) : (
+                taskMembers.map((member) => {
+                  const selected = taskAssigneeIds.includes(member.id);
+                  return (
+                    <button
+                      key={member.id}
+                      type="button"
+                      className={`task-member-chip${selected ? " task-member-chip--selected" : ""}`}
+                      onClick={() => toggleTaskAssignee(member.id)}
+                      disabled={isPosting || isUploading}
+                      aria-pressed={selected}
+                    >
+                      {member.display_name}
+                      {isAdminMember(member) && <span>管理者</span>}
+                      {member.isSelf && <span>自分</span>}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {mentionPickerOpen && (
+          <div className="mention-picker" role="listbox" aria-label="メンション候補">
+            {taskMembersLoading ? (
+              <span className="mention-picker__empty">メンバー読込中...</span>
+            ) : taskMembers.length === 0 ? (
+              <span className="mention-picker__empty">メンションできるメンバーがいません</span>
+            ) : (
+              taskMembers.map((member) => (
+                <button
+                  key={member.id}
+                  type="button"
+                  className="mention-chip"
+                  onClick={() => insertMention(member)}
+                  disabled={isPosting || isUploading}
+                  role="option"
+                  aria-selected="false"
+                >
+                  <Avatar user={member} size={24} />
+                  <span>{member.display_name}</span>
+                  {isAdminMember(member) && <small>管理者</small>}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+
         <form className="post-input-bar__form" onSubmit={(e) => { e.preventDefault(); handlePost(); }} aria-label="新規投稿">
+          <button
+            type="button"
+            className={`mention-toggle-btn${mentionPickerOpen ? " mention-toggle-btn--active" : ""}`}
+            aria-label="メンション候補を表示"
+            aria-pressed={mentionPickerOpen}
+            onClick={toggleMentionPicker}
+            disabled={isPosting || isUploading}
+          >
+            @
+          </button>
           <textarea
             ref={textareaRef}
             value={text}
             onChange={autoResize}
             onKeyDown={handleKeyDown}
+            onPaste={handlePostPaste}
             placeholder="投稿内容を入力... (Ctrl+Enterで送信)"
             rows={1}
             aria-label="投稿テキスト"
@@ -979,10 +1372,19 @@ export default function BoardPage() {
             📎
           </button>
           <button
+            type="button"
+            className={`task-toggle-btn${taskEnabled ? " task-toggle-btn--active" : ""}`}
+            onClick={toggleTaskRequestPanel}
+            disabled={isPosting || isUploading}
+            aria-pressed={taskEnabled}
+          >
+            タスク依頼
+          </button>
+          <button
             type="submit"
             className="send-btn"
             aria-label="投稿を送信"
-            disabled={isPosting || isUploading || (!text.trim() && !selectedFile)}
+            disabled={isPosting || isUploading || (!text.trim() && !selectedFile) || (taskEnabled && (!taskDueDate || taskAssigneeIds.length === 0))}
           >
             {isPosting || isUploading ? "..." : "↑"}
           </button>

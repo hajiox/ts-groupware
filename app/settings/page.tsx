@@ -11,6 +11,7 @@ type User = {
 };
 
 type DeviceType = "iphone" | "android" | "pc";
+type FontSizeMode = "normal" | "large";
 
 /**
  * iOS判定: iPhone / iPad / iPod のほか、
@@ -80,6 +81,7 @@ export default function SettingsPage() {
   const [deviceLoginUrl, setDeviceLoginUrl] = useState("");
   const [creatingDeviceLoginUrl, setCreatingDeviceLoginUrl] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [fontSize, setFontSize] = useState<FontSizeMode>("normal");
 
   // deviceLogin=1 パラメータで来た場合はSafari/PWAから開いたことを自動案内
   const [fromDeviceLogin, setFromDeviceLogin] = useState(false);
@@ -99,6 +101,11 @@ export default function SettingsPage() {
     // テーマ初期値読み込み
     const saved = localStorage.getItem("tsg-theme");
     if (saved === "light" || saved === "dark") setTheme(saved);
+    const savedFontSize = localStorage.getItem("tsg-font-size");
+    const normalizedFontSize: FontSizeMode = savedFontSize === "large" ? "large" : "normal";
+    setFontSize(normalizedFontSize);
+    localStorage.setItem("tsg-font-size", normalizedFontSize);
+    document.documentElement.setAttribute("data-font-size", normalizedFontSize);
 
     determinePushCapability();
     setGuideDevice(detectDevice());
@@ -250,6 +257,12 @@ export default function SettingsPage() {
 
   function handleLogout() {
     window.location.href = "/api/auth/logout";
+  }
+
+  function changeFontSize(next: FontSizeMode) {
+    setFontSize(next);
+    localStorage.setItem("tsg-font-size", next);
+    document.documentElement.setAttribute("data-font-size", next);
   }
 
   // --- Push通知の状態別UI ---
@@ -422,6 +435,34 @@ export default function SettingsPage() {
           </div>
           <div className="settings-profile__sub">
             {user?.role === "admin" ? "管理者" : "メンバー"}
+          </div>
+        </section>
+
+        <section className="settings-section settings-section--font-size" aria-label="文字サイズ設定">
+          <h2 className="settings-section__title">文字サイズ</h2>
+          <div className="settings-row settings-row--stack">
+            <div>
+              <div className="settings-row__label">
+                {fontSize === "large" ? "大きめ" : "標準"}
+              </div>
+              <div className="settings-row__sub">スマホごとに表示サイズを切り替えます</div>
+            </div>
+            <div className="font-size-options" role="group" aria-label="文字サイズ">
+              {([
+                { value: "normal" as const, label: "標準" },
+                { value: "large" as const, label: "大きめ" },
+              ]).map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`font-size-option${fontSize === option.value ? " font-size-option--active" : ""}`}
+                  onClick={() => changeFontSize(option.value)}
+                  aria-pressed={fontSize === option.value}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
         </section>
 

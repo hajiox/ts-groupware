@@ -16,7 +16,7 @@ type User = {
 type Group = {
   id: string;
   name: string;
-  type: string;
+  type: "board" | "chat";
   icon: string;
 };
 
@@ -30,6 +30,11 @@ type GroupMember = {
 };
 
 type Tab = "users" | "groups";
+
+function isAllStaffGroupName(name: string) {
+  const normalized = name.replace(/\s+/g, "");
+  return normalized.includes("オールスタッフ") || normalized.includes("全スタッフ");
+}
 
 function Avatar({ user, size = 36 }: { user: { display_name: string; picture_url: string | null }; size?: number }) {
   if (user.picture_url) {
@@ -128,7 +133,7 @@ function UsersTab() {
             <div className="admin-item__name">
               {user.display_name}
             </div>
-            <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center" }}>
+            <div className="admin-name-editor">
               <input
                 type="text"
                 className="form-input"
@@ -139,14 +144,12 @@ function UsersTab() {
                   if (e.key === "Enter") handleRealNameSave(user);
                 }}
                 aria-label={`${user.display_name} の本名`}
-                style={{ flex: 1, minWidth: 0, height: 30, padding: "4px 8px", fontSize: 13 }}
               />
               <button
                 type="button"
                 className="admin-btn-outline"
                 onClick={() => handleRealNameSave(user)}
                 disabled={(nameDrafts[user.id] ?? (user.real_name || "")).trim() === (user.real_name || "")}
-                style={{ height: 30, padding: "0 10px", fontSize: 12, whiteSpace: "nowrap" }}
               >
                 保存
               </button>
@@ -221,6 +224,7 @@ function GroupsTab() {
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupType, setNewGroupType] = useState<"board" | "chat">("board");
   const [newGroupIcon, setNewGroupIcon] = useState("📢");
+  const [newGroupAddAllMembers, setNewGroupAddAllMembers] = useState(false);
   const [creating, setCreating] = useState(false);
 
   function loadGroups() {
@@ -299,10 +303,16 @@ function GroupsTab() {
     const res = await fetch("/api/groups", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newGroupName.trim(), type: newGroupType, icon: newGroupIcon }),
+      body: JSON.stringify({
+        name: newGroupName.trim(),
+        type: newGroupType,
+        icon: newGroupIcon,
+        add_all_members: newGroupAddAllMembers,
+      }),
     });
     if (res.ok) {
       setNewGroupName("");
+      setNewGroupAddAllMembers(false);
       setShowCreate(false);
       loadGroups();
     } else alert("グループの作成に失敗しました");
@@ -314,6 +324,7 @@ function GroupsTab() {
   function openCreateForm(type: "board" | "chat") {
     setNewGroupType(type);
     setNewGroupIcon(type === "chat" ? "💬" : "📢");
+    setNewGroupAddAllMembers(false);
     setShowCreate(true);
   }
 
@@ -435,7 +446,11 @@ function GroupsTab() {
             type="text"
             className="form-input"
             value={newGroupName}
-            onChange={e => setNewGroupName(e.target.value)}
+            onChange={e => {
+              const nextName = e.target.value;
+              setNewGroupName(nextName);
+              if (isAllStaffGroupName(nextName)) setNewGroupAddAllMembers(true);
+            }}
             placeholder={newGroupType === "chat" ? "Chat名" : "掲示板名"}
             autoFocus
           />
@@ -448,7 +463,15 @@ function GroupsTab() {
               <button key={ic} type="button" className={`icon-select-btn ${newGroupIcon === ic ? "icon-select-btn--active" : ""}`} onClick={() => setNewGroupIcon(ic)}>{ic}</button>
             ))}
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <label className="form-check" style={{ marginTop: 10 }}>
+            <input
+              type="checkbox"
+              checked={newGroupAddAllMembers}
+              onChange={e => setNewGroupAddAllMembers(e.target.checked)}
+            />
+            <span>承認済みスタッフ全員をメンバーに追加</span>
+          </label>
+          <div className="admin-form-actions">
             <button type="button" className="btn-cancel" onClick={() => setShowCreate(false)}>キャンセル</button>
             <button type="submit" className="btn-primary" disabled={creating || !newGroupName.trim()}>
               {creating ? "作成中..." : "作成"}
@@ -461,18 +484,20 @@ function GroupsTab() {
         {groups.length === 0 ? (
           <p className="admin-empty">グループがありません</p>
         ) : (
-          groups.map(group => (
-            <div key={group.id} className="admin-item admin-item--clickable" onClick={() => loadMembers(group)}>
-              <div className="group-card__icon" style={{ width: 40, height: 40, borderRadius: 10, fontSize: 20 }}>
+          groups.map(group => {
+            const groupType = group.type === "chat" ? "chat" : "board";
+            return (
+            <div key={group.id} className={`admin-item admin-item--clickable admin-group-card admin-group-card--${groupType}`} onClick={() => loadMembers(group)}>
+              <div className={`group-card__icon group-card__icon--${groupType}`} style={{ width: 40, height: 40, borderRadius: 10, fontSize: 20 }}>
                 {group.icon}
               </div>
               <div className="admin-item__info">
                 <div className="admin-item__name">{group.name}</div>
                 <div className="admin-item__sub">{group.type === "board" ? "掲示板" : "チャット"}</div>
               </div>
-              <span style={{ color: "var(--text-muted)", fontSize: 13 }}>メンバー管理 →</span>
+              <span className="admin-group-card__manage">メンバー管理 →</span>
             </div>
-          ))
+          )})
         )}
       </div>
     </div>

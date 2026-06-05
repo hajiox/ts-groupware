@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
 import { getDeviceIdFromRequest, markGroupRead } from '@/lib/read-status'
+import { deleteFileFromDrive } from '@/lib/drive'
 
 type Attachment = {
   url?: string
@@ -53,6 +54,41 @@ function normalizeAttachments(value: unknown): Attachment[] {
       webViewLink: typeof item.webViewLink === 'string' ? item.webViewLink : undefined,
     }))
     .filter(item => item.url || item.viewUrl)
+}
+
+function getDriveFileIdFromUrl(url: string) {
+  try {
+    const parsed = new URL(url)
+    if (parsed.hostname !== 'drive.google.com') return null
+
+    const id = parsed.searchParams.get('id')
+    if (id) return id
+
+    const filePathMatch = parsed.pathname.match(/\/file\/d\/([^/]+)/)
+    if (filePathMatch?.[1]) return filePathMatch[1]
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+function getAttachmentDriveIds(attachments?: Attachment[] | null) {
+  const ids = new Set<string>()
+  for (const attachment of attachments || []) {
+    const id =
+      attachment.driveId ||
+      (attachment.url ? getDriveFileIdFromUrl(attachment.url) : null) ||
+      (attachment.webViewLink ? getDriveFileIdFromUrl(attachment.webViewLink) : null)
+
+    if (id) ids.add(id)
+  }
+
+  return [...ids]
+}
+
+function canManageMessage(messageUserId: string, userId: string, userRole: string, groupRole?: string | null) {
+  return messageUserId === userId || userRole === 'admin' || groupRole === 'admin'
 }
 
 export async function GET(request: NextRequest) {
@@ -109,12 +145,21 @@ export async function GET(request: NextRequest) {
     ...(memberRows || []).map(member => member.user_id),
   ])]
 
-  const { data: users } = userIds.length > 0
-    ? await adminClient
-      .from('gw_users')
-      .select('id, display_name, real_name, picture_url, role')
-      .in('id', userIds)
-    : { data: [] }
+  const messageIds = messages.map(message => message.id)
+  const [{ data: users }, { data: reactions }] = await Promise.all([
+    userIds.length > 0
+      ? adminClient
+        .from('gw_users')
+        .select('id, display_name, real_name, picture_url, role')
+        .in('id', userIds)
+      : Promise.resolve({ data: [] }),
+    messageIds.length > 0
+      ? adminClient
+        .from('gw_reactions')
+        .select('post_id, emoji, user_id')
+        .in('post_id', messageIds)
+      : Promise.resolve({ data: [] }),
+  ])
 
   const userMap = Object.fromEntries((users || []).map(chatUser => [
     chatUser.id, 
@@ -133,6 +178,16 @@ export async function GET(request: NextRequest) {
       }
     })
     .filter(Boolean)
+
+  const reactionMap: Record<string, Record<string, { count: number; hasOwn: boolean }>> = {}
+  for (const reaction of reactions || []) {
+    if (!reactionMap[reaction.post_id]) reactionMap[reaction.post_id] = {}
+    if (!reactionMap[reaction.post_id][reaction.emoji]) {
+      reactionMap[reaction.post_id][reaction.emoji] = { count: 0, hasOwn: false }
+    }
+    reactionMap[reaction.post_id][reaction.emoji].count++
+    if (reaction.user_id === user.id) reactionMap[reaction.post_id][reaction.emoji].hasOwn = true
+  }
 
   // 既読情報: 自分以外のメンバーのlast_read_atを返す
   const readReceipts = (readRows || [])
@@ -153,11 +208,13 @@ export async function GET(request: NextRequest) {
       display_name: user.display_name,
       picture_url: user.picture_url,
       role: user.role,
+      group_role: access.membership?.role || null,
     },
     messages: messages.map(message => ({
       ...message,
       author: userMap[message.user_id] || { display_name: '不明', picture_url: null },
       isOwn: message.user_id === user.id,
+      reactions: reactionMap[message.id] || {},
     })),
     readReceipts,
   })
@@ -212,9 +269,15 @@ export async function POST(request: NextRequest) {
 
   // プッシュ通知を送信（DM: 相手のみ / グループ: 全メンバー）
   try {
-    const bodyText = content || (attachments.length > 0 ? 'ファイルを送信しました' : '新しいメッセージ')
+    const [{ sendPushNotificationToUser, sendPushNotificationToGroup }, { findMentionedUsersInGroup, sendMentionNotifications }] = await Promise.all([
+      import('@/lib/web-push'),
+      import('@/lib/mentions'),
+    ])
+    const bodyText = content || (attachments.length > 0 ? '\u30d5\u30a1\u30a4\u30eb\u3092\u9001\u4fe1\u3057\u307e\u3057\u305f' : '\u65b0\u3057\u3044\u30e1\u30c3\u30bb\u30fc\u30b8')
+    const mentionedUsers = await findMentionedUsersInGroup(groupId, content, user.id)
+    const mentionedUserIds = new Set(mentionedUsers.map(mentionedUser => mentionedUser.id))
+
     if (isDirect) {
-      // DMの場合: 送信者以外のメンバー（相手）にのみ通知
       const { data: dmMembers } = await adminClient
         .from('gw_group_members')
         .select('user_id')
@@ -222,10 +285,10 @@ export async function POST(request: NextRequest) {
         .neq('user_id', user.id)
 
       if (dmMembers && dmMembers.length > 0) {
-        const { sendPushNotificationToUser } = await import('@/lib/web-push')
         for (const m of dmMembers) {
+          if (mentionedUserIds.has(m.user_id)) continue
           await sendPushNotificationToUser(m.user_id, {
-            title: `${user.display_name || 'メンバー'}`,
+            title: `${user.display_name || '\u30e1\u30f3\u30d0\u30fc'}`,
             body: bodyText.substring(0, 80),
             url: `/chat/${groupId}`,
             tag: `tsg-dm-${groupId}`,
@@ -233,13 +296,21 @@ export async function POST(request: NextRequest) {
         }
       }
     } else {
-      // グループチャットの場合
-      const { sendPushNotificationToGroup } = await import('@/lib/web-push')
       await sendPushNotificationToGroup(groupId, user.id, {
-        title: `${access.group?.name || 'チャット'} - ${user.display_name || 'メンバー'}`,
+        title: `${access.group?.name || 'Chat'} - ${user.display_name || '\u30e1\u30f3\u30d0\u30fc'}`,
         body: bodyText.substring(0, 80),
         url: `/chat/${groupId}`,
         tag: `tsg-chat-${groupId}`,
+      }, message.id, { excludeUserIds: [...mentionedUserIds] })
+    }
+
+    if (mentionedUsers.length > 0) {
+      await sendMentionNotifications(mentionedUsers, {
+        senderName: user.display_name || '\u30e1\u30f3\u30d0\u30fc',
+        groupName: access.group?.name || null,
+        content: bodyText,
+        url: `/chat/${groupId}`,
+        postId: message.id,
       })
     }
   } catch (e) {
@@ -276,6 +347,139 @@ export async function POST(request: NextRequest) {
         picture_url: user.picture_url,
       },
       isOwn: true,
+      reactions: {},
     },
   }, { status: 201 })
+}
+
+export async function PATCH(request: NextRequest) {
+  const user = await getUserSession()
+  if (!user) {
+    return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
+  }
+
+  const body = await request.json().catch(() => ({}))
+  const messageId = typeof body.message_id === 'string' ? body.message_id : ''
+  const content = typeof body.content === 'string' ? body.content.trim() : ''
+
+  if (!messageId) {
+    return NextResponse.json({ error: 'message_id が必要です' }, { status: 400 })
+  }
+
+  const { data: existing, error: fetchError } = await adminClient
+    .from('gw_posts')
+    .select('id, group_id, user_id, content, attachments, parent_id')
+    .eq('id', messageId)
+    .single()
+
+  if (fetchError || !existing) {
+    return NextResponse.json({ error: 'メッセージが見つかりません' }, { status: 404 })
+  }
+
+  if (existing.parent_id) {
+    return NextResponse.json({ error: 'Chatメッセージではありません' }, { status: 400 })
+  }
+
+  const access = await getChatAccess(existing.group_id, user.id, user.role)
+  if (access.error) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
+
+  if (!canManageMessage(existing.user_id, user.id, user.role, access.membership?.role)) {
+    return NextResponse.json({ error: '編集権限がありません' }, { status: 403 })
+  }
+
+  const attachments = Array.isArray(existing.attachments) ? existing.attachments : []
+  if (!content && attachments.length === 0) {
+    return NextResponse.json({ error: '本文が必要です' }, { status: 400 })
+  }
+
+  const { data: message, error } = await adminClient
+    .from('gw_posts')
+    .update({
+      content: content || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', messageId)
+    .select('id, content, updated_at')
+    .single()
+
+  if (error || !message) {
+    return NextResponse.json({ error: error?.message || '編集に失敗しました' }, { status: 500 })
+  }
+
+  return NextResponse.json({ message })
+}
+
+export async function DELETE(request: NextRequest) {
+  const user = await getUserSession()
+  if (!user) {
+    return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
+  }
+
+  const messageId = request.nextUrl.searchParams.get('message_id')
+  if (!messageId) {
+    return NextResponse.json({ error: 'message_id が必要です' }, { status: 400 })
+  }
+
+  const { data: existing, error: fetchError } = await adminClient
+    .from('gw_posts')
+    .select('id, group_id, user_id, attachments, parent_id')
+    .eq('id', messageId)
+    .single()
+
+  if (fetchError || !existing) {
+    return NextResponse.json({ error: 'メッセージが見つかりません' }, { status: 404 })
+  }
+
+  if (existing.parent_id) {
+    return NextResponse.json({ error: 'Chatメッセージではありません' }, { status: 400 })
+  }
+
+  const access = await getChatAccess(existing.group_id, user.id, user.role)
+  if (access.error) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
+
+  const isDirect = typeof access.group?.description === 'string' && access.group.description.startsWith('direct:')
+  if (isDirect) {
+    return NextResponse.json({ error: 'DMでは削除できません' }, { status: 403 })
+  }
+
+  if (!canManageMessage(existing.user_id, user.id, user.role, access.membership?.role)) {
+    return NextResponse.json({ error: '削除権限がありません' }, { status: 403 })
+  }
+
+  const driveIds = getAttachmentDriveIds(existing.attachments as Attachment[] | null)
+  const deleteResults = await Promise.allSettled(driveIds.map(fileId => deleteFileFromDrive(fileId)))
+  const failedDriveIds = deleteResults
+    .map((result, index) => ({ result, fileId: driveIds[index] }))
+    .filter(({ result }) => result.status === 'rejected')
+    .map(({ fileId }) => fileId)
+
+  if (failedDriveIds.length > 0) {
+    console.error('[Chat attachment delete errors]', failedDriveIds)
+  }
+
+  await adminClient
+    .from('gw_reactions')
+    .delete()
+    .eq('post_id', messageId)
+
+  const { error } = await adminClient
+    .from('gw_posts')
+    .delete()
+    .eq('id', messageId)
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  adminClient
+    .from('gw_groups')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', existing.group_id)
+    .then(undefined, e => console.error('[Chat group timestamp update error]', e))
+
+  return NextResponse.json({ ok: true, deletedId: messageId, deletedDriveFileIds: driveIds.filter(id => !failedDriveIds.includes(id)) })
 }

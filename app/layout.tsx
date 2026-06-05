@@ -3,14 +3,21 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { PullToRefresh } from "@/components/pull-to-refresh";
 import { getDeviceHeaders } from "@/lib/device-id";
 import "./globals.css";
+
+const TSG_TITLE = "TS Groupware";
+const TSG_DESCRIPTION = "テクニカルスタッフ社内グループウェア";
+const TSG_SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://ts-groupware.vercel.app").replace(/\/$/, "");
+const TSG_OG_IMAGE = `${TSG_SITE_URL}/og-image.png`;
 
 // ─── Bottom Navigation ────────────────────────────────────────────────────────
 function BottomNav() {
   const pathname = usePathname();
   const [isAdmin, setIsAdmin] = useState(false);
   const [dmUnread, setDmUnread] = useState(0);
+  const [taskUnread, setTaskUnread] = useState(0);
   const hide = pathname === "/login" || pathname === "/";
 
   useEffect(() => {
@@ -29,11 +36,16 @@ function BottomNav() {
     let active = true;
 
     const fetchUnread = () => {
-      fetch("/api/unread", { headers: getDeviceHeaders() })
-        .then(r => r.ok ? r.json() : { dmUnread: 0, groupUnread: 0, totalUnread: 0 })
-        .then(data => {
+      Promise.all([
+        fetch("/api/unread", { headers: getDeviceHeaders() })
+          .then(r => r.ok ? r.json() : { dmUnread: 0, groupUnread: 0, totalUnread: 0 }),
+        fetch("/api/tasks?summary=1")
+          .then(r => r.ok ? r.json() : { openCount: 0 }),
+      ])
+        .then(([data, taskData]) => {
           if (active) {
             setDmUnread(data.dmUnread || 0);
+            setTaskUnread(taskData.openCount || 0);
             
             // PWA用 App Badgeの更新（iPhoneホーム画面アイコンの赤丸）
             if ("setAppBadge" in navigator && "clearAppBadge" in navigator) {
@@ -58,6 +70,7 @@ function BottomNav() {
 
   const items = [
     { href: "/groups", label: "ホーム", icon: "🏠", badge: 0 },
+    { href: "/tasks", label: "タスク", icon: "✓", badge: taskUnread },
     { href: "/members", label: "DM", icon: "💬", badge: dmUnread },
     ...(isAdmin ? [{ href: "/admin", label: "管理", icon: "🛡️", badge: 0 }] : []),
     { href: "/settings", label: "設定", icon: "⚙️", badge: 0 },
@@ -111,24 +124,45 @@ export default function RootLayout({
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
         <meta name="theme-color" content="#0f172a" />
-        <meta name="description" content="TS Groupware — 社内グループウェア" />
+        <meta name="description" content={TSG_DESCRIPTION} />
+        <meta name="application-name" content="TS Groupware" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="TSG" />
-        <title>TS Groupware</title>
+        <meta property="og:type" content="website" />
+        <meta property="og:locale" content="ja_JP" />
+        <meta property="og:site_name" content={TSG_TITLE} />
+        <meta property="og:title" content={TSG_TITLE} />
+        <meta property="og:description" content={TSG_DESCRIPTION} />
+        <meta property="og:url" content={TSG_SITE_URL} />
+        <meta property="og:image" content={TSG_OG_IMAGE} />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:image:alt" content={TSG_TITLE} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={TSG_TITLE} />
+        <meta name="twitter:description" content={TSG_DESCRIPTION} />
+        <meta name="twitter:image" content={TSG_OG_IMAGE} />
+        <title>{TSG_TITLE}</title>
         <link rel="manifest" href="/manifest.json" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="icon" href="/favicon.png" sizes="64x64" type="image/png" />
+        <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
         <script dangerouslySetInnerHTML={{ __html: `
           (function(){
             try {
               var t = localStorage.getItem('tsg-theme') || 'dark';
+              var f = localStorage.getItem('tsg-font-size') === 'large' ? 'large' : 'normal';
+              localStorage.setItem('tsg-font-size', f);
               document.documentElement.setAttribute('data-theme', t);
+              document.documentElement.setAttribute('data-font-size', f);
               document.documentElement.style.background = t === 'light' ? '#f1f5f9' : '#0f172a';
             } catch(e){}
           })();
         `}} />
       </head>
       <body>
+        <PullToRefresh />
         <div className="app-shell">
           <main style={{ flex: 1 }}>{children}</main>
           <BottomNav />

@@ -58,13 +58,20 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (post && post.user_id !== user.id) {
+      const { data: group } = await adminClient
+        .from('gw_groups')
+        .select('type')
+        .eq('id', post.group_id)
+        .single()
+      const url = group?.type === 'chat' ? `/chat/${post.group_id}` : `/board/${post.group_id}`
+
       await import('@/lib/web-push')
         .then(({ sendPushNotificationToUser }) => {
           const authorName = user.display_name || 'メンバー'
           return sendPushNotificationToUser(post.user_id, {
             title: `${authorName} がリアクションしました`,
             body: `${emoji} ${post.content ? post.content.substring(0, 40) : '投稿へのリアクション'}`,
-            url: `/board/${post.group_id}`,
+            url,
             tag: `tsg-reaction-${post_id}-${emoji}`,
           }, post.parent_id || post.id)
         })

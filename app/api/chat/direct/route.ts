@@ -6,6 +6,12 @@ function directChatKey(userIdA: string, userIdB: string) {
   return `direct:${[userIdA, userIdB].sort().join(':')}`
 }
 
+function getSortTime(value: string | null | undefined) {
+  if (!value) return 0
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? time : 0
+}
+
 export async function GET() {
   const user = await getUserSession()
   if (!user) {
@@ -22,18 +28,78 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const sortedUsers = (users || []).sort((a, b) => {
-    if (a.id === user.id) return -1
-    if (b.id === user.id) return 1
+  const normalizedUsers = (users || []).map(member => ({
+    ...member,
+    display_name: member.real_name || member.display_name,
+    isSelf: member.id === user.id,
+    isTsgAi: member.display_name === 'TSG君' || member.real_name === 'TSG君',
+  }))
+
+  const directKeys = normalizedUsers.map(member => directChatKey(user.id, member.id))
+  const { data: directGroups } = directKeys.length > 0
+    ? await adminClient
+      .from('gw_groups')
+      .select('id, description, created_at, updated_at')
+      .eq('type', 'chat')
+      .in('description', directKeys)
+    : { data: [] }
+
+  const groupByTargetUserId = new Map<string, { id: string; created_at: string | null; updated_at: string | null }>()
+  for (const group of directGroups || []) {
+    const parts = typeof group.description === 'string' ? group.description.split(':') : []
+    if (parts.length < 3) continue
+    const targetUserId = parts[1] === user.id ? parts[2] : parts[1]
+    groupByTargetUserId.set(targetUserId, {
+      id: group.id,
+      created_at: group.created_at || null,
+      updated_at: group.updated_at || null,
+    })
+  }
+
+  const directGroupIds = [...groupByTargetUserId.values()].map(group => group.id)
+  const { data: latestPosts } = directGroupIds.length > 0
+    ? await adminClient
+      .from('gw_posts')
+      .select('group_id, created_at')
+      .in('group_id', directGroupIds)
+      .is('parent_id', null)
+      .order('created_at', { ascending: false })
+      .limit(Math.max(200, directGroupIds.length * 5))
+    : { data: [] }
+
+  const latestPostAtByGroupId = new Map<string, string>()
+  for (const post of latestPosts || []) {
+    if (!latestPostAtByGroupId.has(post.group_id)) {
+      latestPostAtByGroupId.set(post.group_id, post.created_at)
+    }
+  }
+
+  const enrichedUsers = normalizedUsers.map(member => {
+    const group = groupByTargetUserId.get(member.id)
+    const lastMessageAt = group
+      ? latestPostAtByGroupId.get(group.id) || group.updated_at || group.created_at || null
+      : null
+
+    return {
+      ...member,
+      lastMessageAt,
+    }
+  })
+
+  const sortedUsers = enrichedUsers.sort((a, b) => {
+    const aRank = a.isSelf ? 0 : a.isTsgAi ? 1 : 2
+    const bRank = b.isSelf ? 0 : b.isTsgAi ? 1 : 2
+    if (aRank !== bRank) return aRank - bRank
+
+    const aTime = getSortTime(a.lastMessageAt)
+    const bTime = getSortTime(b.lastMessageAt)
+    if (aTime !== bTime) return bTime - aTime
+
     return a.display_name.localeCompare(b.display_name, 'ja')
   })
 
   return NextResponse.json({
-    users: sortedUsers.map(member => ({
-      ...member,
-      display_name: member.real_name || member.display_name,
-      isSelf: member.id === user.id,
-    })),
+    users: sortedUsers,
   })
 }
 

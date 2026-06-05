@@ -41,6 +41,10 @@ type PushPayload = {
   badgeCount?: number
 }
 
+type GroupPushOptions = {
+  excludeUserIds?: string[]
+}
+
 /**
  * 登録済みの全端末にプッシュ通知を送信
  */
@@ -74,7 +78,13 @@ export async function sendPushNotificationToUser(userId: string, payload: PushPa
  * ただし、送信元ユーザー（senderId）と通知ミュート中のユーザーには送らない
  * postIdが指定された場合、その投稿（スレッド）を個別にミュートしているユーザーも除外する
  */
-export async function sendPushNotificationToGroup(groupId: string, senderId: string, payload: PushPayload, postId?: string): Promise<void> {
+export async function sendPushNotificationToGroup(
+  groupId: string,
+  senderId: string,
+  payload: PushPayload,
+  postId?: string,
+  options: GroupPushOptions = {}
+): Promise<void> {
   // グループのメンバー取得
   const { data: members } = await adminClient
     .from('gw_group_members')
@@ -83,7 +93,8 @@ export async function sendPushNotificationToGroup(groupId: string, senderId: str
 
   if (!members || members.length === 0) return
 
-  let userIds = members.map(m => m.user_id).filter(id => id !== senderId)
+  const excludedIds = new Set([senderId, ...(options.excludeUserIds || [])])
+  let userIds = members.map(m => m.user_id).filter(id => !excludedIds.has(id))
 
   if (userIds.length === 0) return
 

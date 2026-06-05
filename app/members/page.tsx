@@ -9,6 +9,8 @@ type Member = {
   picture_url: string | null;
   role: string;
   isSelf?: boolean;
+  isTsgAi?: boolean;
+  lastMessageAt?: string | null;
 };
 
 function AvatarPlaceholder({
@@ -137,7 +139,7 @@ export default function MembersPage() {
                   </span>
                   <span>
                     {member.isSelf ? `${member.display_name}（自分用メモ）` : member.display_name}
-                    {member.display_name === "TSG君" && (
+                    {member.isTsgAi && (
                       <span className="group-card__ai-badge">🤖 AIへの相談はこちらへ！</span>
                     )}
                   </span>
