@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { CalendarShortcut } from "@/components/calendar-shortcut";
 import { getDeviceHeaders } from "@/lib/device-id";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://v0-line-blush.vercel.app";
@@ -219,36 +220,38 @@ export default function GroupsPage() {
       {/* Header */}
       <header className="groups-header" role="banner">
         <span className="groups-header__logo">TS Groupware</span>
-        <div className="groups-header__user-wrap">
-          <button
-            type="button"
-            className="groups-header__user"
-            onClick={() => setShowUserMenu((current) => !current)}
-            aria-expanded={showUserMenu}
-            aria-haspopup="menu"
-          >
-            <span style={{ fontSize: 14, color: "var(--text-sub)" }}>
-              {user?.display_name || ""}
-            </span>
-            {user?.picture_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={user.picture_url}
-                alt={user.display_name}
-                className="avatar"
-                width={34}
-                height={34}
-              />
-            ) : (
-              <AvatarPlaceholder
-                initials={user?.display_name?.charAt(0) || "?"}
-                color="#3b82f6"
-                size={34}
-              />
-            )}
-          </button>
-          {showUserMenu && (
-            <div className="user-menu" role="menu">
+        <div className="groups-header__actions">
+          <CalendarShortcut />
+          <div className="groups-header__user-wrap">
+            <button
+              type="button"
+              className="groups-header__user"
+              onClick={() => setShowUserMenu((current) => !current)}
+              aria-expanded={showUserMenu}
+              aria-haspopup="menu"
+            >
+              <span style={{ fontSize: 14, color: "var(--text-sub)" }}>
+                {user?.display_name || ""}
+              </span>
+              {user?.picture_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={user.picture_url}
+                  alt={user.display_name}
+                  className="avatar"
+                  width={34}
+                  height={34}
+                />
+              ) : (
+                <AvatarPlaceholder
+                  initials={user?.display_name?.charAt(0) || "?"}
+                  color="#3b82f6"
+                  size={34}
+                />
+              )}
+            </button>
+            {showUserMenu && (
+              <div className="user-menu" role="menu">
               <div className="user-menu__qr" aria-label="LINEログインQR">
                 <div className="user-menu__qr-text">
                   <span>LINEログインQR</span>
@@ -269,8 +272,9 @@ export default function GroupsPage() {
               >
                 ログアウト
               </button>
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 

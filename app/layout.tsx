@@ -18,7 +18,7 @@ function BottomNav() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [dmUnread, setDmUnread] = useState(0);
   const [taskUnread, setTaskUnread] = useState(0);
-  const hide = pathname === "/login" || pathname === "/";
+  const hide = pathname === "/login" || pathname === "/" || pathname.startsWith("/calendar");
 
   useEffect(() => {
     if (hide) return;
