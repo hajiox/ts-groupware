@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 
 const TRIGGER_DISTANCE = 78;
 const MAX_DISTANCE = 116;
@@ -28,12 +29,15 @@ function getPageScrollTop() {
 }
 
 export function PullToRefresh() {
+  const pathname = usePathname();
   const startYRef = useRef<number | null>(null);
   const distanceRef = useRef(0);
   const [distance, setDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
+    if (pathname.startsWith("/board")) return;
+
     const supportsTouch = window.matchMedia("(hover: none), (pointer: coarse)").matches;
     if (!supportsTouch) return;
 
@@ -99,7 +103,7 @@ export function PullToRefresh() {
       window.removeEventListener("touchend", onTouchEnd);
       window.removeEventListener("touchcancel", reset);
     };
-  }, [refreshing]);
+  }, [pathname, refreshing]);
 
   const progress = refreshing ? 1 : Math.min(1, distance / TRIGGER_DISTANCE);
   const visible = refreshing || distance > 8;

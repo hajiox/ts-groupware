@@ -3764,6 +3764,14 @@ body,
 }
 
 @media (hover: none), (pointer: coarse) {
+  .post-list {
+    overflow-y: visible;
+    overscroll-behavior-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    padding-bottom: calc(var(--nav-height) + 224px);
+  }
+
   .bottom-nav {
     left: 0;
     right: 0;
@@ -3786,6 +3794,24 @@ body,
     bottom: var(--composer-bottom);
     width: auto;
     max-width: none;
+    max-height: none;
+    overflow-y: visible;
+    overscroll-behavior: auto;
+    contain: layout;
     transform: none;
+    touch-action: auto;
+  }
+
+  .post-input-bar__form,
+  .task-request-panel,
+  .mention-picker {
+    touch-action: auto;
+  }
+
+  .task-request-members {
+    max-height: 112px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 }
