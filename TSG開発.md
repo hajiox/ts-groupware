@@ -1,7 +1,7 @@
 # TSG開発メモ（現行版）
 
 ## 最終更新
-2026-06-05
+2026-08-19
 
 ## 役割
 TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社内グループウェア。
@@ -22,6 +22,7 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - 実際に届くかは、端末ごとのWeb Push購読、PWA化、通知ミュート設定に依存する。
 - DMは相手にだけ通知する。TSG君（AI）がDMで返答した場合も質問者へ通知する。
 - 未読数は下部ナビ、DM一覧、PWA App Badgeへ反映する。
+- 既読・未読はアカウント単位で共有する。端末IDはPush購読の識別だけに使用し、未読集計には使用しない。
 
 ## PWA / iPhone
 - `public/manifest.json`、apple touch icon、192/512アイコンを設定済み。
@@ -88,3 +89,10 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - APIは`TSG_INTEGRATION_SECRET`で認証し、対象掲示板とTSG君をサーバー側で固定する。ブラウザから任意の投稿者・掲示板へ投稿する用途には使わない。
 - TSA側は価格履歴を送信待ち台帳として使い、保存直後の送信に失敗しても毎時再試行する。導入前の履歴は遡及投稿しない。
 - 対象テスト、ESLint、TypeScript診断、`next build`に成功。PR #2を`main`へ統合し、本番deployment`dpl_AZonGVyDzMQBxrGSZaNs4MEdxzig`を固定URL`https://v0-line-blush.vercel.app`へaliasした。未認証GETが401になることを確認済み。
+
+## 2026-08-19 既読・未読のアカウント単位復旧
+
+- 古い端末別既読時刻が新しいアカウント既読時刻を上書きし、掲示板・DM・下部ナビ・PWA App Badgeで過去投稿が大量未読として復活する問題を修正した。
+- 未読集計と既読更新を`gw_read_status`へ一本化した。`gw_push_subscriptions.device_id`は端末別Push購読のため継続利用するが、既読判定には使用しない。
+- 端末別既読データは削除せず参照対象から外した。既存のアカウント既読履歴と投稿は維持する。
+- 回帰テスト、ESLint、ローカル／Vercelビルドに成功。本番deployment`dpl_AdPffSFUR3LX5WK7c97RjM9BsiSq`を固定URLへ反映し、ログイン済み画面で掲示板とDMの異常未読が解消したことを確認した。
