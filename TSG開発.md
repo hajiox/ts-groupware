@@ -80,3 +80,11 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - フォントサイズ設定は2段階のみ。現在の「大きめ」を標準サイズ相当にし、もう一段大きい設定を用意。
 - DocScanner/TSA連携APIを整備。DocScanner EC速報、DocScanner eFAX受信、TSA売上報告をTSG掲示板へ外部連携投稿できる。投稿者は原則TSG君または選択したユーザー。
 - 2026-06-05時点で本番 `https://v0-line-blush.vercel.app` へデプロイ済み。
+
+## 2026-08-19 TSA販売価格変更の自動報告
+
+- TSAレシピで新しい販売価格を保存した時、`NEWブランド館（フロア）`へTSG君名義で報告する外部連携APIを追加した。
+- 投稿内容は商品名、前回／新価格の税込・税抜、差額、TSAレシピURL。TSAが保持する価格履歴IDから投稿IDを決定し、通信再試行や同時実行でも二重投稿しない。
+- APIは`TSG_INTEGRATION_SECRET`で認証し、対象掲示板とTSG君をサーバー側で固定する。ブラウザから任意の投稿者・掲示板へ投稿する用途には使わない。
+- TSA側は価格履歴を送信待ち台帳として使い、保存直後の送信に失敗しても毎時再試行する。導入前の履歴は遡及投稿しない。
+- 対象テスト、ESLint、TypeScript診断、`next build`に成功。PR #2を`main`へ統合し、本番deployment`dpl_AZonGVyDzMQBxrGSZaNs4MEdxzig`を固定URL`https://v0-line-blush.vercel.app`へaliasした。未認証GETが401になることを確認済み。
