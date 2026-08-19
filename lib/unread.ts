@@ -1,5 +1,4 @@
 import { adminClient } from '@/lib/supabase/admin'
-import { shouldFallbackDeviceRead } from '@/lib/read-status'
 
 type GroupRow = {
   id: string
@@ -19,49 +18,22 @@ function isDirectChat(group: GroupRow) {
     && group.description.startsWith('direct:')
 }
 
-async function getReadMap(userId: string, groupIds: string[], deviceId?: string | null) {
-  const userReadPromise = adminClient
+// 既読は端末ではなくアカウント単位。Push購読のdevice_idとは混在させない。
+async function getReadMap(userId: string, groupIds: string[]) {
+  const { data } = await adminClient
     .from('gw_read_status')
     .select('group_id, last_read_at')
     .eq('user_id', userId)
     .in('group_id', groupIds)
 
-  if (!deviceId) {
-    const { data } = await userReadPromise
-    return new Map((data || []).map(row => [row.group_id, row.last_read_at]))
-  }
-
-  const [{ data: userRows }, { data: deviceRows, error: deviceError }] = await Promise.all([
-    userReadPromise,
-    adminClient
-      .from('gw_device_read_status')
-      .select('group_id, last_read_at')
-      .eq('user_id', userId)
-      .eq('device_id', deviceId)
-      .in('group_id', groupIds),
-  ])
-
-  const readMap = new Map((userRows || []).map(row => [row.group_id, row.last_read_at]))
-
-  if (deviceError) {
-    if (!shouldFallbackDeviceRead(deviceError)) {
-      console.error('[Device unread read-status error]', { userId, deviceId, error: deviceError.message })
-    }
-    return readMap
-  }
-
-  for (const row of deviceRows || []) {
-    readMap.set(row.group_id, row.last_read_at)
-  }
-
-  return readMap
+  return new Map((data || []).map(row => [row.group_id, row.last_read_at]))
 }
 
-export async function getUnreadCountsByGroup(userId: string, groupIds: string[], deviceId?: string | null) {
+export async function getUnreadCountsByGroup(userId: string, groupIds: string[]) {
   const uniqueGroupIds = [...new Set(groupIds)].filter(Boolean)
   if (uniqueGroupIds.length === 0) return {}
 
-  const readMap = await getReadMap(userId, uniqueGroupIds, deviceId)
+  const readMap = await getReadMap(userId, uniqueGroupIds)
 
   const pairs = await Promise.all(uniqueGroupIds.map(async (groupId) => {
     let query = adminClient
@@ -87,7 +59,7 @@ export async function getUnreadCountsByGroup(userId: string, groupIds: string[],
   return Object.fromEntries(pairs)
 }
 
-export async function getUnreadSummary(userId: string, deviceId?: string | null): Promise<UnreadSummary> {
+export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
   const { data: memberships } = await adminClient
     .from('gw_group_members')
     .select('group_id')
@@ -103,7 +75,7 @@ export async function getUnreadSummary(userId: string, deviceId?: string | null)
     .select('id, type, description')
     .in('id', groupIds)
 
-  const unreadByGroup = await getUnreadCountsByGroup(userId, groupIds, deviceId)
+  const unreadByGroup = await getUnreadCountsByGroup(userId, groupIds)
   let dmUnread = 0
   let groupUnread = 0
 

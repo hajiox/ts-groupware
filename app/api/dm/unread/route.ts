@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
-import { getDeviceIdFromRequest } from '@/lib/read-status'
 import { getUnreadCountsByGroup } from '@/lib/unread'
 
-export async function GET(request: Request) {
+export async function GET() {
   const user = await getUserSession()
   if (!user) {
     return NextResponse.json({ count: 0, perUser: {} }, { status: 401 })
@@ -40,7 +39,7 @@ export async function GET(request: Request) {
   }
 
   const dmIds = dmGroups.map(g => g.id)
-  const unreadMap = await getUnreadCountsByGroup(user.id, dmIds, getDeviceIdFromRequest(request))
+  const unreadMap = await getUnreadCountsByGroup(user.id, dmIds)
   let totalUnread = 0
   const perUser: Record<string, number> = {}
 

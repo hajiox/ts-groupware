@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
-import { getDeviceIdFromRequest, seedDeviceReadStatus } from '@/lib/read-status'
+import { getDeviceIdFromRequest } from '@/lib/read-status'
 
 export async function POST(request: Request) {
   const user = await getUserSession()
@@ -24,8 +24,6 @@ export async function POST(request: Request) {
       .delete()
       .eq('endpoint', subscription.endpoint)
       .eq('user_id', user.id)
-
-    await seedDeviceReadStatus(user.id, deviceId)
 
     const subscriptionRow = {
       endpoint: subscription.endpoint,

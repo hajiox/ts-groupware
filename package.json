@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test:recipe-price-notification": "node scripts/test-recipe-price-notification.cjs"
+    "test:recipe-price-notification": "node scripts/test-recipe-price-notification.cjs",
+    "test:account-read-status": "node scripts/test-account-read-status.cjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
