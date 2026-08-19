@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
 import { getUnreadCountsByGroup } from '@/lib/unread'
-import { getDeviceIdFromRequest } from '@/lib/read-status'
 
 /**
  * GET /api/groups — 自分が参加しているグループ一覧
@@ -18,7 +17,7 @@ function isAllStaffGroupName(name: string) {
   return normalized.includes('オールスタッフ') || normalized.includes('全スタッフ')
 }
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const user = await getUserSession()
   if (!user) {
     return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
@@ -85,7 +84,7 @@ export async function GET(request: NextRequest) {
       .is('parent_id', null)
       .order('created_at', { ascending: false })
       .limit(groupIds.length * 3),
-    getUnreadCountsByGroup(user.id, groupIds, getDeviceIdFromRequest(request)),
+    getUnreadCountsByGroup(user.id, groupIds),
   ])
 
   // グループごとの最新投稿をマップ化

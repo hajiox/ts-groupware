@@ -197,7 +197,7 @@ async function _executeSend(subscriptions: any[], payload: PushPayload): Promise
     subscriptions.map(async (sub) => {
       try {
         const badgeCount = payload.badgeCount ?? (sub.user_id
-          ? (await getUnreadSummary(sub.user_id, sub.device_id)).totalUnread
+          ? (await getUnreadSummary(sub.user_id)).totalUnread
           : undefined)
         const notificationPayload = JSON.stringify({
           title: payload.title,

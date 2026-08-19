@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
 import { deleteFileFromDrive } from '@/lib/drive'
-import { getDeviceIdFromRequest, markGroupRead } from '@/lib/read-status'
+import { markGroupRead } from '@/lib/read-status'
 
 /**
  * GET /api/posts?group_id=xxx — 投稿一覧取得
@@ -101,8 +101,6 @@ export async function GET(request: NextRequest) {
   const parentOnly = request.nextUrl.searchParams.get('parent_only') !== 'false'
   const parentId = request.nextUrl.searchParams.get('parent_id')
   const limit = parseInt(request.nextUrl.searchParams.get('limit') || '50')
-  const deviceId = getDeviceIdFromRequest(request)
-
   let query = adminClient
     .from('gw_posts')
     .select('*')
@@ -123,7 +121,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (!posts?.length) {
-    markGroupRead(user.id, groupId, deviceId)
+    markGroupRead(user.id, groupId)
       .then(undefined, e => console.error('[Read status update error]', e))
 
     return NextResponse.json({ posts: [] })
@@ -201,7 +199,7 @@ export async function GET(request: NextRequest) {
 
   // 既読更新 + グループ名取得を並列
   const [, { data: groupInfo }] = await Promise.all([
-    markGroupRead(user.id, groupId, deviceId),
+    markGroupRead(user.id, groupId),
     adminClient
       .from('gw_groups')
       .select('name')
