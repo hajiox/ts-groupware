@@ -37,7 +37,17 @@ function formatPrice(value: number) {
   return `¥${Math.floor(value).toLocaleString('ja-JP')}`
 }
 
-export function buildRecipePriceChangeContent(body: Record<string, unknown>, sourceKey: string) {
+type NormalizedPriceChange = {
+  recipeId: string
+  productName: string
+  previousPriceExTax: number
+  newPriceExTax: number
+  previousPriceInclTax: number
+  newPriceInclTax: number
+  changedAt: string | null
+}
+
+function normalizeRecipePriceChange(body: Record<string, unknown>): NormalizedPriceChange {
   const recipeId = requiredRecipePriceText(body.recipeId, 'recipeId', 100)
   const recipeName = singleLine(requiredRecipePriceText(body.recipeName, 'recipeName', 200))
   const ecProductName = optionalText(body.ecProductName, 200)
@@ -61,6 +71,28 @@ export function buildRecipePriceChangeContent(body: Record<string, unknown>, sou
       minute: '2-digit',
     }).format(new Date(changedAtValue))
     : null
+  return {
+    recipeId,
+    productName,
+    previousPriceExTax,
+    newPriceExTax,
+    previousPriceInclTax,
+    newPriceInclTax,
+    changedAt,
+  }
+}
+
+export function buildRecipePriceChangeContent(body: Record<string, unknown>, sourceKey: string) {
+  const change = normalizeRecipePriceChange(body)
+  const {
+    recipeId,
+    productName,
+    previousPriceExTax,
+    newPriceExTax,
+    previousPriceInclTax,
+    newPriceInclTax,
+    changedAt,
+  } = change
   const difference = Math.floor(newPriceInclTax - previousPriceInclTax)
   const differenceLabel = `${difference >= 0 ? '+' : ''}${difference.toLocaleString('ja-JP')}円`
 
@@ -73,6 +105,38 @@ export function buildRecipePriceChangeContent(body: Record<string, unknown>, sou
     `税抜価格: ${formatPrice(previousPriceExTax)} → ${formatPrice(newPriceExTax)}`,
     changedAt ? `登録日時: ${changedAt}` : '',
     `TSAレシピ: https://v0-tsa-19.vercel.app/recipe/${encodeURIComponent(recipeId)}`,
+    `連携ID: tsa-recipe-price:${sourceKey}`,
+  ].filter(Boolean).join('\n')
+}
+
+export function buildRecipePriceBatchChangeContent(body: Record<string, unknown>, sourceKey: string) {
+  const rawItems = Array.isArray(body.items) ? body.items : []
+  if (rawItems.length === 0 || rawItems.length > 200) throw new Error('items is invalid')
+  const changes = rawItems.map((item) => normalizeRecipePriceChange(
+    item && typeof item === 'object' ? item as Record<string, unknown> : {},
+  ))
+  if (new Set(changes.map(change => change.recipeId)).size !== changes.length) {
+    throw new Error('recipeId is duplicated')
+  }
+
+  const detailLines = changes.flatMap((change, index) => {
+    const difference = Math.floor(change.newPriceInclTax - change.previousPriceInclTax)
+    const differenceLabel = `${difference >= 0 ? '+' : ''}${difference.toLocaleString('ja-JP')}円`
+    return [
+      `${index + 1}. ${change.productName}`,
+      `税込: ${formatPrice(change.previousPriceInclTax)} → ${formatPrice(change.newPriceInclTax)}（${differenceLabel}） / 税抜: ${formatPrice(change.previousPriceExTax)} → ${formatPrice(change.newPriceExTax)}`,
+      `TSAレシピ: https://v0-tsa-19.vercel.app/recipe/${encodeURIComponent(change.recipeId)}`,
+    ]
+  })
+  const changedDates = changes.map(change => change.changedAt).filter(Boolean)
+  const changedAt = changedDates[changedDates.length - 1]
+
+  return [
+    '【販売価格一括変更】',
+    '@フロア',
+    `${changes.length}商品のEC価格改定が完了しました。`,
+    ...detailLines,
+    changedAt ? `最終登録日時: ${changedAt}` : '',
     `連携ID: tsa-recipe-price:${sourceKey}`,
   ].filter(Boolean).join('\n')
 }

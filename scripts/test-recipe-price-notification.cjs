@@ -48,4 +48,63 @@ assert.throws(() => loaded.exports.buildRecipePriceChangeContent({
   newPriceInclTax: 108,
 }, 'same-price'), /price was not changed/)
 
+const batchContent = loaded.exports.buildRecipePriceBatchChangeContent({
+  items: [
+    {
+      recipeId: 'recipe-a',
+      recipeName: '商品A',
+      previousPriceExTax: 1000,
+      newPriceExTax: 1100,
+      previousPriceInclTax: 1080,
+      newPriceInclTax: 1188,
+      changedAt: '2026-08-24T00:00:00.000Z',
+    },
+    {
+      recipeId: 'recipe-b',
+      recipeName: '商品B',
+      ecProductName: 'EC商品B',
+      previousPriceExTax: 2000,
+      newPriceExTax: 2100,
+      previousPriceInclTax: 2160,
+      newPriceInclTax: 2268,
+      changedAt: '2026-08-24T00:01:00.000Z',
+    },
+  ],
+}, 'batch:batch-id')
+
+assert.match(batchContent, /【販売価格一括変更】/)
+assert.match(batchContent, /2商品のEC価格改定が完了しました。/)
+assert.match(batchContent, /1\. 商品A/)
+assert.match(batchContent, /2\. EC商品B/)
+assert.match(batchContent, /税込: ¥1,080 → ¥1,188（\+108円）/)
+assert.match(batchContent, /連携ID: tsa-recipe-price:batch:batch-id/)
+assert.equal((batchContent.match(/@フロア/g) || []).length, 1)
+assert.throws(
+  () => loaded.exports.buildRecipePriceBatchChangeContent({ items: [] }, 'empty'),
+  /items is invalid/,
+)
+assert.throws(
+  () => loaded.exports.buildRecipePriceBatchChangeContent({
+    items: [
+      {
+        recipeId: 'duplicate',
+        recipeName: '商品A',
+        previousPriceExTax: 100,
+        newPriceExTax: 110,
+        previousPriceInclTax: 108,
+        newPriceInclTax: 119,
+      },
+      {
+        recipeId: 'duplicate',
+        recipeName: '商品B',
+        previousPriceExTax: 200,
+        newPriceExTax: 210,
+        previousPriceInclTax: 216,
+        newPriceInclTax: 227,
+      },
+    ],
+  }, 'duplicate'),
+  /recipeId is duplicated/,
+)
+
 console.log('TSG recipe price notification checks passed.')

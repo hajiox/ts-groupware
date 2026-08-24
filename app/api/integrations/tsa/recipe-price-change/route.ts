@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getTsgUserId } from '@/lib/tsg-ai'
 import {
+  buildRecipePriceBatchChangeContent,
   buildRecipePriceChangeContent,
   recipePriceChangePostId,
   requiredRecipePriceText,
@@ -115,7 +116,9 @@ export async function POST(request: NextRequest) {
     if (!/^[A-Za-z0-9:_-]+$/.test(sourceKey)) {
       return NextResponse.json({ error: 'sourceKey is invalid' }, { status: 400 })
     }
-    const content = buildRecipePriceChangeContent(body, sourceKey)
+    const content = Array.isArray(body.items)
+      ? buildRecipePriceBatchChangeContent(body, sourceKey)
+      : buildRecipePriceChangeContent(body, sourceKey)
     const group = await getTargetGroup()
     const tsgUserId = await getTsgUserId()
     if (!tsgUserId) {
@@ -198,7 +201,11 @@ export async function POST(request: NextRequest) {
     }, { status: duplicate ? 200 : 201 })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create recipe price post'
-    const status = message.endsWith(' is invalid') || message === 'price was not changed' ? 400 : 500
+    const status = message.endsWith(' is invalid')
+      || message === 'price was not changed'
+      || message === 'recipeId is duplicated'
+      ? 400
+      : 500
     return NextResponse.json({ error: message }, { status })
   }
 }

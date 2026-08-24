@@ -96,3 +96,9 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - 未読集計と既読更新を`gw_read_status`へ一本化した。`gw_push_subscriptions.device_id`は端末別Push購読のため継続利用するが、既読判定には使用しない。
 - 端末別既読データは削除せず参照対象から外した。既存のアカウント既読履歴と投稿は維持する。
 - 回帰テスト、ESLint、ローカル／Vercelビルドに成功。本番deployment`dpl_AdPffSFUR3LX5WK7c97RjM9BsiSq`を固定URLへ反映し、ログイン済み画面で掲示板とDMの異常未読が解消したことを確認した。
+
+## 2026-08-24 TSA販売価格一括変更の集約報告
+
+- TSAの一括改定IDを連携キーとして受け取り、複数商品の前回／新価格（税込・税抜）とTSAレシピURLを `NEWブランド館（フロア）` の1投稿へまとめる形式を追加した。
+- 投稿者TSG君、`@フロア`、対象掲示板固定、secret認証、決定的投稿IDによる二重投稿防止は単品報告と同じ。単品価格変更の既存形式は変更しない。
+- `pnpm run test:recipe-price-notification`、対象ESLint、`pnpm build` に成功。掲示板を汚さないため、本番APIへのダミー一括投稿は行っていない。
