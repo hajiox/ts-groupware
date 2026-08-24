@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+const TASK_PREVIEW_LIMIT = 10;
+const MENTION_PREVIEW_LIMIT = 10;
+
 type TaskUser = {
   id: string;
   display_name: string;
@@ -25,6 +28,20 @@ type TaskItem = {
   completedBy: TaskUser | null;
 };
 
+type MentionItem = {
+  id: string;
+  sender_id: string | null;
+  sender_name: string;
+  group_id: string | null;
+  group_name: string | null;
+  post_id: string;
+  context_type: "board" | "chat" | "dm";
+  context_label: string;
+  content_snippet: string;
+  url: string;
+  created_at: string;
+};
+
 function formatDueDate(value: string) {
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
@@ -38,16 +55,33 @@ function isOverdue(value: string) {
   return due.getTime() < today.getTime();
 }
 
+function formatMentionDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("ja-JP", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [mentions, setMentions] = useState<MentionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [completingId, setCompletingId] = useState<string | null>(null);
+  const [showAllTasks, setShowAllTasks] = useState(false);
+  const [showAllMentions, setShowAllMentions] = useState(false);
 
   function loadTasks() {
     setLoading(true);
     fetch("/api/tasks?status=all", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : { tasks: [] }))
-      .then((data) => setTasks(data.tasks || []))
+      .then((res) => (res.ok ? res.json() : { tasks: [], mentions: [] }))
+      .then((data) => {
+        setTasks(data.tasks || []);
+        setMentions(data.mentions || []);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }
@@ -57,7 +91,17 @@ export default function TasksPage() {
   }, []);
 
   const openTasks = useMemo(() => tasks.filter(task => !task.completed_at), [tasks]);
-  const completedTasks = useMemo(() => tasks.filter(task => task.completed_at), [tasks]);
+  const taskRequests = useMemo(() => {
+    return [...tasks].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [tasks]);
+  const visibleTaskRequests = useMemo(
+    () => showAllTasks ? taskRequests : taskRequests.slice(0, TASK_PREVIEW_LIMIT),
+    [showAllTasks, taskRequests],
+  );
+  const visibleMentions = useMemo(
+    () => showAllMentions ? mentions : mentions.slice(0, MENTION_PREVIEW_LIMIT),
+    [mentions, showAllMentions],
+  );
 
   async function completeTask(taskId: string) {
     setCompletingId(taskId);
@@ -116,6 +160,28 @@ export default function TasksPage() {
     );
   }
 
+  function renderMention(mention: MentionItem) {
+    const location = mention.group_name
+      ? `${mention.context_label}「${mention.group_name}」`
+      : mention.context_label;
+
+    return (
+      <Link key={mention.id} href={mention.url || "/groups"} className="mention-history-card">
+        <div className="mention-history-card__main">
+          <div className="mention-history-card__header">
+            <span className="mention-history-card__location">{location}</span>
+            <span className="mention-history-card__time">{formatMentionDate(mention.created_at)}</span>
+          </div>
+          <p className="mention-history-card__content">{mention.content_snippet || "（本文なし）"}</p>
+          <div className="mention-history-card__meta">
+            <span>送信者: {mention.sender_name || "不明"}</span>
+          </div>
+        </div>
+        <span className="mention-history-card__open">開く</span>
+      </Link>
+    );
+  }
+
   return (
     <>
       <header className="top-header" role="banner">
@@ -130,21 +196,39 @@ export default function TasksPage() {
           <>
             <section className="tasks-section">
               <div className="tasks-section__header">
-                <h2>未完了のタスク</h2>
-                <span>{openTasks.length}件</span>
+                <h2>タスク依頼</h2>
+                <span>未完了 {openTasks.length}件 / 全{taskRequests.length}件</span>
               </div>
-              {openTasks.length > 0 ? openTasks.map(renderTask) : (
-                <p className="tasks-empty">未完了のタスクはありません。</p>
+              {visibleTaskRequests.length > 0 ? visibleTaskRequests.map(renderTask) : (
+                <p className="tasks-empty">タスク依頼はありません。</p>
+              )}
+              {taskRequests.length > TASK_PREVIEW_LIMIT && (
+                <button
+                  type="button"
+                  className="tasks-section__more"
+                  onClick={() => setShowAllTasks((current) => !current)}
+                >
+                  {showAllTasks ? "最新10件に戻す" : `過去のタスク依頼を見る（残り${taskRequests.length - TASK_PREVIEW_LIMIT}件）`}
+                </button>
               )}
             </section>
 
             <section className="tasks-section">
               <div className="tasks-section__header">
-                <h2>完了済み</h2>
-                <span>{completedTasks.length}件</span>
+                <h2>自分へのメンション</h2>
+                <span>{mentions.length}件 / 最新10件表示</span>
               </div>
-              {completedTasks.length > 0 ? completedTasks.map(renderTask) : (
-                <p className="tasks-empty">完了済みタスクはまだありません。</p>
+              {visibleMentions.length > 0 ? visibleMentions.map(renderMention) : (
+                <p className="tasks-empty">メンションされた投稿はありません。</p>
+              )}
+              {mentions.length > MENTION_PREVIEW_LIMIT && (
+                <button
+                  type="button"
+                  className="tasks-section__more"
+                  onClick={() => setShowAllMentions((current) => !current)}
+                >
+                  {showAllMentions ? "最新10件に戻す" : `過去のメンションを見る（残り${mentions.length - MENTION_PREVIEW_LIMIT}件）`}
+                </button>
               )}
             </section>
           </>

@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS gw_tasks (
   due_date DATE NOT NULL,
   completed_at TIMESTAMPTZ,
   completed_by UUID REFERENCES gw_users(id) ON DELETE SET NULL,
+  canceled_at TIMESTAMPTZ,
+  canceled_by UUID REFERENCES gw_users(id) ON DELETE SET NULL,
+  cancel_reason TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(post_id, assignee_id)

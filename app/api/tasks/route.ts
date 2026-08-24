@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
+import { pruneMentionHistory } from '@/lib/mentions'
 import { getUserSession } from '@/lib/session'
+import { isManagementUser } from '@/lib/user-roles'
 
 type TaskRow = {
   id: string
@@ -11,6 +13,9 @@ type TaskRow = {
   due_date: string
   completed_at: string | null
   completed_by: string | null
+  canceled_at?: string | null
+  canceled_by?: string | null
+  cancel_reason?: string | null
   created_at: string
   updated_at?: string | null
 }
@@ -22,8 +27,35 @@ type UserRow = {
   picture_url?: string | null
 }
 
+type MentionRow = {
+  id: string
+  mentioned_user_id: string
+  sender_id: string | null
+  sender_name: string
+  group_id: string | null
+  group_name: string | null
+  post_id: string
+  target_post_id: string | null
+  context_type: 'board' | 'chat' | 'dm'
+  context_label: string
+  content_snippet: string
+  url: string
+  created_at: string
+}
+
 function displayName(user?: UserRow | null) {
   return user?.real_name || user?.display_name || '不明'
+}
+
+function mentionUrl(mention: MentionRow) {
+  if (mention.url) return mention.url
+  if (mention.context_type === 'board' && mention.group_id) {
+    return `/board/${mention.group_id}#post-${mention.target_post_id || mention.post_id}`
+  }
+  if ((mention.context_type === 'chat' || mention.context_type === 'dm') && mention.group_id) {
+    return `/chat/${mention.group_id}`
+  }
+  return '/groups'
 }
 
 async function enrichTasks(tasks: TaskRow[]) {
@@ -84,6 +116,7 @@ export async function GET(request: NextRequest) {
       .select('id', { count: 'exact', head: true })
       .eq('assignee_id', user.id)
       .is('completed_at', null)
+      .is('canceled_at', null)
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
@@ -96,9 +129,16 @@ export async function GET(request: NextRequest) {
     .from('gw_tasks')
     .select('*')
     .eq('assignee_id', user.id)
-    .order('due_date', { ascending: true })
-    .order('created_at', { ascending: false })
+    .is('canceled_at', null)
     .limit(100)
+
+  if (status === 'all') {
+    query = query.order('created_at', { ascending: false })
+  } else {
+    query = query
+      .order('due_date', { ascending: true })
+      .order('created_at', { ascending: false })
+  }
 
   if (status !== 'all') {
     if (status === 'completed') query = query.not('completed_at', 'is', null)
@@ -113,7 +153,27 @@ export async function GET(request: NextRequest) {
   const tasks = (data || []) as TaskRow[]
   const openCount = tasks.filter(task => !task.completed_at).length
 
-  return NextResponse.json({ tasks: await enrichTasks(tasks), openCount })
+  await pruneMentionHistory(user.id).catch(error => {
+    console.error('[Mention history prune error]', error)
+  })
+
+  const { data: mentions, error: mentionsError } = await adminClient
+    .from('gw_mentions')
+    .select('*')
+    .eq('mentioned_user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(30)
+
+  if (mentionsError) {
+    return NextResponse.json({ error: mentionsError.message }, { status: 500 })
+  }
+
+  const mentionItems = ((mentions || []) as MentionRow[]).map(mention => ({
+    ...mention,
+    url: mentionUrl(mention),
+  }))
+
+  return NextResponse.json({ tasks: await enrichTasks(tasks), mentions: mentionItems, openCount })
 }
 
 export async function PATCH(request: NextRequest) {
@@ -137,7 +197,10 @@ export async function PATCH(request: NextRequest) {
   if (!existing) {
     return NextResponse.json({ error: 'タスクが見つかりません' }, { status: 404 })
   }
-  if (existing.assignee_id !== user.id && user.role !== 'admin') {
+  if ((existing as TaskRow).canceled_at) {
+    return NextResponse.json({ error: '取り消されたタスクです' }, { status: 410 })
+  }
+  if (existing.assignee_id !== user.id && !isManagementUser(user)) {
     return NextResponse.json({ error: 'このタスクを完了にできません' }, { status: 403 })
   }
   if (existing.completed_at) {

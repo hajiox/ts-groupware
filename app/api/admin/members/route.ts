@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
+import { isManagementUser } from '@/lib/user-roles'
 
 /**
  * 管理者用グループメンバー管理 API
@@ -13,7 +14,7 @@ import { getUserSession } from '@/lib/session'
 async function requireAdmin() {
   const user = await getUserSession()
   if (!user) return { error: '認証が必要です', status: 401, user: null }
-  if (user.role !== 'admin') return { error: '管理者権限が必要です', status: 403, user: null }
+  if (!isManagementUser(user)) return { error: '役員または管理者権限が必要です', status: 403, user: null }
   return { error: null, status: 0, user }
 }
 
@@ -32,29 +33,27 @@ export async function GET(request: NextRequest) {
     .select('user_id, role, joined_at')
     .eq('group_id', groupId)
 
-  const explicitMemberUserIds = (members || []).map(m => m.user_id)
+  const membershipByUserId = new Map((members || []).map(member => [member.user_id, member]))
+  const explicitMemberUserIds = new Set(membershipByUserId.keys())
 
   // 全ユーザー
   const { data: allUsers } = await adminClient
     .from('gw_users')
-    .select('id, display_name, real_name, picture_url, role, status')
+    .select('id, display_name, real_name, picture_url, role, department, status')
     .or('status.eq.approved,status.is.null')
     .order('display_name', { ascending: true })
 
   // メンバーに含まれるユーザー / 含まれないユーザー
   const memberUsers = (allUsers || [])
-    .filter(u => u.role === 'admin' || explicitMemberUserIds.includes(u.id))
+    .filter(u => explicitMemberUserIds.has(u.id))
     .map(u => ({
       ...u,
       display_name: u.real_name || u.display_name,
-      group_role: u.role === 'admin'
-        ? 'admin'
-        : (members || []).find(m => m.user_id === u.id)?.role || 'member',
-      implicit_member: u.role === 'admin' && !explicitMemberUserIds.includes(u.id),
+      group_role: membershipByUserId.get(u.id)?.role || 'member',
     }))
 
   const nonMembers = (allUsers || [])
-    .filter(u => u.role !== 'admin' && !explicitMemberUserIds.includes(u.id))
+    .filter(u => !explicitMemberUserIds.has(u.id))
     .map(u => ({ ...u, display_name: u.real_name || u.display_name }))
 
   return NextResponse.json({ members: memberUsers, nonMembers })

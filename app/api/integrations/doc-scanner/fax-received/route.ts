@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getTsgUserId } from '@/lib/tsg-ai'
 import { uploadFileToDrive } from '@/lib/drive'
+import sharp from 'sharp'
 
 type GroupRow = {
   id: string
@@ -23,6 +24,41 @@ type Attachment = {
   sourceFileName?: string
   sourcePage?: number
   sourcePageCount?: number
+  rotationCorrected?: boolean
+  rotationReason?: string
+}
+
+function getStringValue(item: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = item[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+function getNumberValue(item: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = item[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+      return Number(value)
+    }
+  }
+  return undefined
+}
+
+function isDataImageUrl(value?: string) {
+  return !!value && /^data:image\/[a-z0-9.+-]+;base64,/i.test(value.trim())
+}
+
+function isHttpUrl(value?: string) {
+  if (!value) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 type PostRow = {
@@ -100,25 +136,39 @@ function normalizeAttachments(value: unknown): Attachment[] {
 
   return value
     .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-    .map(item => ({
-      name: typeof item.name === 'string' ? item.name : 'FAX受信.jpg',
-      type: typeof item.type === 'string' ? item.type : 'image/jpeg',
-      size: typeof item.size === 'number' ? item.size : undefined,
-      url: typeof item.url === 'string' ? item.url : undefined,
-      viewUrl: typeof item.viewUrl === 'string' ? item.viewUrl : undefined,
-      webViewLink: typeof item.webViewLink === 'string' ? item.webViewLink : undefined,
-      driveId: typeof item.driveId === 'string' ? item.driveId : undefined,
-      docScannerFileHash: typeof item.docScannerFileHash === 'string' ? item.docScannerFileHash : undefined,
-      dataBase64: typeof item.dataBase64 === 'string' ? item.dataBase64 : undefined,
-      encoding: typeof item.encoding === 'string' ? item.encoding : undefined,
-      sourceFileName: typeof item.sourceFileName === 'string' ? item.sourceFileName : undefined,
-      sourcePage: typeof item.sourcePage === 'number' ? item.sourcePage : undefined,
-      sourcePageCount: typeof item.sourcePageCount === 'number' ? item.sourcePageCount : undefined,
-    }))
+    .map(item => {
+      const url = getStringValue(item, ['url', 'downloadUrl', 'download_url'])
+      const viewUrl = getStringValue(item, ['viewUrl', 'view_url', 'previewUrl', 'preview_url'])
+      const webViewLink = getStringValue(item, ['webViewLink', 'web_view_link', 'webContentLink', 'web_content_link'])
+      const dataBase64 =
+        getStringValue(item, ['dataBase64', 'data_base64', 'contentBase64', 'content_base64', 'base64', 'data', 'content']) ||
+        (isDataImageUrl(url) ? url : undefined) ||
+        (isDataImageUrl(viewUrl) ? viewUrl : undefined)
+
+      return {
+        name: getStringValue(item, ['name', 'fileName', 'filename']) || 'FAX受信.jpg',
+        type: getStringValue(item, ['type', 'mimeType', 'mime_type', 'contentType', 'content_type']) || 'image/jpeg',
+        size: getNumberValue(item, ['size', 'fileSize', 'file_size']),
+        url,
+        viewUrl,
+        webViewLink,
+        driveId: getStringValue(item, ['driveId', 'drive_id']),
+        docScannerFileHash: getStringValue(item, ['docScannerFileHash', 'doc_scanner_file_hash', 'fileHash', 'file_hash']),
+        dataBase64,
+        encoding: getStringValue(item, ['encoding']),
+        sourceFileName: getStringValue(item, ['sourceFileName', 'source_file_name']),
+        sourcePage: getNumberValue(item, ['sourcePage', 'source_page']),
+        sourcePageCount: getNumberValue(item, ['sourcePageCount', 'source_page_count']),
+      }
+    })
     .filter(item => item.url || item.viewUrl || item.webViewLink || item.dataBase64)
 }
 
 const MAX_INCOMING_IMAGE_BYTES = 6 * 1024 * 1024
+const NORMALIZED_FAX_IMAGE_TYPE = 'image/jpeg'
+const FAX_IMAGE_MAX_WIDTH = 1600
+const FAX_IMAGE_QUALITY = 82
+const UPSIDE_DOWN_CONFIDENCE_THRESHOLD = 0.9
 
 function normalizeBase64Payload(value: string) {
   const trimmed = value.trim()
@@ -129,11 +179,125 @@ function normalizeBase64Payload(value: string) {
   return trimmed
 }
 
+function getJpegAttachmentName(name: string | undefined, fallback: string) {
+  const rawName = (name || fallback).trim() || fallback
+  return rawName.replace(/\.[^.]+$/, '') + '.jpg'
+}
+
+async function normalizeFaxImageBuffer(buffer: Buffer) {
+  const jpegBuffer = await sharp(buffer)
+    .rotate()
+    .flatten({ background: '#fff' })
+    .resize({ width: FAX_IMAGE_MAX_WIDTH, withoutEnlargement: true })
+    .jpeg({ quality: FAX_IMAGE_QUALITY, mozjpeg: true })
+    .toBuffer()
+
+  const orientation = await detectUpsideDownByInkBalance(jpegBuffer)
+  if (orientation.rotationDegrees === 180 && orientation.confidence >= UPSIDE_DOWN_CONFIDENCE_THRESHOLD) {
+    const rotatedBuffer = await sharp(jpegBuffer)
+      .rotate(180)
+      .jpeg({ quality: FAX_IMAGE_QUALITY, mozjpeg: true })
+      .toBuffer()
+
+    return {
+      buffer: rotatedBuffer,
+      type: NORMALIZED_FAX_IMAGE_TYPE,
+      rotationCorrected: true,
+      rotationReason: orientation.reason,
+    }
+  }
+
+  return {
+    buffer: jpegBuffer,
+    type: NORMALIZED_FAX_IMAGE_TYPE,
+    rotationCorrected: false,
+    rotationReason: orientation.reason,
+  }
+}
+
+async function fetchIncomingImageAttachment(attachment: Attachment) {
+  const sourceUrl = [attachment.url, attachment.viewUrl, attachment.webViewLink].find(isHttpUrl)
+  if (!sourceUrl) return null
+
+  const response = await fetch(sourceUrl, { cache: 'no-store' })
+  if (!response.ok) {
+    throw new Error(`FAX image could not be fetched: ${response.status}`)
+  }
+
+  const contentType = response.headers.get('content-type') || attachment.type || ''
+  if (!contentType.toLowerCase().startsWith('image/')) {
+    throw new Error(`FAX attachment URL is not an image: ${contentType || 'unknown'}`)
+  }
+
+  return Buffer.from(await response.arrayBuffer())
+}
+
+async function detectUpsideDownByInkBalance(imageBuffer: Buffer) {
+  const { data, info } = await sharp(imageBuffer)
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+
+  let totalInk = 0
+  let topInk = 0
+  let bottomInk = 0
+  let yWeightedInk = 0
+
+  const headerCut = Math.floor(info.height * 0.08)
+  const lowerCut = Math.floor(info.height * 0.98)
+  const topLimit = info.height * 0.42
+  const bottomStart = info.height * 0.58
+
+  for (let y = headerCut; y < lowerCut; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      const value = data[y * info.width + x]
+      const ink = Math.max(0, 245 - value)
+      if (ink < 20) continue
+
+      totalInk += ink
+      yWeightedInk += ink * y
+
+      if (y < topLimit) {
+        topInk += ink
+      } else if (y >= bottomStart) {
+        bottomInk += ink
+      }
+    }
+  }
+
+  if (totalInk <= 0) {
+    return {
+      rotationDegrees: 0,
+      confidence: 0,
+      reason: 'no visible ink',
+    }
+  }
+
+  const centerY = yWeightedInk / totalInk / info.height
+  const topRatio = topInk / totalInk
+  const bottomRatio = bottomInk / totalInk
+  const bottomToTop = bottomInk / Math.max(1, topInk)
+
+  if (centerY > 0.68 && topRatio < 0.04 && bottomRatio > 0.55 && bottomToTop > 8) {
+    return {
+      rotationDegrees: 180,
+      confidence: 0.96,
+      reason: `main ink is concentrated at the bottom (center=${centerY.toFixed(2)}, top=${topRatio.toFixed(2)}, bottom=${bottomRatio.toFixed(2)})`,
+    }
+  }
+
+  return {
+    rotationDegrees: 0,
+    confidence: 0.5,
+    reason: `ink balance did not require rotation (center=${centerY.toFixed(2)}, top=${topRatio.toFixed(2)}, bottom=${bottomRatio.toFixed(2)})`,
+  }
+}
+
 async function storeIncomingImageAttachments(attachments: Attachment[]): Promise<Attachment[]> {
   const stored: Attachment[] = []
 
   for (const attachment of attachments) {
-    if (!attachment.dataBase64) {
+    if (!attachment.dataBase64 && attachment.driveId) {
       stored.push(attachment)
       continue
     }
@@ -142,13 +306,22 @@ async function storeIncomingImageAttachments(attachments: Attachment[]): Promise
       throw new Error('FAX attachment must be an image')
     }
 
-    const buffer = Buffer.from(normalizeBase64Payload(attachment.dataBase64), 'base64')
+    const buffer = attachment.dataBase64
+      ? Buffer.from(normalizeBase64Payload(attachment.dataBase64), 'base64')
+      : await fetchIncomingImageAttachment(attachment)
+
+    if (!buffer) {
+      continue
+    }
+
     if (buffer.length === 0) continue
     if (buffer.length > MAX_INCOMING_IMAGE_BYTES) {
       throw new Error(`FAX image is too large: ${attachment.name || 'image'}`)
     }
 
-    const driveFile = await uploadFileToDrive(buffer, attachment.name || `FAX受信_${stored.length + 1}.jpg`, attachment.type)
+    const normalizedImage = await normalizeFaxImageBuffer(buffer)
+    const uploadName = getJpegAttachmentName(attachment.name, `FAX受信_${stored.length + 1}.jpg`)
+    const driveFile = await uploadFileToDrive(normalizedImage.buffer, uploadName, normalizedImage.type)
     const fileUrl = driveFile.id
       ? `https://drive.google.com/uc?export=download&id=${driveFile.id}`
       : driveFile.webViewLink || ''
@@ -157,9 +330,9 @@ async function storeIncomingImageAttachments(attachments: Attachment[]): Promise
       : fileUrl
 
     stored.push({
-      name: attachment.name,
-      type: attachment.type,
-      size: buffer.length,
+      name: uploadName,
+      type: normalizedImage.type,
+      size: normalizedImage.buffer.length,
       url: fileUrl,
       viewUrl: thumbnailUrl,
       webViewLink: driveFile.webViewLink || fileUrl,
@@ -168,6 +341,8 @@ async function storeIncomingImageAttachments(attachments: Attachment[]): Promise
       sourceFileName: attachment.sourceFileName,
       sourcePage: attachment.sourcePage,
       sourcePageCount: attachment.sourcePageCount,
+      rotationCorrected: normalizedImage.rotationCorrected || undefined,
+      rotationReason: normalizedImage.rotationReason,
     })
   }
 

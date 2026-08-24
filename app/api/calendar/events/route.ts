@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  GoogleCalendarImportFailure,
+  type GoogleCalendarImportErrorPayload,
+  type GoogleCalendarImportResult,
+  errorPayloadBody,
+  isAutoGoogleCalendarSyncEnabled,
+  syncGoogleCalendarRange,
+} from '@/lib/google-calendar-import'
 import { getUserSession } from '@/lib/session'
+import { isManagementUser } from '@/lib/user-roles'
 import { adminClient } from '@/lib/supabase/admin'
 
-const EVENT_COLORS = new Set([
-  '#1a73e8',
-  '#0b8043',
-  '#f4511e',
-  '#8e24aa',
-  '#d93025',
-  '#fbbc04',
-  '#00897b',
-])
+const DEFAULT_EVENT_COLOR = '#1a73e8'
 
 type CalendarEventRow = {
   id: string
@@ -54,8 +55,9 @@ function cleanOptionalString(value: unknown, maxLength: number) {
 }
 
 function cleanColor(value: unknown) {
-  if (typeof value !== 'string') return '#1a73e8'
-  return EVENT_COLORS.has(value) ? value : '#1a73e8'
+  if (typeof value !== 'string') return DEFAULT_EVENT_COLOR
+  const color = value.trim()
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : DEFAULT_EVENT_COLOR
 }
 
 async function enrichEvents(events: CalendarEventRow[]) {
@@ -78,6 +80,30 @@ async function enrichEvents(events: CalendarEventRow[]) {
   }))
 }
 
+async function autoSyncGoogleCalendar(rangeStart: string, rangeEnd: string, userId: string) {
+  if (!isAutoGoogleCalendarSyncEnabled()) return {}
+
+  try {
+    const googleImport = await syncGoogleCalendarRange({
+      rangeStart,
+      rangeEnd,
+      requestedBy: userId,
+      force: false,
+    })
+    return { googleImport }
+  } catch (error) {
+    const payload: GoogleCalendarImportErrorPayload = error instanceof GoogleCalendarImportFailure
+      ? error.payload
+      : {
+        status: 500,
+        error: error instanceof Error ? error.message : 'Googleカレンダー自動同期に失敗しました',
+      }
+
+    console.error('[calendar/events] google auto sync failed', payload.error)
+    return { googleImportError: errorPayloadBody(payload) }
+  }
+}
+
 export async function GET(request: NextRequest) {
   const user = await getUserSession()
   if (!user) {
@@ -91,6 +117,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'range_start と range_end が必要です' }, { status: 400 })
   }
 
+  const syncResult = await autoSyncGoogleCalendar(rangeStart, rangeEnd, user.id)
+
   const { data, error } = await adminClient
     .from('gw_calendar_events')
     .select('*')
@@ -103,7 +131,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ events: await enrichEvents((data || []) as CalendarEventRow[]) })
+  const body: {
+    events: Awaited<ReturnType<typeof enrichEvents>>
+    google_import?: GoogleCalendarImportResult
+    google_import_error?: ReturnType<typeof errorPayloadBody>
+  } = {
+    events: await enrichEvents((data || []) as CalendarEventRow[]),
+  }
+
+  if ('googleImport' in syncResult && syncResult.googleImport) {
+    body.google_import = syncResult.googleImport
+  }
+  if ('googleImportError' in syncResult && syncResult.googleImportError) {
+    body.google_import_error = syncResult.googleImportError
+  }
+
+  return NextResponse.json(body)
 }
 
 export async function POST(request: NextRequest) {
@@ -178,7 +221,7 @@ export async function PATCH(request: NextRequest) {
   if (!existing) {
     return NextResponse.json({ error: '予定が見つかりません' }, { status: 404 })
   }
-  if (existing.created_by !== user.id && user.role !== 'admin') {
+  if (existing.created_by !== user.id && !isManagementUser(user)) {
     return NextResponse.json({ error: 'この予定を編集できません' }, { status: 403 })
   }
 
@@ -225,7 +268,7 @@ export async function DELETE(request: NextRequest) {
   if (!existing) {
     return NextResponse.json({ error: '予定が見つかりません' }, { status: 404 })
   }
-  if (existing.created_by !== user.id && user.role !== 'admin') {
+  if (existing.created_by !== user.id && !isManagementUser(user)) {
     return NextResponse.json({ error: 'この予定を削除できません' }, { status: 403 })
   }
 

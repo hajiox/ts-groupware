@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { ReactElement } from "react";
 
 /**
  * URL正規表現: テキスト中のhttp/httpsリンクを検出
  */
 const URL_REGEX = /https?:\/\/[^\s<>"{}|\\^`[\]]+/g;
+const LONG_URL_VISIBLE_LIMIT = 72;
 
 type OgpData = {
   title: string | null;
@@ -15,11 +17,42 @@ type OgpData = {
   url: string;
 };
 
+function getLinePrefix(text: string, index: number) {
+  const lineStart = text.lastIndexOf("\n", index - 1) + 1;
+  return text.slice(lineStart, index).trim();
+}
+
+function getShortUrlLabel(url: string) {
+  if (url.length <= LONG_URL_VISIBLE_LIMIT) return url;
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "");
+    if (host === "indeed.com" || host.endsWith(".indeed.com")) {
+      return "Indeed応募ページ";
+    }
+
+    const pathParts = parsed.pathname.split("/").filter(Boolean).slice(0, 2);
+    if (pathParts.length === 0) return host;
+
+    const pathLabel = `${host}/${pathParts.join("/")}`;
+    return pathLabel.length > LONG_URL_VISIBLE_LIMIT ? `${host}/...` : `${pathLabel}/...`;
+  } catch {
+    return `${url.slice(0, LONG_URL_VISIBLE_LIMIT - 3)}...`;
+  }
+}
+
+function getUrlLabel(text: string, index: number, url: string) {
+  const prefix = getLinePrefix(text, index);
+  if (/応募内容を確認する[:：]?$/.test(prefix)) return "開く";
+  return getShortUrlLabel(url);
+}
+
 /**
  * テキスト中のURLを<a>タグに変換してReact要素の配列を返す
  */
-export function linkifyText(text: string): (string | JSX.Element)[] {
-  const parts: (string | JSX.Element)[] = [];
+export function linkifyText(text: string): (string | ReactElement)[] {
+  const parts: (string | ReactElement)[] = [];
   let lastIndex = 0;
   let match;
 
@@ -33,6 +66,7 @@ export function linkifyText(text: string): (string | JSX.Element)[] {
     const url = match[0];
     // 末尾の句読点を除外
     const cleaned = url.replace(/[.,;:!?)]+$/, "");
+    const label = getUrlLabel(text, match.index, cleaned);
 
     parts.push(
       <a
@@ -41,8 +75,9 @@ export function linkifyText(text: string): (string | JSX.Element)[] {
         target="_blank"
         rel="noopener noreferrer"
         className="post-link"
+        title={cleaned}
       >
-        {cleaned}
+        {label}
       </a>
     );
 

@@ -1,17 +1,24 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ImageAnnotationEditor } from "@/components/image-annotation-editor";
+import { linkifyText } from "@/components/link-preview";
+import { ReadReceiptAvatars, type ReadReceiptUser } from "@/components/read-receipt-avatars";
+import { SafeLineAvatar } from "@/components/safe-line-avatar";
 import { getClipboardImageFile } from "@/lib/clipboard-image";
 import { getDeviceHeaders } from "@/lib/device-id";
-
-const REACTION_EMOJIS = ["👍", "❤️", "😮", "🙌", "🙏", "👀"] as const;
+import { USER_DEPARTMENTS, type UserDepartment } from "@/lib/departments";
+import { formatMentionName, mentionDisplayName } from "@/lib/mention-names";
+import { REACTION_EMOJIS } from "@/lib/reactions";
+import { getEffectiveUserRole, getUserRoleLabel, isManagementRole } from "@/lib/user-roles";
 
 type ChatUser = {
   id: string;
   display_name: string;
   picture_url: string | null;
   role?: string;
+  department?: UserDepartment;
   group_role?: string;
 };
 
@@ -43,11 +50,6 @@ type ChatGroup = {
   description?: string | null;
 };
 
-type ReadReceipt = {
-  user_id: string;
-  last_read_at: string;
-};
-
 type CurrentUser = {
   id: string;
   role?: string;
@@ -55,24 +57,14 @@ type CurrentUser = {
 };
 
 function Avatar({ user, size = 30 }: { user: ChatUser; size?: number }) {
-  if (user.picture_url) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={user.picture_url} alt="" title={user.display_name} className="avatar" width={size} height={size} />;
-  }
-
-  return (
-    <div
-      className="avatar-placeholder"
-      title={user.display_name}
-      style={{ width: size, height: size, fontSize: size * 0.4 }}
-    >
-      {user.display_name?.charAt(0) || "?"}
-    </div>
-  );
+  return <SafeLineAvatar name={user.display_name} pictureUrl={user.picture_url} size={size} title={user.display_name} alt="" />;
 }
 
 function formatTime(value: string) {
-  return new Date(value).toLocaleTimeString("ja-JP", {
+  return new Date(value).toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -82,10 +74,47 @@ function attachmentViewUrl(attachment: Attachment) {
   return attachment.viewUrl || attachment.url;
 }
 
-function formatMentionName(name: string) {
-  const trimmed = name.trim();
-  if (!trimmed) return "";
-  return /(さん|様|さま|君|くん|ちゃん)$/.test(trimmed) ? trimmed : `${trimmed}さん`;
+function hasDraggedFiles(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.types || []).includes("Files");
+}
+
+function getFirstDroppedFile(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.files || [])[0] || null;
+}
+
+const CHAT_BOTTOM_FOLLOW_DISTANCE = 180;
+
+function isNearChatBottom(element: HTMLDivElement | null) {
+  if (!element) return false;
+  return element.scrollHeight - (element.scrollTop + element.clientHeight) <= CHAT_BOTTOM_FOLLOW_DISTANCE;
+}
+
+function scrollChatToBottom(element: HTMLDivElement | null, behavior: ScrollBehavior = "smooth") {
+  if (!element) return;
+
+  if (behavior === "auto") {
+    element.scrollTop = element.scrollHeight;
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    element.scrollTo({ top: element.scrollHeight, behavior });
+  });
+}
+
+function areMessagesEquivalent(current: Message, incoming: Message) {
+  return (
+    current.id === incoming.id &&
+    current.user_id === incoming.user_id &&
+    current.content === incoming.content &&
+    current.created_at === incoming.created_at &&
+    current.updated_at === incoming.updated_at &&
+    current.isOwn === incoming.isOwn &&
+    current.author?.display_name === incoming.author?.display_name &&
+    current.author?.picture_url === incoming.author?.picture_url &&
+    JSON.stringify(current.attachments || []) === JSON.stringify(incoming.attachments || []) &&
+    JSON.stringify(current.reactions || {}) === JSON.stringify(incoming.reactions || {})
+  );
 }
 
 export default function ChatPage() {
@@ -93,8 +122,11 @@ export default function ChatPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageIdsRef = useRef<Set<string>>(new Set());
+  const initialLoadHandledRef = useRef(false);
+  const pendingScrollToBottomRef = useRef(false);
 
   const [group, setGroup] = useState<ChatGroup | null>(null);
   const [members, setMembers] = useState<ChatUser[]>([]);
@@ -105,15 +137,18 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [annotatingImage, setAnnotatingImage] = useState<{ message: Message; attachment: Attachment; attachmentIndex: number } | null>(null);
+  const [annotationSaving, setAnnotationSaving] = useState(false);
   const [notifMuted, setNotifMuted] = useState(false);
   const [notifToggling, setNotifToggling] = useState(false);
-  const [readReceipts, setReadReceipts] = useState<ReadReceipt[]>([]);
+  const [readReceipts, setReadReceipts] = useState<ReadReceiptUser[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
 
   const latestMessageAt = useMemo(() => {
     return messages.length > 0 ? messages[messages.length - 1].created_at : "";
@@ -136,32 +171,40 @@ export default function ChatPage() {
 
   const mentionMembers = useMemo(() => {
     return [...members].sort((a, b) => {
-      const aIsAdmin = a.role === "admin" || a.group_role === "admin";
-      const bIsAdmin = b.role === "admin" || b.group_role === "admin";
+      const aIsAdmin = isManagementRole(getEffectiveUserRole(a)) || a.group_role === "admin";
+      const bIsAdmin = isManagementRole(getEffectiveUserRole(b)) || b.group_role === "admin";
       if (aIsAdmin !== bIsAdmin) return aIsAdmin ? -1 : 1;
       return a.display_name.localeCompare(b.display_name, "ja");
     });
   }, [members]);
 
   const isDirectChat = group?.description?.startsWith("direct:") || false;
-  const canModerateChat = currentUser?.role === "admin" || currentUser?.group_role === "admin";
+  const canModerateChat = isManagementRole(currentUser?.role) || currentUser?.group_role === "admin";
 
   const mergeMessages = useCallback((incoming: Message[]) => {
     if (incoming.length === 0) return;
+    const hasNewMessage = incoming.some((message) => !messageIdsRef.current.has(message.id));
+    if (hasNewMessage && isNearChatBottom(messagesRef.current)) {
+      pendingScrollToBottomRef.current = true;
+    }
 
     setMessages(prev => {
+      let changed = false;
       const next = [...prev];
       for (const message of incoming) {
         if (messageIdsRef.current.has(message.id)) {
           const index = next.findIndex(item => item.id === message.id);
-          if (index >= 0) {
+          if (index >= 0 && !areMessagesEquivalent(next[index], message)) {
             next[index] = { ...next[index], ...message };
+            changed = true;
           }
           continue;
         }
         messageIdsRef.current.add(message.id);
         next.push(message);
+        changed = true;
       }
+      if (!changed) return prev;
       return next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     });
   }, []);
@@ -195,6 +238,8 @@ export default function ChatPage() {
 
   useEffect(() => {
     let active = true;
+    initialLoadHandledRef.current = false;
+    pendingScrollToBottomRef.current = false;
     setLoading(true);
     setError("");
 
@@ -228,9 +273,20 @@ export default function ChatPage() {
     return () => window.clearInterval(timer);
   }, [latestMessageAt, loadChat]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: loading ? "auto" : "smooth" });
-  }, [messages, loading]);
+  useLayoutEffect(() => {
+    if (loading) return;
+
+    if (!initialLoadHandledRef.current) {
+      initialLoadHandledRef.current = true;
+      pendingScrollToBottomRef.current = false;
+      scrollChatToBottom(messagesRef.current, "auto");
+      return;
+    }
+
+    if (!pendingScrollToBottomRef.current) return;
+    pendingScrollToBottomRef.current = false;
+    scrollChatToBottom(messagesRef.current, "smooth");
+  }, [messages.length, loading]);
 
   async function uploadSelectedFile() {
     if (!selectedFile) return [];
@@ -256,6 +312,30 @@ export default function ChatPage() {
       driveId: data.driveId,
       webViewLink: data.webViewLink,
     }];
+  }
+
+  async function uploadAnnotationFile(file: File): Promise<Attachment> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || "画像の保存に失敗しました");
+    }
+
+    return {
+      url: data.viewUrl || data.url,
+      viewUrl: data.viewUrl,
+      name: data.name || file.name,
+      type: data.type || file.type,
+      driveId: data.driveId,
+      webViewLink: data.webViewLink,
+    };
   }
 
   function resizeMessageInput() {
@@ -286,6 +366,7 @@ export default function ChatPage() {
         throw new Error(data.error || "メッセージ送信に失敗しました");
       }
 
+      pendingScrollToBottomRef.current = true;
       mergeMessages([data.message]);
       setInput("");
       setSelectedFile(null);
@@ -319,6 +400,26 @@ export default function ChatPage() {
     }, 0);
   }
 
+  function insertDepartmentMention(department: UserDepartment) {
+    const inputElement = messageInputRef.current;
+    const start = inputElement?.selectionStart ?? input.length;
+    const end = inputElement?.selectionEnd ?? input.length;
+    const needsLeadingSpace = start > 0 && !/\s/.test(input.charAt(start - 1));
+    const mention = `${needsLeadingSpace ? " " : ""}@${department} `;
+    const nextInput = `${input.slice(0, start)}${mention}${input.slice(end)}`;
+    const cursor = start + mention.length;
+
+    setInput(nextInput);
+    setMentionPickerOpen(false);
+
+    window.setTimeout(() => {
+      if (!messageInputRef.current) return;
+      messageInputRef.current.focus();
+      messageInputRef.current.setSelectionRange(cursor, cursor);
+      resizeMessageInput();
+    }, 0);
+  }
+
   function handleMessageChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setInput(e.target.value);
     resizeMessageInput();
@@ -336,8 +437,41 @@ export default function ChatPage() {
     if (!file) return;
 
     e.preventDefault();
+    attachMessageFile(file);
+  }
+
+  function attachMessageFile(file: File | null) {
     setSelectedFile(file);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function handleChatDragEnter(e: React.DragEvent<HTMLElement>) {
+    if (sending || !hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    setDropActive(true);
+  }
+
+  function handleChatDragOver(e: React.DragEvent<HTMLElement>) {
+    if (sending || !hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleChatDragLeave(e: React.DragEvent<HTMLElement>) {
+    const nextTarget = e.relatedTarget as Node | null;
+    if (!nextTarget || !e.currentTarget.contains(nextTarget)) {
+      setDropActive(false);
+    }
+  }
+
+  function handleChatDrop(e: React.DragEvent<HTMLElement>) {
+    if (sending || !hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    const file = getFirstDroppedFile(e.dataTransfer);
+    setDropActive(false);
+    if (!file) return;
+    attachMessageFile(file);
+    messageInputRef.current?.focus();
   }
 
   async function toggleNotifMute() {
@@ -400,7 +534,8 @@ export default function ChatPage() {
   }
 
   function canDeleteMessage(message: Message) {
-    return !isDirectChat && (message.isOwn || canModerateChat);
+    if (message.isOwn) return true;
+    return !isDirectChat && canModerateChat;
   }
 
   function startEditingMessage(message: Message) {
@@ -444,6 +579,51 @@ export default function ChatPage() {
     }
   }
 
+  async function saveAnnotatedMessageImage(file: File) {
+    if (!annotatingImage || annotationSaving) return;
+
+    const target = annotatingImage;
+    setAnnotationSaving(true);
+    setError("");
+    try {
+      const uploadedAttachment = await uploadAnnotationFile(file);
+      const nextAttachments = target.message.attachments.map((attachment, index) => (
+        index === target.attachmentIndex ? uploadedAttachment : attachment
+      ));
+
+      const res = await fetch("/api/chat", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message_id: target.message.id,
+          content: target.message.content || "",
+          attachments: nextAttachments,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.error || "画像の保存に失敗しました");
+      }
+
+      const updatedAttachments = Array.isArray(data.message?.attachments) ? data.message.attachments : nextAttachments;
+      setMessages(prev => prev.map(item => (
+        item.id === target.message.id
+          ? {
+              ...item,
+              attachments: updatedAttachments,
+              updated_at: data.message?.updated_at || item.updated_at,
+            }
+          : item
+      )));
+      setAnnotatingImage(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "画像の保存に失敗しました");
+    } finally {
+      setAnnotationSaving(false);
+    }
+  }
+
   async function deleteMessage(messageId: string) {
     if (!confirm("メッセージを削除しますか？")) return;
 
@@ -465,7 +645,18 @@ export default function ChatPage() {
   }
 
   return (
-    <>
+    <div
+      className={`chat-page${dropActive ? " chat-page--drop-active" : ""}`}
+      onDragEnter={handleChatDragEnter}
+      onDragOver={handleChatDragOver}
+      onDragLeave={handleChatDragLeave}
+      onDrop={handleChatDrop}
+    >
+      {dropActive && (
+        <div className="page-file-drop-indicator" aria-hidden="true">
+          <span>ファイルをドロップして添付</span>
+        </div>
+      )}
       <header className="top-header" role="banner">
         <button
           type="button"
@@ -508,7 +699,7 @@ export default function ChatPage() {
         )}
       </div>
 
-      <section className="chat-messages" aria-label="チャットメッセージ" role="log" aria-live="polite">
+      <section ref={messagesRef} className="chat-messages" aria-label="チャットメッセージ" role="log" aria-live="polite">
         {group?.description?.startsWith("direct:") && (
           <div className="chat-privacy-banner">
             <span className="chat-privacy-banner__icon" aria-hidden="true">🔒</span>
@@ -587,16 +778,16 @@ export default function ChatPage() {
                   </div>
                 </form>
               ) : (
-                message.content && <div className="msg__bubble">{message.content}</div>
+                message.content && <div className="msg__bubble">{linkifyText(message.content)}</div>
               )}
 
               {message.attachments?.map((attachment, index) => {
                 const viewUrl = attachmentViewUrl(attachment);
                 if (attachment.type?.startsWith("image/")) {
                   return (
-                    <button
-                      key={`${message.id}-${index}`}
-                      type="button"
+                    <div key={`${message.id}-${index}`} className="msg__image-wrap">
+                      <button
+                        type="button"
                       className="msg__image-btn"
                       onClick={() => setPreviewImage(viewUrl)}
                       aria-label={`${attachment.name}を拡大表示`}
@@ -604,6 +795,17 @@ export default function ChatPage() {
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={viewUrl} alt={attachment.name} className="msg__image" />
                     </button>
+                      {canEditMessage(message) && !isEditing && (
+                        <button
+                          type="button"
+                          className="msg__annotate-btn"
+                          onClick={() => setAnnotatingImage({ message, attachment, attachmentIndex: index })}
+                          aria-label="画像に赤丸・赤枠を追加"
+                        >
+                          赤丸/赤枠
+                        </button>
+                      )}
+                    </div>
                   );
                 }
 
@@ -646,12 +848,10 @@ export default function ChatPage() {
 
             <div className="msg__meta">
               {message.isOwn && (() => {
-                const readCount = readReceipts.filter(
+                const readers = readReceipts.filter(
                   r => new Date(r.last_read_at) >= new Date(message.created_at)
-                ).length;
-                return readCount > 0 ? (
-                  <span className="msg__read-receipt">既読{readCount > 1 ? ` ${readCount}` : ""}</span>
-                ) : null;
+                );
+                return readers.length > 0 ? <ReadReceiptAvatars readers={readers} /> : null;
               })()}
               {isEdited && <span className="msg__edited">{"\u7de8\u96c6\u6e08\u307f"}</span>}
               {canEditMessage(message) && !isEditing && (
@@ -684,12 +884,13 @@ export default function ChatPage() {
           );
         })}
 
-        <div ref={bottomRef} aria-hidden="true" />
+        <div ref={bottomRef} className="chat-bottom-anchor" aria-hidden="true" />
       </section>
 
       {error && messages.length > 0 && <div className="chat-inline-error">{error}</div>}
 
-      <form
+      <footer className="chat-footer">
+        <form
         className="chat-input-bar"
         onSubmit={(e) => {
           e.preventDefault();
@@ -717,8 +918,28 @@ export default function ChatPage() {
             {mentionMembers.length === 0 ? (
               <span className="mention-picker__empty">メンションできるメンバーがいません</span>
             ) : (
-              mentionMembers.map((member) => {
-                const isAdmin = member.role === "admin" || member.group_role === "admin";
+              <>
+                {USER_DEPARTMENTS.map((department) => (
+                  <button
+                    key={`department-${department}`}
+                    type="button"
+                    className="mention-chip"
+                    onClick={() => insertDepartmentMention(department)}
+                    disabled={sending}
+                    role="option"
+                    aria-selected="false"
+                  >
+                    <span>@{department}</span>
+                    <small>部署</small>
+                  </button>
+                ))}
+                {mentionMembers.map((member) => {
+                const accountRole = getEffectiveUserRole(member);
+                const permissionLabel = isManagementRole(accountRole)
+                  ? getUserRoleLabel(member)
+                  : member.group_role === "admin"
+                    ? "グループ管理者"
+                    : null;
                 return (
                   <button
                     key={member.id}
@@ -730,11 +951,12 @@ export default function ChatPage() {
                     aria-selected="false"
                   >
                     <Avatar user={member} size={24} />
-                    <span>{member.display_name}</span>
-                    {isAdmin && <small>管理者</small>}
+                    <span>{mentionDisplayName(member.display_name)}</span>
+                    {permissionLabel && <small>{permissionLabel}</small>}
                   </button>
                 );
-              })
+                })}
+              </>
             )}
           </div>
         )}
@@ -743,7 +965,7 @@ export default function ChatPage() {
           ref={fileInputRef}
           type="file"
           className="visually-hidden"
-          onChange={e => setSelectedFile(e.target.files?.[0] || null)}
+          onChange={e => attachMessageFile(e.target.files?.[0] || null)}
         />
         <button
           type="button"
@@ -784,7 +1006,20 @@ export default function ChatPage() {
         >
           {sending ? "…" : "↑"}
         </button>
-      </form>
+        </form>
+      </footer>
+
+      {annotatingImage && (
+        <ImageAnnotationEditor
+          imageUrl={attachmentViewUrl(annotatingImage.attachment)}
+          imageName={annotatingImage.attachment.name || "image"}
+          saving={annotationSaving}
+          onCancel={() => {
+            if (!annotationSaving) setAnnotatingImage(null);
+          }}
+          onSave={saveAnnotatedMessageImage}
+        />
+      )}
 
       {previewImage && (
         <div className="image-preview" role="dialog" aria-modal="true" onClick={() => setPreviewImage(null)}>
@@ -795,6 +1030,6 @@ export default function ChatPage() {
           <img src={previewImage} alt="添付画像プレビュー" onClick={e => e.stopPropagation()} />
         </div>
       )}
-    </>
+    </div>
   );
 }

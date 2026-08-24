@@ -1,0 +1,2 @@
+-- Canonical copy: supabase/migrations/202608130002_notify_fujita_aoi_correction.sql
+-- Apply the migration file above. This pointer keeps the numbered SQL index in sync.

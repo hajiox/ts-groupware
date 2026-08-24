@@ -1,4 +1,10 @@
-<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-  <rect width="512" height="512" rx="100" fill="#3b82f6" />
-  <text x="256" y="270" font-family="Arial, sans-serif" font-size="200" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="middle">TS</text>
+
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0f172a"/>
+  <rect x="40" y="40" width="432" height="432" rx="96" fill="#111827"/>
+  <rect x="64" y="64" width="384" height="384" rx="78" fill="#1d4ed8" opacity="0.18"/>
+  <path d="M92 150c48-50 98-75 150-75 69 0 130 37 178 112" fill="none" stroke="#38bdf8" stroke-width="18" stroke-linecap="round" opacity="0.82"/>
+  <path d="M90 363c50 49 104 74 162 74 70 0 129-35 177-104" fill="none" stroke="#22c55e" stroke-width="16" stroke-linecap="round" opacity="0.72"/>
+  <text x="256" y="292" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="138" font-weight="800" fill="#ffffff">TSG</text>
+  <text x="256" y="342" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="700" fill="#bfdbfe">GROUPWARE</text>
 </svg>

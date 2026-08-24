@@ -30,13 +30,14 @@ function getPageScrollTop() {
 
 export function PullToRefresh() {
   const pathname = usePathname();
+  const disabled = pathname.startsWith("/admin/shifts/print") || pathname.startsWith("/pledges/pdf/");
   const startYRef = useRef<number | null>(null);
   const distanceRef = useRef(0);
   const [distance, setDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    if (pathname.startsWith("/board")) return;
+    if (disabled || pathname.startsWith("/board") || pathname.startsWith("/chat")) return;
 
     const supportsTouch = window.matchMedia("(hover: none), (pointer: coarse)").matches;
     if (!supportsTouch) return;
@@ -103,7 +104,9 @@ export function PullToRefresh() {
       window.removeEventListener("touchend", onTouchEnd);
       window.removeEventListener("touchcancel", reset);
     };
-  }, [pathname, refreshing]);
+  }, [disabled, pathname, refreshing]);
+
+  if (disabled) return null;
 
   const progress = refreshing ? 1 : Math.min(1, distance / TRIGGER_DISTANCE);
   const visible = refreshing || distance > 8;

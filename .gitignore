@@ -16,6 +16,8 @@ node_modules
 .DS_Store
 .vercel/
 .vercel
+.codex-tmp/
+tmp/
 
 # Build/cache output
 *.tsbuildinfo

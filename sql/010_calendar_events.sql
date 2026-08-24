@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS gw_calendar_events (
   all_day BOOLEAN NOT NULL DEFAULT false,
   color TEXT NOT NULL DEFAULT '#1a73e8',
   source TEXT NOT NULL DEFAULT 'manual',
+  external_id TEXT,
+  source_updated_at TIMESTAMPTZ,
   created_by UUID NOT NULL REFERENCES gw_users(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
@@ -20,6 +22,9 @@ CREATE INDEX IF NOT EXISTS idx_gw_calendar_events_range
 
 CREATE INDEX IF NOT EXISTS idx_gw_calendar_events_created_by
   ON gw_calendar_events(created_by);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gw_calendar_events_source_external
+  ON gw_calendar_events(source, external_id);
 
 ALTER TABLE gw_calendar_events ENABLE ROW LEVEL SECURITY;
 

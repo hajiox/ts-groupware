@@ -1,7 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
+import { isManagementUser } from '@/lib/user-roles'
 import { getUnreadCountsByGroup } from '@/lib/unread'
+
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+const PRIVATE_NO_STORE_HEADERS = {
+  'Cache-Control': 'private, no-store, no-cache, max-age=0, must-revalidate',
+  Pragma: 'no-cache',
+  Expires: '0',
+  Vary: 'Cookie',
+}
+
+function noStoreJson(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: PRIVATE_NO_STORE_HEADERS,
+  })
+}
 
 /**
  * GET /api/groups — 自分が参加しているグループ一覧
@@ -20,7 +38,7 @@ function isAllStaffGroupName(name: string) {
 export async function GET() {
   const user = await getUserSession()
   if (!user) {
-    return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
+    return noStoreJson({ error: '認証が必要です' }, 401)
   }
 
   const { data: memberships } = await adminClient
@@ -30,24 +48,20 @@ export async function GET() {
 
   const explicitGroupIds = memberships?.map(m => m.group_id) || []
 
-  let groupsQuery = adminClient
-    .from('gw_groups')
-    .select('*')
-    .order('updated_at', { ascending: false })
-
-  if (user.role !== 'admin') {
-    if (explicitGroupIds.length === 0) {
-      return NextResponse.json({ groups: [] })
-    }
-    groupsQuery = groupsQuery.in('id', explicitGroupIds)
+  if (explicitGroupIds.length === 0) {
+    return noStoreJson({ groups: [] })
   }
 
-  const { data: rawGroups } = await groupsQuery
+  const { data: rawGroups } = await adminClient
+    .from('gw_groups')
+    .select('*')
+    .in('id', explicitGroupIds)
+    .order('updated_at', { ascending: false })
   const groups = (rawGroups || []).filter(group => !isDirectChat(group))
   const groupIds = groups.map(group => group.id)
 
   if (groupIds.length === 0) {
-    return NextResponse.json({ groups: [] })
+    return noStoreJson({ groups: [] })
   }
 
   const { data: groupMembers } = await adminClient
@@ -113,7 +127,7 @@ export async function GET() {
     }
   })
 
-  return NextResponse.json({ groups: enrichedGroups })
+  return noStoreJson({ groups: enrichedGroups })
 }
 
 export async function POST(request: NextRequest) {
@@ -122,9 +136,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
   }
 
-  // 管理者のみグループ作成可
-  if (user.role !== 'admin') {
-    return NextResponse.json({ error: '管理者のみグループを作成できます' }, { status: 403 })
+  // 役員・管理者のみグループ作成可
+  if (!isManagementUser(user)) {
+    return NextResponse.json({ error: '役員または管理者のみグループを作成できます' }, { status: 403 })
   }
 
   const body = await request.json()
@@ -178,7 +192,7 @@ export async function POST(request: NextRequest) {
     memberRows = (approvedUsers || []).map(approvedUser => ({
       group_id: group.id,
       user_id: approvedUser.id,
-      role: approvedUser.id === user.id || approvedUser.role === 'admin' ? 'admin' : 'member',
+      role: approvedUser.id === user.id ? 'admin' : 'member',
     }))
   }
 

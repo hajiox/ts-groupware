@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { SafeLineAvatar } from "@/components/safe-line-avatar";
 import { getDeviceHeaders } from "@/lib/device-id";
+import { UserRoleBadge } from "@/components/user-role-badge";
 
 type User = {
   id: string;
@@ -413,28 +415,12 @@ export default function SettingsPage() {
       <div className="settings-page page-content">
         {/* Profile */}
         <section className="settings-profile" aria-label="プロフィール">
-          {user?.picture_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={user.picture_url}
-              alt={user.display_name}
-              className="avatar"
-              width={72}
-              height={72}
-            />
-          ) : (
-            <div
-              className="avatar-placeholder"
-              style={{ width: 72, height: 72, fontSize: 30, background: "#3b82f6" }}
-            >
-              {user?.display_name?.charAt(0) || "?"}
-            </div>
-          )}
+          <SafeLineAvatar name={user?.display_name} pictureUrl={user?.picture_url} size={72} />
           <div className="settings-profile__name">
             {user?.display_name || "読み込み中..."}
           </div>
           <div className="settings-profile__sub">
-            {user?.role === "admin" ? "管理者" : "メンバー"}
+            <UserRoleBadge user={user} />
           </div>
         </section>
 

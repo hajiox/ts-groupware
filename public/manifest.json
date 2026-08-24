@@ -6,28 +6,28 @@
   "start_url": "/groups",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
   "icons": [
     {
-      "src": "/favicon.png",
+      "src": "/favicon.png?v=20260618-tsg",
       "sizes": "64x64",
       "type": "image/png"
     },
     {
-      "src": "/apple-touch-icon.png",
+      "src": "/apple-touch-icon.png?v=20260618-tsg",
       "sizes": "180x180",
       "type": "image/png"
     },
     {
-      "src": "/icon-192.png",
+      "src": "/icon-192.png?v=20260618-tsg",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icon-512.png",
+      "src": "/icon-512.png?v=20260618-tsg",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

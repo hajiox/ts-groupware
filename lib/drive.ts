@@ -64,7 +64,7 @@ function getDriveClient() {
   return google.drive({ version: 'v3', auth })
 }
 
-export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mimeType: string) {
+export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mimeType: string, options?: { makePublic?: boolean }) {
   const drive = getDriveClient()
   const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim()
 
@@ -91,7 +91,7 @@ export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mi
   })
 
   // 作成したファイルに「リンクを知っている全員が閲覧可」の権限を付与
-  if (response.data.id) {
+  if (response.data.id && options?.makePublic !== false) {
     await drive.permissions.create({
       fileId: response.data.id,
       requestBody: {
@@ -105,6 +105,15 @@ export async function uploadFileToDrive(fileBuffer: Buffer, fileName: string, mi
   return response.data
 }
 
+export async function downloadFileFromDrive(fileId: string) {
+  const drive = getDriveClient()
+  const response = await drive.files.get(
+    { fileId, alt: 'media', supportsAllDrives: true },
+    { responseType: 'arraybuffer' },
+  )
+  return Buffer.from(response.data as ArrayBuffer)
+}
+
 export async function deleteFileFromDrive(fileId: string) {
   const drive = getDriveClient()
 
@@ -112,4 +121,45 @@ export async function deleteFileFromDrive(fileId: string) {
     fileId,
     supportsAllDrives: true,
   })
+}
+
+export async function extractTextFromPdfWithDriveOcr(fileBuffer: Buffer, fileName: string) {
+  const drive = getDriveClient()
+  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim()
+  const stream = new Readable()
+  stream.push(fileBuffer)
+  stream.push(null)
+
+  let temporaryDocumentId = ''
+  try {
+    const response = await drive.files.create({
+      requestBody: {
+        name: `${fileName.replace(/\.pdf$/i, '')}_OCR一時ファイル`,
+        mimeType: 'application/vnd.google-apps.document',
+        ...(folderId ? { parents: [folderId] } : {}),
+      },
+      media: {
+        mimeType: 'application/pdf',
+        body: stream,
+      },
+      fields: 'id',
+      ocrLanguage: 'ja',
+      supportsAllDrives: true,
+    })
+
+    temporaryDocumentId = response.data.id || ''
+    if (!temporaryDocumentId) throw new Error('Google Drive OCRの一時ファイルを作成できませんでした')
+
+    const exported = await drive.files.export(
+      { fileId: temporaryDocumentId, mimeType: 'text/plain' },
+      { responseType: 'arraybuffer' },
+    )
+    const text = Buffer.from(exported.data as ArrayBuffer).toString('utf8').trim()
+    if (!text) throw new Error('Google Drive OCRの読取結果が空でした')
+    return text
+  } finally {
+    if (temporaryDocumentId) {
+      await drive.files.delete({ fileId: temporaryDocumentId, supportsAllDrives: true }).catch(() => {})
+    }
+  }
 }

@@ -1,22 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthFlowId, logAuthEvent } from '@/lib/auth-log'
+import { createSessionCookieValue, getSessionCookieOptions, SESSION_COOKIE_NAME } from '@/lib/session-cookie'
 import { adminClient } from '@/lib/supabase/admin'
 import { verifyLineOAuthState } from '@/lib/line-oauth-state'
+import { normalizeLinePictureUrl } from '@/lib/line-picture'
+
+const LINE_OAUTH_NEXT_COOKIE = 'line_oauth_next'
+
+function getSafeNextPath(value?: string | null) {
+  if (!value || !value.startsWith('/') || value.startsWith('//')) return null
+
+  try {
+    const parsed = new URL(value, 'https://tsg.local')
+    if (parsed.origin !== 'https://tsg.local') return null
+    if (parsed.pathname === '/login' || parsed.pathname.startsWith('/api/auth')) return null
+    return `${parsed.pathname}${parsed.search}`
+  } catch {
+    return null
+  }
+}
 
 /**
  * GET /api/auth/line/callback
  *
- * 責務: LINE OAuth コールバック処理。
- * 1. state 検証（CSRF防止）
- * 2. 認可コードをアクセストークンに交換
- * 3. LINE プロフィール取得
- * 4. gw_users テーブルで line_user_id を検索 → 既存 or 承認待ち登録
- * 5. 承認済みユーザーのみセッション Cookie を発行
- * 6. グループ一覧へリダイレクト
- */
+ * 雋ｬ蜍・ LINE OAuth 繧ｳ繝ｼ繝ｫ繝舌ャ繧ｯ蜃ｦ逅・・ * 1. state 讀懆ｨｼ・・SRF髦ｲ豁｢・・ * 2. 隱榊庄繧ｳ繝ｼ繝峨ｒ繧｢繧ｯ繧ｻ繧ｹ繝医・繧ｯ繝ｳ縺ｫ莠､謠・ * 3. LINE 繝励Ο繝輔ぅ繝ｼ繝ｫ蜿門ｾ・ * 4. gw_users 繝・・繝悶Ν縺ｧ line_user_id 繧呈､懃ｴ｢ 竊・譌｢蟄・or 謇ｿ隱榊ｾ・■逋ｻ骭ｲ
+ * 5. 謇ｿ隱肴ｸ医∩繝ｦ繝ｼ繧ｶ繝ｼ縺ｮ縺ｿ繧ｻ繝・す繝ｧ繝ｳ Cookie 繧堤匱陦・ * 6. 繧ｰ繝ｫ繝ｼ繝嶺ｸ隕ｧ縺ｸ繝ｪ繝繧､繝ｬ繧ｯ繝・ */
 
 export async function GET(request: NextRequest) {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || request.nextUrl.origin
+  const siteUrl = new URL(process.env.NEXT_PUBLIC_SITE_URL?.trim() || request.nextUrl.origin).origin
 
   try {
     const searchParams = request.nextUrl.searchParams
@@ -32,7 +43,7 @@ export async function GET(request: NextRequest) {
       request,
     })
 
-    // LINE がエラーを返した場合（ユーザーが拒否した等）
+    // LINE error or cancellation.
     if (error) {
       console.error('[LINE callback] LINE auth error:', error)
       await logAuthEvent({ event: 'line_callback_line_error', flowId, detail: error, request })
@@ -44,7 +55,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${siteUrl}/login?error=invalid_request`)
     }
 
-    // --- CSRF state 検証 ---
+    // --- CSRF state 讀懆ｨｼ ---
     const savedState = request.cookies.get('line_oauth_state')?.value
     const channelSecret = process.env.LINE_CHANNEL_SECRET!
     const isCookieStateValid = !!savedState && savedState === state
@@ -67,7 +78,7 @@ export async function GET(request: NextRequest) {
       request,
     })
 
-    // --- アクセストークン取得 ---
+    // --- 繧｢繧ｯ繧ｻ繧ｹ繝医・繧ｯ繝ｳ蜿門ｾ・---
     const redirectUri = `${siteUrl}/api/auth/line/callback`
     const tokenResponse = await fetch('https://api.line.me/oauth2/v2.1/token', {
       method: 'POST',
@@ -96,7 +107,7 @@ export async function GET(request: NextRequest) {
     const tokenData = await tokenResponse.json()
     await logAuthEvent({ event: 'line_callback_token_ok', flowId, request })
 
-    // --- LINE プロフィール取得 ---
+    // --- LINE 繝励Ο繝輔ぅ繝ｼ繝ｫ蜿門ｾ・---
     const profileResponse = await fetch('https://api.line.me/v2/profile', {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     })
@@ -115,12 +126,12 @@ export async function GET(request: NextRequest) {
     const profile = await profileResponse.json()
     const lineUserId: string = profile.userId
     const displayName: string = profile.displayName
-    const pictureUrl: string | null = profile.pictureUrl || null
+    const pictureUrl = normalizeLinePictureUrl(profile.pictureUrl || null)
     await logAuthEvent({ event: 'line_callback_profile_ok', flowId, request })
 
     const supabase = adminClient
 
-    // --- 既存ユーザー検索 ---
+    // --- 譌｢蟄倥Θ繝ｼ繧ｶ繝ｼ讀懃ｴ｢ ---
     const { data: existingUser } = await supabase
       .from('gw_users')
       .select('*')
@@ -131,7 +142,7 @@ export async function GET(request: NextRequest) {
     let userStatus = 'pending'
 
     if (existingUser) {
-      // 既存ユーザー → プロフィール更新
+      // 譌｢蟄倥Θ繝ｼ繧ｶ繝ｼ 竊・繝励Ο繝輔ぅ繝ｼ繝ｫ譖ｴ譁ｰ
       userId = existingUser.id
       userStatus = existingUser.status || 'approved'
       await supabase
@@ -149,7 +160,7 @@ export async function GET(request: NextRequest) {
         request,
       })
     } else {
-      // 新規ユーザー登録。管理者が承認するまでログインセッションは発行しない。
+      // Register a new user as pending approval.
       const { data: newUser, error: insertError } = await supabase
         .from('gw_users')
         .insert({
@@ -187,7 +198,8 @@ export async function GET(request: NextRequest) {
       await logAuthEvent({ event: 'line_callback_pending_redirect', flowId, request })
       const response = NextResponse.redirect(`${siteUrl}/login?error=approval_pending`)
       response.cookies.delete('line_oauth_state')
-      response.cookies.delete('gw_user_session')
+      response.cookies.delete(LINE_OAUTH_NEXT_COOKIE)
+      response.cookies.delete(SESSION_COOKIE_NAME)
       return response
     }
 
@@ -195,22 +207,19 @@ export async function GET(request: NextRequest) {
       await logAuthEvent({ event: 'line_callback_suspended_redirect', flowId, request })
       const response = NextResponse.redirect(`${siteUrl}/login?error=account_suspended`)
       response.cookies.delete('line_oauth_state')
-      response.cookies.delete('gw_user_session')
+      response.cookies.delete(LINE_OAUTH_NEXT_COOKIE)
+      response.cookies.delete(SESSION_COOKIE_NAME)
       return response
     }
 
-    // --- セッション発行 ---
-    // Next.jsの仕様により、cookies().set() ではなく NextResponse に直接セットする
-    const response = NextResponse.redirect(`${siteUrl}/groups`)
+    // --- 繧ｻ繝・す繝ｧ繝ｳ逋ｺ陦・---
+    // Next.js縺ｮ莉墓ｧ倥↓繧医ｊ縲…ookies().set() 縺ｧ縺ｯ縺ｪ縺・NextResponse 縺ｫ逶ｴ謗･繧ｻ繝・ヨ縺吶ｋ
+    const nextPath = getSafeNextPath(request.cookies.get(LINE_OAUTH_NEXT_COOKIE)?.value)
+    const response = NextResponse.redirect(`${siteUrl}${nextPath || '/groups'}`)
     await logAuthEvent({ event: 'line_callback_approved_redirect', flowId, request })
-    response.cookies.set('gw_user_session', userId, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 30, // 30日
-      path: '/',
-    })
+    response.cookies.set(SESSION_COOKIE_NAME, createSessionCookieValue(userId), getSessionCookieOptions())
     response.cookies.delete('line_oauth_state')
+    response.cookies.delete(LINE_OAUTH_NEXT_COOKIE)
     return response
 
   } catch (err) {

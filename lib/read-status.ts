@@ -5,19 +5,40 @@ export function getDeviceIdFromRequest(request: Request) {
   return /^[a-zA-Z0-9_-]{8,128}$/.test(deviceId) ? deviceId : null
 }
 
-// 同じアカウントで開いた全端末に既読状態を共有する。
-export async function markGroupRead(userId: string, groupId: string) {
-  const lastReadAt = new Date().toISOString()
-
+async function upsertUserReadStatus(rows: { user_id: string; group_id: string; last_read_at: string }[]) {
   const { error } = await adminClient
     .from('gw_read_status')
-    .upsert({
-      user_id: userId,
-      group_id: groupId,
-      last_read_at: lastReadAt,
-    }, { onConflict: 'user_id,group_id' })
+    .upsert(rows, { onConflict: 'user_id,group_id' })
 
   if (error) {
     console.error('[Read status update error]', error)
   }
+
+  return error
+}
+
+// 既読は同じアカウントの全端末で共有する。device_idはPush購読だけに使う。
+export async function markGroupsRead(userId: string, groupIds: string[]) {
+  const uniqueGroupIds = [...new Set(groupIds)].filter(Boolean)
+  const lastReadAt = new Date().toISOString()
+
+  if (uniqueGroupIds.length === 0) {
+    return { count: 0, lastReadAt, error: null }
+  }
+
+  const error = await upsertUserReadStatus(uniqueGroupIds.map(groupId => ({
+      user_id: userId,
+      group_id: groupId,
+      last_read_at: lastReadAt,
+  })))
+
+  return {
+    count: uniqueGroupIds.length,
+    lastReadAt,
+    error: error?.message || null,
+  }
+}
+
+export async function markGroupRead(userId: string, groupId: string) {
+  return markGroupsRead(userId, [groupId])
 }

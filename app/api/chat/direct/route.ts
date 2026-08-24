@@ -6,6 +6,21 @@ function directChatKey(userIdA: string, userIdB: string) {
   return `direct:${[userIdA, userIdB].sort().join(':')}`
 }
 
+function getDirectChatMemberRows(groupId: string, userId: string, targetUserId: string) {
+  return targetUserId === userId
+    ? [{ group_id: groupId, user_id: userId, role: 'member' }]
+    : [
+      { group_id: groupId, user_id: userId, role: 'member' },
+      { group_id: groupId, user_id: targetUserId, role: 'member' },
+    ]
+}
+
+async function ensureDirectChatMembers(groupId: string, userId: string, targetUserId: string) {
+  return adminClient
+    .from('gw_group_members')
+    .upsert(getDirectChatMemberRows(groupId, userId, targetUserId), { onConflict: 'group_id,user_id' })
+}
+
 function getSortTime(value: string | null | undefined) {
   if (!value) return 0
   const time = new Date(value).getTime()
@@ -133,19 +148,15 @@ export async function POST(request: NextRequest) {
     .select('id')
     .eq('type', 'chat')
     .eq('description', key)
+    .order('created_at', { ascending: true })
+    .limit(1)
     .maybeSingle()
 
   if (existing) {
-    const members = targetUser.id === user.id
-      ? [{ group_id: existing.id, user_id: user.id, role: 'member' }]
-      : [
-        { group_id: existing.id, user_id: user.id, role: 'member' },
-        { group_id: existing.id, user_id: targetUser.id, role: 'member' },
-      ]
-
-    await adminClient
-      .from('gw_group_members')
-      .upsert(members, { onConflict: 'group_id,user_id' })
+    const { error: memberError } = await ensureDirectChatMembers(existing.id, user.id, targetUser.id)
+    if (memberError) {
+      return NextResponse.json({ error: memberError.message }, { status: 500 })
+    }
 
     return NextResponse.json({ group: existing, existed: true })
   }
@@ -168,14 +179,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: groupError?.message || '個人Chatの作成に失敗しました' }, { status: 500 })
   }
 
-  const { error: memberError } = await adminClient
-    .from('gw_group_members')
-    .insert(targetUser.id === user.id
-      ? [{ group_id: group.id, user_id: user.id, role: 'member' }]
-      : [
-        { group_id: group.id, user_id: user.id, role: 'member' },
-        { group_id: group.id, user_id: targetUser.id, role: 'member' },
-      ])
+  const { error: memberError } = await ensureDirectChatMembers(group.id, user.id, targetUser.id)
 
   if (memberError) {
     await adminClient.from('gw_groups').delete().eq('id', group.id)

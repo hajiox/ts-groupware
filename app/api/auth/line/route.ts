@@ -2,6 +2,21 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthFlowId, logAuthEvent } from '@/lib/auth-log'
 import { createLineOAuthState } from '@/lib/line-oauth-state'
 
+const LINE_OAUTH_NEXT_COOKIE = 'line_oauth_next'
+
+function getSafeNextPath(value: string | null) {
+  if (!value || !value.startsWith('/') || value.startsWith('//')) return null
+
+  try {
+    const parsed = new URL(value, 'https://tsg.local')
+    if (parsed.origin !== 'https://tsg.local') return null
+    if (parsed.pathname === '/login' || parsed.pathname.startsWith('/api/auth')) return null
+    return `${parsed.pathname}${parsed.search}`
+  } catch {
+    return null
+  }
+}
+
 /**
  * GET /api/auth/line
  *
@@ -20,9 +35,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'LINE_CHANNEL_ID または LINE_CHANNEL_SECRET が未設定です' }, { status: 500 })
   }
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || request.nextUrl.origin
+  const siteUrl = new URL(process.env.NEXT_PUBLIC_SITE_URL?.trim() || request.nextUrl.origin).origin
   const redirectUri = `${siteUrl}/api/auth/line/callback`
   const state = createLineOAuthState(channelSecret)
+  const nextPath = getSafeNextPath(request.nextUrl.searchParams.get('next'))
   const flowId = getAuthFlowId(state)
 
   const params = new URLSearchParams({
@@ -50,6 +66,17 @@ export async function GET(request: NextRequest) {
     maxAge: 600,
     path: '/',
   })
+  if (nextPath) {
+    response.cookies.set(LINE_OAUTH_NEXT_COOKIE, nextPath, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 600,
+      path: '/',
+    })
+  } else {
+    response.cookies.delete(LINE_OAUTH_NEXT_COOKIE)
+  }
 
   return response
 }

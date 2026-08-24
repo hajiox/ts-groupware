@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
+import { isManagementRole } from '@/lib/user-roles'
 
 type GroupRow = {
   id: string
@@ -102,14 +103,14 @@ async function getEligibleUsers(groupId: string) {
   const memberRoleMap = new Map(memberRows.map(member => [member.user_id, member.role || 'member']))
 
   return ((users || []) as UserRow[])
-    .filter(user => user.role === 'admin' || explicitMemberUserIds.has(user.id))
+    .filter(user => isManagementRole(user.role) || explicitMemberUserIds.has(user.id))
     .map(user => ({
       id: user.id,
       displayName: user.real_name || user.display_name,
       pictureUrl: user.picture_url || null,
       role: user.role || 'member',
-      groupRole: user.role === 'admin' ? 'admin' : memberRoleMap.get(user.id) || 'member',
-      implicitMember: user.role === 'admin' && !explicitMemberUserIds.has(user.id),
+      groupRole: isManagementRole(user.role) ? 'admin' : memberRoleMap.get(user.id) || 'member',
+      implicitMember: isManagementRole(user.role) && !explicitMemberUserIds.has(user.id),
     }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName, 'ja'))
 }

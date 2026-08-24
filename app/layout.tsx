@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { getDeviceHeaders } from "@/lib/device-id";
+import { isManagementUser } from "@/lib/user-roles";
 import "./globals.css";
 
 const TSG_TITLE = "TS Groupware";
@@ -12,38 +13,60 @@ const TSG_DESCRIPTION = "テクニカルスタッフ社内グループウェア"
 const TSG_SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://ts-groupware.vercel.app").replace(/\/$/, "");
 const TSG_OG_IMAGE = `${TSG_SITE_URL}/og-image.png`;
 
+function ServiceWorkerUpdater() {
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then(registration => registration.update().catch(() => {}))
+      .catch(() => {});
+  }, []);
+
+  return null;
+}
+
 // ─── Bottom Navigation ────────────────────────────────────────────────────────
 function BottomNav() {
   const pathname = usePathname();
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [canUseAdmin, setCanUseAdmin] = useState(false);
   const [dmUnread, setDmUnread] = useState(0);
   const [taskUnread, setTaskUnread] = useState(0);
-  const hide = pathname === "/login" || pathname === "/" || pathname.startsWith("/calendar");
+  const hide = pathname === "/login" || pathname === "/" || pathname.startsWith("/calendar") || pathname.startsWith("/time-clock") || pathname.startsWith("/admin/shifts/print") || pathname.startsWith("/pledges/pdf/");
 
   useEffect(() => {
-    if (hide) return;
+    if (hide) {
+      setCanUseAdmin(false);
+      return;
+    }
+    let active = true;
     fetch("/api/auth/me")
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.user?.role === "admin") setIsAdmin(true);
+        if (active) setCanUseAdmin(data?.permissions?.canUseAdmin || isManagementUser(data?.user));
       })
-      .catch(() => {});
+      .catch(() => {
+        if (active) setCanUseAdmin(false);
+      });
+    return () => { active = false; };
   }, [hide]);
 
   // 全体未読カウントのポーリング（30秒間隔）
   useEffect(() => {
     if (hide) return;
     let active = true;
+    let requestId = 0;
 
     const fetchUnread = () => {
+      const currentRequestId = ++requestId;
       Promise.all([
-        fetch("/api/unread", { headers: getDeviceHeaders() })
+        fetch("/api/unread", { cache: "no-store", headers: getDeviceHeaders() })
           .then(r => r.ok ? r.json() : { dmUnread: 0, groupUnread: 0, totalUnread: 0 }),
-        fetch("/api/tasks?summary=1")
+        fetch("/api/tasks?summary=1", { cache: "no-store" })
           .then(r => r.ok ? r.json() : { openCount: 0 }),
       ])
         .then(([data, taskData]) => {
-          if (active) {
+          if (active && currentRequestId === requestId) {
             setDmUnread(data.dmUnread || 0);
             setTaskUnread(taskData.openCount || 0);
             
@@ -61,9 +84,24 @@ function BottomNav() {
         .catch(() => {});
     };
 
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") fetchUnread();
+    };
+
     fetchUnread();
+    window.addEventListener("tsg:unread-refresh", fetchUnread);
+    window.addEventListener("focus", fetchUnread);
+    window.addEventListener("pageshow", fetchUnread);
+    document.addEventListener("visibilitychange", handleVisibility);
     const timer = setInterval(fetchUnread, 30000);
-    return () => { active = false; clearInterval(timer); };
+    return () => {
+      active = false;
+      clearInterval(timer);
+      window.removeEventListener("tsg:unread-refresh", fetchUnread);
+      window.removeEventListener("focus", fetchUnread);
+      window.removeEventListener("pageshow", fetchUnread);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [hide, pathname]);
 
   if (hide) return null;
@@ -72,7 +110,7 @@ function BottomNav() {
     { href: "/groups", label: "ホーム", icon: "🏠", badge: 0 },
     { href: "/tasks", label: "タスク", icon: "✓", badge: taskUnread },
     { href: "/members", label: "DM", icon: "💬", badge: dmUnread },
-    ...(isAdmin ? [{ href: "/admin", label: "管理", icon: "🛡️", badge: 0 }] : []),
+    ...(canUseAdmin ? [{ href: "/admin", label: "管理", icon: "🛡️", badge: 0 }] : []),
     { href: "/settings", label: "設定", icon: "⚙️", badge: 0 },
   ];
 
@@ -144,10 +182,10 @@ export default function RootLayout({
         <meta name="twitter:description" content={TSG_DESCRIPTION} />
         <meta name="twitter:image" content={TSG_OG_IMAGE} />
         <title>{TSG_TITLE}</title>
-        <link rel="manifest" href="/manifest.json" />
-        <link rel="icon" href="/favicon.png" sizes="64x64" type="image/png" />
-        <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+        <link rel="manifest" href="/manifest.json?v=20260819-landscape" />
+        <link rel="icon" href="/favicon.png?v=20260618-tsg" sizes="64x64" type="image/png" />
+        <link rel="icon" href="/icon-192.png?v=20260618-tsg" sizes="192x192" type="image/png" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=20260618-tsg" sizes="180x180" />
         <script dangerouslySetInnerHTML={{ __html: `
           (function(){
             try {
@@ -162,6 +200,7 @@ export default function RootLayout({
         `}} />
       </head>
       <body>
+        <ServiceWorkerUpdater />
         <PullToRefresh />
         <div className="app-shell">
           <main style={{ flex: 1 }}>{children}</main>

@@ -4,13 +4,29 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://v0-line-blush.vercel.app";
-const lineLoginUrl = `${siteUrl}/api/auth/line`;
-const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(lineLoginUrl)}`;
+const siteOrigin = new URL(siteUrl).origin;
+const baseLineLoginUrl = `${siteOrigin}/api/auth/line`;
+
+function getSafeNextPath(value: string | null) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "";
+
+  try {
+    const parsed = new URL(value, siteOrigin);
+    if (parsed.origin !== siteOrigin) return "";
+    if (parsed.pathname === "/login" || parsed.pathname.startsWith("/api/auth")) return "";
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return "";
+  }
+}
 
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const error = searchParams.get('error');
+  const nextPath = getSafeNextPath(searchParams.get('next'));
+  const lineLoginUrl = nextPath ? `${baseLineLoginUrl}?next=${encodeURIComponent(nextPath)}` : baseLineLoginUrl;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(lineLoginUrl)}`;
   const [checkingSession, setCheckingSession] = useState(!error);
 
   const errorMessages: Record<string, string> = {

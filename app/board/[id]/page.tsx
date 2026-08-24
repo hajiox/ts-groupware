@@ -2,13 +2,21 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { ImageAnnotationEditor } from "@/components/image-annotation-editor";
 import { linkifyText, OgpPreviews } from "@/components/link-preview";
+import { ReadReceiptAvatars, type ReadReceiptUser } from "@/components/read-receipt-avatars";
+import { SafeLineAvatar } from "@/components/safe-line-avatar";
 import { getClipboardImageFile } from "@/lib/clipboard-image";
 import { getDeviceHeaders } from "@/lib/device-id";
+import { USER_DEPARTMENTS, type UserDepartment } from "@/lib/departments";
+import { formatMentionName, mentionDisplayName } from "@/lib/mention-names";
+import { REACTION_EMOJIS } from "@/lib/reactions";
+import { getEffectiveUserRole, getUserRoleLabel, isManagementRole } from "@/lib/user-roles";
 
-const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"] as const;
 const IMAGE_UPLOAD_MAX_SIZE = 1600;
 const IMAGE_UPLOAD_QUALITY = 0.82;
+const POSTS_PAGE_LIMIT = 50;
+const COMMENT_PREVIEW_LIMIT = 5;
 
 type Author = {
   id: string;
@@ -30,6 +38,11 @@ type Post = {
   group_id: string;
   user_id: string;
   parent_id: string | null;
+  reply_to_id?: string | null;
+  reply_to?: {
+    id: string;
+    display_name: string;
+  } | null;
   content: string | null;
   attachments: Attachment[];
   created_at: string;
@@ -37,6 +50,7 @@ type Post = {
   author: Author;
   reactions: Record<string, { count: number; hasOwn: boolean }>;
   commentCount: number;
+  commentPreview?: Post[];
   tasks?: TaskSummary[];
 };
 
@@ -54,6 +68,9 @@ type TaskSummary = {
   due_date: string;
   completed_at: string | null;
   completed_by: string | null;
+  canceled_at?: string | null;
+  canceled_by?: string | null;
+  cancel_reason?: string | null;
   assignee?: Author | null;
   requester?: Author | null;
   completedBy?: Author | null;
@@ -62,11 +79,18 @@ type TaskSummary = {
 type GroupMember = Author & {
   groupRole?: string;
   role?: string;
+  department?: UserDepartment;
   isSelf?: boolean;
 };
 
 function isAdminMember(member: GroupMember) {
-  return member.role === "admin" || member.groupRole === "admin";
+  return isManagementRole(getEffectiveUserRole(member)) || member.groupRole === "admin";
+}
+
+function memberPermissionLabel(member: GroupMember) {
+  if (isManagementRole(getEffectiveUserRole(member))) return getUserRoleLabel(member);
+  if (member.groupRole === "admin") return "グループ管理者";
+  return null;
 }
 
 function sortTaskMembers(members: GroupMember[]) {
@@ -79,28 +103,15 @@ function sortTaskMembers(members: GroupMember[]) {
   });
 }
 
-function formatMentionName(name: string) {
-  const trimmed = name.trim();
-  if (!trimmed) return "";
-  return /(さん|様|さま|君|くん|ちゃん)$/.test(trimmed) ? trimmed : `${trimmed}さん`;
+function sortBoardPosts(posts: Post[]) {
+  return [...posts].sort((a, b) => {
+    if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
 }
 
 function Avatar({ user, size = 38 }: { user: Author; size?: number }) {
-  if (user.picture_url) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={user.picture_url} alt={user.display_name} className="avatar" width={size} height={size} />
-    );
-  }
-
-  return (
-    <div
-      className="avatar-placeholder"
-      style={{ width: size, height: size, background: "#3b82f6", fontSize: size * 0.4 }}
-    >
-      {user.display_name?.charAt(0) || "?"}
-    </div>
-  );
+  return <SafeLineAvatar name={user.display_name} pictureUrl={user.picture_url} size={size} />;
 }
 
 function formatDate(dateStr: string) {
@@ -162,6 +173,14 @@ function getAttachmentOpenUrl(attachment: Attachment) {
 function getCompressedImageName(name: string) {
   const baseName = name.replace(/\.[^.]+$/, "");
   return `${baseName || "image"}.jpg`;
+}
+
+function hasDraggedFiles(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.types || []).includes("Files");
+}
+
+function getFirstDroppedFile(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.files || [])[0] || null;
 }
 
 async function loadImageSource(file: File) {
@@ -228,27 +247,39 @@ export default function BoardPage() {
 
   const [groupName, setGroupName] = useState("掲示板");
   const [posts, setPosts] = useState<Post[]>([]);
+  const [readReceipts, setReadReceipts] = useState<ReadReceiptUser[]>([]);
   const [commentsByPost, setCommentsByPost] = useState<Record<string, Post[]>>({});
+  const [expandedCommentsByPost, setExpandedCommentsByPost] = useState<Record<string, boolean>>({});
   const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
   const [commentTextByPost, setCommentTextByPost] = useState<Record<string, string>>({});
   const [commentLoadingByPost, setCommentLoadingByPost] = useState<Record<string, boolean>>({});
   const [commentSubmittingByPost, setCommentSubmittingByPost] = useState<Record<string, boolean>>({});
   const [commentFilesByPost, setCommentFilesByPost] = useState<Record<string, File | null>>({});
   const [commentUploadOriginalByPost, setCommentUploadOriginalByPost] = useState<Record<string, boolean>>({});
+  const [replyTargetByPost, setReplyTargetByPost] = useState<Record<string, Post | null>>({});
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [hasMorePosts, setHasMorePosts] = useState(false);
   const [isPosting, setIsPosting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadOriginal, setUploadOriginal] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
+  const [annotatingImage, setAnnotatingImage] = useState<{ post: Post; attachment: Attachment; attachmentIndex: number } | null>(null);
+  const [annotationSaving, setAnnotationSaving] = useState(false);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editingTaskAssigneeIds, setEditingTaskAssigneeIds] = useState<string[]>([]);
+  const [editingTaskDueDate, setEditingTaskDueDate] = useState("");
   const [notifMuted, setNotifMuted] = useState(false);
   const [notifToggling, setNotifToggling] = useState(false);
   const [postMutedSettings, setPostMutedSettings] = useState<Record<string, boolean>>({});
   const [postNotifToggling, setPostNotifToggling] = useState<Record<string, boolean>>({});
+  const [pinTogglingByPost, setPinTogglingByPost] = useState<Record<string, boolean>>({});
+  const [expandedPinnedPosts, setExpandedPinnedPosts] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [taskEnabled, setTaskEnabled] = useState(false);
   const [taskMembers, setTaskMembers] = useState<GroupMember[]>([]);
@@ -257,6 +288,8 @@ export default function BoardPage() {
   const [taskDueDate, setTaskDueDate] = useState("");
   const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   const [commentMentionPickerPostId, setCommentMentionPickerPostId] = useState<string | null>(null);
+  const [postDropActive, setPostDropActive] = useState(false);
+  const [commentDropActivePostId, setCommentDropActivePostId] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -310,14 +343,62 @@ export default function BoardPage() {
 
   function loadPosts() {
     setLoading(true);
-    fetch(`/api/posts?group_id=${id}`, { headers: getDeviceHeaders() })
+    const params = new URLSearchParams({
+      group_id: id,
+      limit: String(POSTS_PAGE_LIMIT),
+    });
+    fetch(`/api/posts?${params.toString()}`, { headers: getDeviceHeaders() })
       .then((res) => (res.ok ? res.json() : { posts: [], groupName: null }))
       .then((data) => {
-        setPosts(data.posts || []);
+        const loadedPosts = (data.posts || []) as Post[];
+        setPosts(loadedPosts);
+        setReadReceipts(data.readReceipts || []);
+        setCommentsByPost(Object.fromEntries(
+          loadedPosts
+            .filter((post) => Array.isArray(post.commentPreview) && post.commentPreview.length > 0)
+            .map((post) => [post.id, post.commentPreview || []]),
+        ));
+        setExpandedCommentsByPost({});
+        setHasMorePosts(Boolean(data.hasMore));
         if (data.groupName) setGroupName(data.groupName);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  }
+
+  async function loadMorePosts() {
+    if (loadingMorePosts || loading || posts.length === 0 || !hasMorePosts) return;
+
+    const oldestPost = posts[posts.length - 1];
+    if (!oldestPost?.created_at) return;
+
+    setLoadingMorePosts(true);
+    try {
+      const params = new URLSearchParams({
+        group_id: id,
+        limit: String(POSTS_PAGE_LIMIT),
+        before: oldestPost.created_at,
+      });
+      const res = await fetch(`/api/posts?${params.toString()}`, { headers: getDeviceHeaders() });
+      const data = res.ok ? await res.json() : { posts: [], hasMore: false };
+      const nextPosts = (data.posts || []) as Post[];
+      setReadReceipts(data.readReceipts || []);
+      setCommentsByPost((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          nextPosts
+            .filter((post) => Array.isArray(post.commentPreview) && post.commentPreview.length > 0)
+            .map((post) => [post.id, post.commentPreview || []]),
+        ),
+      }));
+      setPosts((current) => {
+        const existingIds = new Set(current.map((post) => post.id));
+        return sortBoardPosts([...current, ...nextPosts.filter((post) => !existingIds.has(post.id))]);
+      });
+      setHasMorePosts(Boolean(data.hasMore));
+    } finally {
+      setLoadingMorePosts(false);
+    }
   }
 
   async function loadGroupMembers() {
@@ -403,7 +484,7 @@ export default function BoardPage() {
       if (textareaRef.current) textareaRef.current.style.height = "38px";
 
       if (data?.post) {
-        setPosts((current) => [data.post, ...current]);
+        setPosts((current) => sortBoardPosts([data.post, ...current]));
       } else {
         loadPosts();
       }
@@ -420,6 +501,7 @@ export default function BoardPage() {
     try {
       const res = await fetch(`/api/posts?group_id=${id}&parent_id=${postId}&limit=100`, { headers: getDeviceHeaders() });
       const data = res.ok ? await res.json() : { posts: [] };
+      setReadReceipts(data.readReceipts || []);
       const comments = (data.posts || [])
         .filter((post: Post) => post.parent_id === postId)
         .sort((a: Post, b: Post) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
@@ -432,6 +514,7 @@ export default function BoardPage() {
 
   function openCommentComposer(postId: string) {
     setActiveCommentPostId(postId);
+    setReplyTargetByPost((current) => ({ ...current, [postId]: null }));
 
     if (!commentsByPost[postId]) {
       loadComments(postId);
@@ -445,10 +528,31 @@ export default function BoardPage() {
     }, 0);
   }
 
+  function openReplyComposer(postId: string, comment: Post) {
+    setActiveCommentPostId(postId);
+    setReplyTargetByPost((current) => ({ ...current, [postId]: comment }));
+
+    if (!commentsByPost[postId]) {
+      void loadComments(postId);
+    }
+
+    window.setTimeout(() => {
+      commentSectionRefs.current[postId]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      window.setTimeout(() => commentInputRefs.current[postId]?.focus(), 80);
+    }, 0);
+  }
+
+  async function showAllComments(postId: string) {
+    if (commentLoadingByPost[postId]) return;
+    await loadComments(postId);
+    setExpandedCommentsByPost((current) => ({ ...current, [postId]: true }));
+  }
+
   async function handleComment(postId: string) {
     const content = (commentTextByPost[postId] || "").trim();
     const selectedCommentFile = commentFilesByPost[postId] || null;
     const uploadOriginalComment = commentUploadOriginalByPost[postId] || false;
+    const replyTarget = replyTargetByPost[postId] || null;
     if (commentSubmittingByPost[postId] || (!content && !selectedCommentFile)) return;
 
     setCommentSubmittingByPost((current) => ({ ...current, [postId]: true }));
@@ -460,7 +564,13 @@ export default function BoardPage() {
       const res = await fetch("/api/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ group_id: id, parent_id: postId, content, attachments }),
+        body: JSON.stringify({
+          group_id: id,
+          parent_id: postId,
+          reply_to_id: replyTarget?.id || null,
+          content,
+          attachments,
+        }),
       });
 
       if (!res.ok) {
@@ -472,6 +582,7 @@ export default function BoardPage() {
       setCommentTextByPost((current) => ({ ...current, [postId]: "" }));
       setCommentFilesByPost((current) => ({ ...current, [postId]: null }));
       setCommentUploadOriginalByPost((current) => ({ ...current, [postId]: false }));
+      setReplyTargetByPost((current) => ({ ...current, [postId]: null }));
       setCommentMentionPickerPostId((current) => (current === postId ? null : current));
       if (commentFileInputRefs.current[postId]) {
         commentFileInputRefs.current[postId]!.value = "";
@@ -589,6 +700,27 @@ export default function BoardPage() {
     }, 0);
   }
 
+  function insertDepartmentMention(department: UserDepartment) {
+    const input = textareaRef.current;
+    const start = input?.selectionStart ?? text.length;
+    const end = input?.selectionEnd ?? text.length;
+    const needsLeadingSpace = start > 0 && !/\s/.test(text.charAt(start - 1));
+    const mention = `${needsLeadingSpace ? " " : ""}@${department} `;
+    const nextText = `${text.slice(0, start)}${mention}${text.slice(end)}`;
+    const cursor = start + mention.length;
+
+    setText(nextText);
+    setMentionPickerOpen(false);
+
+    window.setTimeout(() => {
+      if (!textareaRef.current) return;
+      textareaRef.current.focus();
+      textareaRef.current.setSelectionRange(cursor, cursor);
+      textareaRef.current.style.height = "38px";
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }, 0);
+  }
+
   function insertCommentMention(postId: string, member: GroupMember) {
     const input = commentInputRefs.current[postId];
     const currentText = commentTextByPost[postId] || "";
@@ -611,10 +743,38 @@ export default function BoardPage() {
     }, 0);
   }
 
+  function insertCommentDepartmentMention(postId: string, department: UserDepartment) {
+    const input = commentInputRefs.current[postId];
+    const currentText = commentTextByPost[postId] || "";
+    const start = input?.selectionStart ?? currentText.length;
+    const end = input?.selectionEnd ?? currentText.length;
+    const needsLeadingSpace = start > 0 && !/\s/.test(currentText.charAt(start - 1));
+    const mention = `${needsLeadingSpace ? " " : ""}@${department} `;
+    const nextText = `${currentText.slice(0, start)}${mention}${currentText.slice(end)}`;
+    const cursor = start + mention.length;
+
+    setCommentTextByPost((current) => ({ ...current, [postId]: nextText }));
+    setCommentMentionPickerPostId(null);
+    setActiveCommentPostId(postId);
+
+    window.setTimeout(() => {
+      const target = commentInputRefs.current[postId];
+      if (!target) return;
+      target.focus();
+      target.setSelectionRange(cursor, cursor);
+    }, 0);
+  }
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] || null;
     setSelectedFile(file);
     setUploadOriginal(false);
+  }
+
+  function attachPostFile(file: File | null) {
+    setSelectedFile(file);
+    setUploadOriginal(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function handlePostPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
@@ -622,9 +782,36 @@ export default function BoardPage() {
     if (!file) return;
 
     e.preventDefault();
-    setSelectedFile(file);
-    setUploadOriginal(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    attachPostFile(file);
+  }
+
+  function handlePostDragEnter(e: React.DragEvent<HTMLElement>) {
+    if (isPosting || isUploading || !hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    setPostDropActive(true);
+  }
+
+  function handlePostDragOver(e: React.DragEvent<HTMLElement>) {
+    if (isPosting || isUploading || !hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+
+  function handlePostDragLeave(e: React.DragEvent<HTMLElement>) {
+    const nextTarget = e.relatedTarget as Node | null;
+    if (!nextTarget || !e.currentTarget.contains(nextTarget)) {
+      setPostDropActive(false);
+    }
+  }
+
+  function handlePostDrop(e: React.DragEvent<HTMLElement>) {
+    if (isPosting || isUploading || !hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    const file = getFirstDroppedFile(e.dataTransfer);
+    setPostDropActive(false);
+    if (!file) return;
+    attachPostFile(file);
+    textareaRef.current?.focus();
   }
 
   function handleCommentFileChange(postId: string, file: File | null) {
@@ -632,29 +819,84 @@ export default function BoardPage() {
     setCommentUploadOriginalByPost((current) => ({ ...current, [postId]: false }));
   }
 
-  function handleCommentPaste(postId: string, e: React.ClipboardEvent<HTMLInputElement>) {
+  function handleCommentPaste(postId: string, e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const file = getClipboardImageFile(e.clipboardData);
     if (!file) return;
 
     e.preventDefault();
+    attachCommentFile(postId, file);
+  }
+
+  function attachCommentFile(postId: string, file: File | null) {
     handleCommentFileChange(postId, file);
     if (commentFileInputRefs.current[postId]) {
       commentFileInputRefs.current[postId]!.value = "";
     }
   }
 
+  function handleCommentDragEnter(postId: string, e: React.DragEvent<HTMLElement>) {
+    if (commentSubmittingByPost[postId] || !hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setPostDropActive(false);
+    setCommentDropActivePostId(postId);
+  }
+
+  function handleCommentDragOver(postId: string, e: React.DragEvent<HTMLElement>) {
+    if (commentSubmittingByPost[postId] || !hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleCommentDragLeave(postId: string, e: React.DragEvent<HTMLElement>) {
+    e.stopPropagation();
+    const nextTarget = e.relatedTarget as Node | null;
+    if (!nextTarget || !e.currentTarget.contains(nextTarget)) {
+      setCommentDropActivePostId((current) => (current === postId ? null : current));
+    }
+  }
+
+  function handleCommentDrop(postId: string, e: React.DragEvent<HTMLElement>) {
+    if (commentSubmittingByPost[postId] || !hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const file = getFirstDroppedFile(e.dataTransfer);
+    setPostDropActive(false);
+    setCommentDropActivePostId(null);
+    if (!file) return;
+    attachCommentFile(postId, file);
+    commentInputRefs.current[postId]?.focus();
+  }
+
   function canEditPost(post: Post) {
-    return currentUser?.id === post.user_id;
+    return currentUser?.id === post.user_id || (isManagementRole(currentUser?.role) && Boolean(post.tasks?.length));
   }
 
   function canDeletePost(post: Post) {
-    return currentUser?.id === post.user_id || currentUser?.role === "admin";
+    return currentUser?.id === post.user_id || isManagementRole(currentUser?.role);
+  }
+
+  function canAnnotatePost(post: Post) {
+    return canDeletePost(post);
+  }
+
+  function canPinPost(post: Post) {
+    return isManagementRole(currentUser?.role) && !post.parent_id;
   }
 
   function toggleTaskAssignee(memberId: string) {
     setTaskAssigneeIds((current) => (
       current.includes(memberId)
         ? current.filter((id) => id !== memberId)
+        : [...current, memberId]
+    ));
+  }
+
+  function toggleEditingTaskAssignee(memberId: string) {
+    setEditingTaskAssigneeIds((current) => (
+      current.includes(memberId)
+        ? current.filter((item) => item !== memberId)
         : [...current, memberId]
     ));
   }
@@ -669,37 +911,152 @@ export default function BoardPage() {
   function startEditing(post: Post) {
     setEditingPostId(post.id);
     setEditingText(post.content || "");
+    setEditingTaskAssigneeIds((post.tasks || []).map((task) => task.assignee_id));
+    setEditingTaskDueDate(post.tasks?.[0]?.due_date || "");
+    if (post.tasks?.length) void loadGroupMembers();
   }
 
   async function saveEdit(post: Post) {
-    const res = await fetch("/api/posts", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ post_id: post.id, content: editingText }),
-    });
+    if (savingEdit) return;
 
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
-      alert(data?.error || "投稿の更新に失敗しました");
+    const isTaskEdit = Boolean(post.tasks?.length);
+    if (isTaskEdit && editingTaskAssigneeIds.length === 0) {
+      alert("タスク担当者を選択してください");
+      return;
+    }
+    if (isTaskEdit && !editingTaskDueDate) {
+      alert("タスク期限を選択してください");
       return;
     }
 
-    const data = await res.json();
-    const nextContent = data.post.content;
-    setPosts((current) => current.map((item) => (
-      item.id === post.id ? { ...item, content: nextContent } : item
-    )));
-    setCommentsByPost((current) => {
-      const next = { ...current };
-      for (const postId of Object.keys(next)) {
-        next[postId] = next[postId].map((item) => (
-          item.id === post.id ? { ...item, content: nextContent } : item
-        ));
+    setSavingEdit(true);
+    try {
+      const res = await fetch("/api/posts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          post_id: post.id,
+          content: editingText,
+          task: isTaskEdit ? { assignee_ids: editingTaskAssigneeIds, due_date: editingTaskDueDate } : undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(data?.error || "投稿の更新に失敗しました");
+        return;
       }
-      return next;
-    });
-    setEditingPostId(null);
-    setEditingText("");
+
+      const data = await res.json();
+      const nextContent = data.post.content;
+      const nextTasks = Array.isArray(data.post.tasks) ? data.post.tasks : undefined;
+      setPosts((current) => current.map((item) => (
+        item.id === post.id ? { ...item, content: nextContent, ...(nextTasks ? { tasks: nextTasks } : {}) } : item
+      )));
+      setCommentsByPost((current) => {
+        const next = { ...current };
+        for (const postId of Object.keys(next)) {
+          next[postId] = next[postId].map((item) => (
+            item.id === post.id ? { ...item, content: nextContent } : item
+          ));
+        }
+        return next;
+      });
+      setEditingPostId(null);
+      setEditingText("");
+      setEditingTaskAssigneeIds([]);
+      setEditingTaskDueDate("");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function saveAnnotatedImage(file: File) {
+    if (!annotatingImage || annotationSaving) return;
+
+    const target = annotatingImage;
+    setAnnotationSaving(true);
+    try {
+      const [uploadedAttachment] = await uploadFile(file, true);
+      const nextAttachments = target.post.attachments.map((attachment, index) => (
+        index === target.attachmentIndex ? uploadedAttachment : attachment
+      ));
+
+      const res = await fetch("/api/posts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "attachments",
+          post_id: target.post.id,
+          attachments: nextAttachments,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(data?.error || "画像の保存に失敗しました");
+      }
+
+      const updatedAttachments = Array.isArray(data?.post?.attachments) ? data.post.attachments : nextAttachments;
+      setPosts((current) => current.map((item) => (
+        item.id === target.post.id ? { ...item, attachments: updatedAttachments } : item
+      )));
+      setCommentsByPost((current) => {
+        const next = { ...current };
+        for (const postId of Object.keys(next)) {
+          next[postId] = next[postId].map((item) => (
+            item.id === target.post.id ? { ...item, attachments: updatedAttachments } : item
+          ));
+        }
+        return next;
+      });
+      setAnnotatingImage(null);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "画像の保存に失敗しました");
+    } finally {
+      setAnnotationSaving(false);
+    }
+  }
+
+  async function togglePinPost(post: Post) {
+    if (!canPinPost(post) || pinTogglingByPost[post.id]) return;
+
+    const nextPinned = !post.is_pinned;
+    setPinTogglingByPost((current) => ({ ...current, [post.id]: true }));
+    try {
+      const res = await fetch("/api/posts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "pin",
+          post_id: post.id,
+          is_pinned: nextPinned,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(data?.error || "固定状態の更新に失敗しました");
+        return;
+      }
+
+      setPosts((current) => sortBoardPosts(current.map((item) => (
+        item.id === post.id ? { ...item, is_pinned: nextPinned } : item
+      ))));
+      if (!nextPinned) {
+        setExpandedPinnedPosts((current) => {
+          const next = { ...current };
+          delete next[post.id];
+          return next;
+        });
+      }
+    } finally {
+      setPinTogglingByPost((current) => ({ ...current, [post.id]: false }));
+    }
+  }
+
+  function togglePinnedPostBody(postId: string) {
+    setExpandedPinnedPosts((current) => ({ ...current, [postId]: !current[postId] }));
   }
 
   async function deletePost(post: Post) {
@@ -733,8 +1090,24 @@ export default function BoardPage() {
     });
   }
 
-  function renderPostBody(post: Post) {
+  function renderPinnedExpandButton(post: Post, isExpanded: boolean) {
+    if (!post.is_pinned) return null;
+
+    return (
+      <button
+        type="button"
+        className="post-card__expand-btn"
+        onClick={() => togglePinnedPostBody(post.id)}
+        aria-expanded={isExpanded}
+      >
+        {isExpanded ? "折りたたむ" : "全文を表示"}
+      </button>
+    );
+  }
+
+  function renderPostBody(post: Post, isPinnedExpanded = true) {
     if (editingPostId === post.id) {
+      const isTaskEdit = Boolean(post.tasks?.length);
       return (
         <div className="post-card__edit">
           <textarea
@@ -744,9 +1117,52 @@ export default function BoardPage() {
             rows={3}
             aria-label="投稿を編集"
           />
+          {isTaskEdit && (
+            <div className="task-request-panel task-request-panel--edit">
+              <div className="task-request-panel__row">
+                <label className="task-request-panel__date">
+                  <span>期限</span>
+                  <input
+                    type="date"
+                    value={editingTaskDueDate}
+                    onChange={(event) => setEditingTaskDueDate(event.target.value)}
+                    disabled={savingEdit}
+                  />
+                </label>
+                <span className="task-request-panel__hint">担当者を編集できます</span>
+              </div>
+              <div className="task-request-members" aria-label="タスク担当者を編集">
+                {taskMembersLoading ? (
+                  <span className="task-request-members__empty">メンバーを読み込み中...</span>
+                ) : taskMembers.length === 0 ? (
+                  <span className="task-request-members__empty">選択できるメンバーがいません</span>
+                ) : (
+                  taskMembers.map((member) => {
+                    const selected = editingTaskAssigneeIds.includes(member.id);
+                    const currentTask = (post.tasks || []).find((task) => task.assignee_id === member.id);
+                    return (
+                      <button
+                        key={member.id}
+                        type="button"
+                        className={`task-member-chip${selected ? " task-member-chip--selected" : ""}`}
+                        onClick={() => toggleEditingTaskAssignee(member.id)}
+                        disabled={savingEdit}
+                        aria-pressed={selected}
+                      >
+                        {member.display_name}
+                        {currentTask?.completed_at && <span>完了済</span>}
+                        {memberPermissionLabel(member) && <span>{memberPermissionLabel(member)}</span>}
+                        {member.isSelf && <span>自分</span>}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
           <div className="post-card__edit-actions">
-            <button type="button" className="post-card__edit-btn" onClick={() => saveEdit(post)}>
-              保存
+            <button type="button" className="post-card__edit-btn" onClick={() => saveEdit(post)} disabled={savingEdit}>
+              {savingEdit ? "保存中..." : "保存"}
             </button>
             <button
               type="button"
@@ -754,7 +1170,10 @@ export default function BoardPage() {
               onClick={() => {
                 setEditingPostId(null);
                 setEditingText("");
+                setEditingTaskAssigneeIds([]);
+                setEditingTaskDueDate("");
               }}
+              disabled={savingEdit}
             >
               キャンセル
             </button>
@@ -763,14 +1182,43 @@ export default function BoardPage() {
       );
     }
 
-    if (!post.content) return null;
+    if (!post.content) {
+      if (!post.is_pinned || isPinnedExpanded || !post.attachments?.length) return null;
+
+      return (
+        <>
+          <button
+            type="button"
+            className="post-card__body post-card__body--pinned-collapsed post-card__body--attachment-preview"
+            onClick={() => togglePinnedPostBody(post.id)}
+            aria-expanded="false"
+          >
+            添付ファイル {post.attachments.length}件
+          </button>
+          {renderPinnedExpandButton(post, false)}
+        </>
+      );
+    }
 
     return (
       <>
-        <div className="post-card__body" style={{ whiteSpace: "pre-wrap" }}>
+        <div
+          className={`post-card__body${post.is_pinned && !isPinnedExpanded ? " post-card__body--pinned-collapsed" : ""}`}
+          style={{ whiteSpace: "pre-wrap" }}
+          role={post.is_pinned && !isPinnedExpanded ? "button" : undefined}
+          tabIndex={post.is_pinned && !isPinnedExpanded ? 0 : undefined}
+          aria-expanded={post.is_pinned ? isPinnedExpanded : undefined}
+          onClick={post.is_pinned && !isPinnedExpanded ? () => togglePinnedPostBody(post.id) : undefined}
+          onKeyDown={post.is_pinned && !isPinnedExpanded ? (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            togglePinnedPostBody(post.id);
+          } : undefined}
+        >
           {linkifyText(post.content)}
         </div>
-        <OgpPreviews text={post.content} />
+        {isPinnedExpanded && <OgpPreviews text={post.content} />}
+        {renderPinnedExpandButton(post, isPinnedExpanded)}
       </>
     );
   }
@@ -785,9 +1233,9 @@ export default function BoardPage() {
             const imageUrl = getAttachmentImageUrl(attachment);
 
             return (
-              <button
-                key={`${attachment.name}-${index}`}
-                type="button"
+              <div key={`${attachment.name}-${index}`} className="post-card__image-shell">
+                <button
+                  type="button"
                 className="post-card__image-button"
                 onClick={() => setPreviewImage({ url: imageUrl, name: attachment.name })}
                 aria-label={`${attachment.name}を拡大表示`}
@@ -795,6 +1243,17 @@ export default function BoardPage() {
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={imageUrl} alt={attachment.name} className="post-card__image" />
               </button>
+                {canAnnotatePost(post) && (
+                  <button
+                    type="button"
+                    className="post-card__annotate-btn"
+                    onClick={() => setAnnotatingImage({ post, attachment, attachmentIndex: index })}
+                    aria-label="画像に赤丸・赤枠を追加"
+                  >
+                    赤丸/赤枠
+                  </button>
+                )}
+              </div>
             );
           }
 
@@ -849,15 +1308,28 @@ export default function BoardPage() {
     );
   }
 
-  function renderComment(post: Post) {
+  function renderComment(post: Post, parentPostId: string) {
+    const readers = currentUser?.id === post.user_id
+      ? readReceipts.filter(receipt => new Date(receipt.last_read_at) >= new Date(post.created_at))
+      : [];
+
     return (
-      <article key={post.id} className="post-comment">
+      <article
+        key={post.id}
+        id={`comment-${post.id}`}
+        className={`post-comment${post.reply_to_id ? " post-comment--reply" : ""}`}
+      >
         <Avatar user={post.author} size={28} />
         <div className="post-comment__main">
           <div className="post-comment__meta">
             <span>{post.author.display_name}</span>
             <span>{formatDate(post.created_at)}</span>
           </div>
+          {post.reply_to && (
+            <div className="post-comment__reply-context">
+              {post.reply_to.display_name}さんへの返信
+            </div>
+          )}
           {renderPostBody(post)}
           {renderAttachments(post)}
           <div className="post-comment__reactions" role="group" aria-label="comment reactions">
@@ -881,8 +1353,17 @@ export default function BoardPage() {
               );
             })}
           </div>
-          {(canEditPost(post) || canDeletePost(post)) && (
-            <div className="post-comment__actions">
+          {readers.length > 0 && (
+            <div className="post-comment__read-row">
+              <ReadReceiptAvatars readers={readers} />
+            </div>
+          )}
+          <div className="post-comment__actions">
+            <button type="button" onClick={() => openReplyComposer(parentPostId, post)}>
+              返信
+            </button>
+            {(canEditPost(post) || canDeletePost(post)) && (
+              <>
               {canEditPost(post) && (
                 <button type="button" onClick={() => startEditing(post)}>
                   編集
@@ -893,8 +1374,9 @@ export default function BoardPage() {
                   削除
                 </button>
               )}
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
       </article>
     );
@@ -905,9 +1387,21 @@ export default function BoardPage() {
     const uploadOriginalComment = commentUploadOriginalByPost[post.id] || false;
     const isCommentSubmitting = commentSubmittingByPost[post.id] || false;
     const currentCommentText = commentTextByPost[post.id] || "";
+    const replyTarget = replyTargetByPost[post.id] || null;
 
     return (
-      <>
+      <div
+        className={`comment-composer-drop-zone${commentDropActivePostId === post.id ? " comment-composer-drop-zone--drop-active" : ""}`}
+        onDragEnter={(event) => handleCommentDragEnter(post.id, event)}
+        onDragOver={(event) => handleCommentDragOver(post.id, event)}
+        onDragLeave={(event) => handleCommentDragLeave(post.id, event)}
+        onDrop={(event) => handleCommentDrop(post.id, event)}
+      >
+        {commentDropActivePostId === post.id && (
+          <div className="comment-file-drop-indicator" aria-hidden="true">
+            <span>ファイルをドロップして添付</span>
+          </div>
+        )}
         {commentFile && (
           <div className="comment-selected-file">
             <div className="comment-selected-file__main">
@@ -947,6 +1441,20 @@ export default function BoardPage() {
           </div>
         )}
 
+        {replyTarget && (
+          <div className="comment-reply-target">
+            <span>{replyTarget.author.display_name}さんへ返信</span>
+            <button
+              type="button"
+              onClick={() => setReplyTargetByPost((current) => ({ ...current, [post.id]: null }))}
+              disabled={isCommentSubmitting}
+              aria-label="返信先を解除"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {commentMentionPickerPostId === post.id && (
           <div className="mention-picker mention-picker--comment" role="listbox" aria-label="comment mention candidates">
             {taskMembersLoading ? (
@@ -954,21 +1462,37 @@ export default function BoardPage() {
             ) : taskMembers.length === 0 ? (
               <span className="mention-picker__empty">No mentionable members</span>
             ) : (
-              taskMembers.map((member) => (
-                <button
-                  key={member.id}
-                  type="button"
-                  className="mention-chip"
-                  onClick={() => insertCommentMention(post.id, member)}
-                  disabled={isCommentSubmitting}
-                  role="option"
-                  aria-selected="false"
-                >
-                  <Avatar user={member} size={24} />
-                  <span>{member.display_name}</span>
-                  {isAdminMember(member) && <small>admin</small>}
-                </button>
-              ))
+              <>
+                {USER_DEPARTMENTS.map((department) => (
+                  <button
+                    key={`department-${department}`}
+                    type="button"
+                    className="mention-chip"
+                    onClick={() => insertCommentDepartmentMention(post.id, department)}
+                    disabled={isCommentSubmitting}
+                    role="option"
+                    aria-selected="false"
+                  >
+                    <span>@{department}</span>
+                    <small>部署</small>
+                  </button>
+                ))}
+                {taskMembers.map((member) => (
+                  <button
+                    key={member.id}
+                    type="button"
+                    className="mention-chip"
+                    onClick={() => insertCommentMention(post.id, member)}
+                    disabled={isCommentSubmitting}
+                    role="option"
+                    aria-selected="false"
+                  >
+                    <Avatar user={member} size={24} />
+                    <span>{mentionDisplayName(member.display_name)}</span>
+                    {isAdminMember(member) && <small>admin</small>}
+                  </button>
+                ))}
+              </>
             )}
           </div>
         )}
@@ -1030,7 +1554,7 @@ export default function BoardPage() {
             {isCommentSubmitting ? "..." : "送信"}
           </button>
         </form>
-      </>
+      </div>
     );
   }
 
@@ -1038,9 +1562,21 @@ export default function BoardPage() {
     const comments = commentsByPost[post.id] || [];
     const isComposerActive = activeCommentPostId === post.id;
     const isCommentLoading = commentLoadingByPost[post.id] || false;
+    const commentsExpanded = expandedCommentsByPost[post.id] === true;
+    const visibleComments = commentsExpanded ? comments : comments.slice(-COMMENT_PREVIEW_LIMIT);
+    const hiddenCommentCount = Math.max(0, post.commentCount - visibleComments.length);
+    const showCommentsSection = post.commentCount > 0 || isComposerActive;
+    const isPinnedExpanded = !post.is_pinned || expandedPinnedPosts[post.id] === true;
+    const readers = currentUser?.id === post.user_id
+      ? readReceipts.filter(receipt => new Date(receipt.last_read_at) >= new Date(post.created_at))
+      : [];
 
     return (
-      <article key={post.id} id={`post-${post.id}`} className={`post-card${post.tasks?.length ? " post-card--task" : ""}`}>
+      <article
+        key={post.id}
+        id={`post-${post.id}`}
+        className={`post-card${post.tasks?.length ? " post-card--task" : ""}${post.is_pinned ? " post-card--pinned" : ""}${post.is_pinned && !isPinnedExpanded ? " post-card--pinned-collapsed" : ""}`}
+      >
         {post.is_pinned && (
           <div className="post-card__pinned">
             📌 ピン留め
@@ -1066,6 +1602,16 @@ export default function BoardPage() {
             >
               {postMutedSettings[post.id] ? "🔕" : "🔔"}
             </button>
+            {canPinPost(post) && (
+              <button
+                type="button"
+                className="post-card__action-btn"
+                onClick={() => togglePinPost(post)}
+                disabled={pinTogglingByPost[post.id]}
+              >
+                {post.is_pinned ? "固定解除" : "固定"}
+              </button>
+            )}
             {canEditPost(post) && (
               <button type="button" className="post-card__action-btn" onClick={() => startEditing(post)}>
                 編集
@@ -1084,8 +1630,8 @@ export default function BoardPage() {
         </header>
 
         {renderTaskSummary(post)}
-        {renderPostBody(post)}
-        {renderAttachments(post)}
+        {renderPostBody(post, isPinnedExpanded)}
+        {isPinnedExpanded && renderAttachments(post)}
 
         <div className="post-card__reactions" role="group" aria-label="リアクション">
           {REACTION_EMOJIS.map((emoji) => {
@@ -1109,41 +1655,65 @@ export default function BoardPage() {
           })}
         </div>
 
-        <details
-          className="post-comments-details"
-          open={isComposerActive}
-          onToggle={(event) => {
-            if (event.currentTarget.open) {
-              openCommentComposer(post.id);
-            }
-          }}
-        >
-          <summary className="post-card__footer post-comments-summary-inline">
+        {readers.length > 0 && (
+          <div className="post-card__read-row">
+            <ReadReceiptAvatars readers={readers} />
+          </div>
+        )}
+
+        <div className="post-comments-details">
+          <div className="post-card__footer post-comments-summary-inline">
             <span className="post-card__footer-btn">
               💬 {post.commentCount}件のコメント
             </span>
-            <span className="post-card__footer-btn">
+            <button type="button" className="post-card__footer-btn" onClick={() => openCommentComposer(post.id)}>
               コメントする
-            </span>
-          </summary>
-          <section
-            className="post-comments"
-            aria-label="コメント"
-            ref={(element) => {
-              commentSectionRefs.current[post.id] = element;
-            }}
-          >
-            {isCommentLoading ? (
-              <p className="post-comments__empty">コメントを読み込み中...</p>
-            ) : comments.length > 0 ? (
-              comments.map(renderComment)
-            ) : (
-              <p className="post-comments__empty">まだコメントはありません。</p>
-            )}
-            {renderCommentComposer(post)}
-          </section>
-        </details>
+            </button>
+          </div>
+          {showCommentsSection && (
+            <section
+              className="post-comments"
+              aria-label="コメント"
+              ref={(element) => {
+                commentSectionRefs.current[post.id] = element;
+              }}
+            >
+              {visibleComments.map((comment) => renderComment(comment, post.id))}
+              {!commentsExpanded && post.commentCount > COMMENT_PREVIEW_LIMIT && (
+                <button
+                  type="button"
+                  className="post-comments__more"
+                  onClick={() => void showAllComments(post.id)}
+                  disabled={isCommentLoading}
+                >
+                  {isCommentLoading ? "コメントを読み込み中..." : `さらに${hiddenCommentCount}件のコメントを表示`}
+                </button>
+              )}
+              {post.commentCount > 0 && visibleComments.length === 0 && (
+                <p className="post-comments__empty">コメントを読み込み中...</p>
+              )}
+              {isComposerActive && renderCommentComposer(post)}
+            </section>
+          )}
+        </div>
       </article>
+    );
+  }
+
+  function renderLoadMorePosts() {
+    if (!hasMorePosts) return null;
+
+    return (
+      <div className="post-list__load-more">
+        <button
+          type="button"
+          className="post-load-more-btn"
+          onClick={loadMorePosts}
+          disabled={loadingMorePosts}
+        >
+          {loadingMorePosts ? "読み込み中..." : "過去投稿を読み込む"}
+        </button>
+      </div>
     );
   }
 
@@ -1186,7 +1756,18 @@ export default function BoardPage() {
   }
 
   return (
-    <>
+    <div
+      className={`board-page${postDropActive ? " board-page--drop-active" : ""}`}
+      onDragEnter={handlePostDragEnter}
+      onDragOver={handlePostDragOver}
+      onDragLeave={handlePostDragLeave}
+      onDrop={handlePostDrop}
+    >
+      {postDropActive && (
+        <div className="page-file-drop-indicator" aria-hidden="true">
+          <span>ファイルをドロップして添付</span>
+        </div>
+      )}
       <header className="top-header" role="banner">
         <button
           type="button"
@@ -1209,7 +1790,7 @@ export default function BoardPage() {
         </button>
       </header>
 
-      <div className="thread-search" role="search">
+      <div className="thread-search thread-search--board" role="search">
         <input
           type="search"
           value={searchQuery}
@@ -1230,13 +1811,20 @@ export default function BoardPage() {
         ) : posts.length === 0 ? (
           <p className="post-list__state">投稿がありません。最初の投稿をしてみましょう。</p>
         ) : filteredPosts.length === 0 ? (
-          <p className="post-list__state">検索条件に一致する投稿はありません。</p>
+          <>
+            <p className="post-list__state">検索条件に一致する投稿はありません。</p>
+            {renderLoadMorePosts()}
+          </>
         ) : (
-          filteredPosts.map(renderPost)
+          <>
+            {filteredPosts.map(renderPost)}
+            {renderLoadMorePosts()}
+          </>
         )}
       </section>
 
-      <div className="post-input-bar post-input-bar--stacked">
+      <footer className="board-footer">
+        <div className="post-input-bar post-input-bar--stacked">
         {selectedFile && (
           <div className="selected-file">
             <div className="selected-file__main">
@@ -1303,7 +1891,7 @@ export default function BoardPage() {
                       aria-pressed={selected}
                     >
                       {member.display_name}
-                      {isAdminMember(member) && <span>管理者</span>}
+                      {memberPermissionLabel(member) && <span>{memberPermissionLabel(member)}</span>}
                       {member.isSelf && <span>自分</span>}
                     </button>
                   );
@@ -1320,7 +1908,22 @@ export default function BoardPage() {
             ) : taskMembers.length === 0 ? (
               <span className="mention-picker__empty">メンションできるメンバーがいません</span>
             ) : (
-              taskMembers.map((member) => (
+              <>
+                {USER_DEPARTMENTS.map((department) => (
+                  <button
+                    key={`department-${department}`}
+                    type="button"
+                    className="mention-chip"
+                    onClick={() => insertDepartmentMention(department)}
+                    disabled={isPosting || isUploading}
+                    role="option"
+                    aria-selected="false"
+                  >
+                    <span>@{department}</span>
+                    <small>部署</small>
+                  </button>
+                ))}
+                {taskMembers.map((member) => (
                 <button
                   key={member.id}
                   type="button"
@@ -1331,10 +1934,11 @@ export default function BoardPage() {
                   aria-selected="false"
                 >
                   <Avatar user={member} size={24} />
-                  <span>{member.display_name}</span>
-                  {isAdminMember(member) && <small>管理者</small>}
+                  <span>{mentionDisplayName(member.display_name)}</span>
+                  {memberPermissionLabel(member) && <small>{memberPermissionLabel(member)}</small>}
                 </button>
-              ))
+                ))}
+              </>
             )}
           </div>
         )}
@@ -1389,7 +1993,20 @@ export default function BoardPage() {
             {isPosting || isUploading ? "..." : "↑"}
           </button>
         </form>
-      </div>
+        </div>
+      </footer>
+
+      {annotatingImage && (
+        <ImageAnnotationEditor
+          imageUrl={getAttachmentImageUrl(annotatingImage.attachment)}
+          imageName={annotatingImage.attachment.name || "image"}
+          saving={annotationSaving}
+          onCancel={() => {
+            if (!annotationSaving) setAnnotatingImage(null);
+          }}
+          onSave={saveAnnotatedImage}
+        />
+      )}
 
       {previewImage && (
         <div
@@ -1416,6 +2033,6 @@ export default function BoardPage() {
           />
         </div>
       )}
-    </>
+    </div>
   );
 }

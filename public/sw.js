@@ -5,8 +5,8 @@ self.addEventListener('push', (event) => {
     const data = event.data.json()
     const options = {
       body: data.body || '',
-      icon: data.icon || '/icon-192.png',
-      badge: data.badge || '/icon-192.png',
+      icon: data.icon || '/icon-192.png?v=20260618-tsg',
+      badge: data.badge || '/icon-192.png?v=20260618-tsg',
       vibrate: [100, 50, 100],
       tag: data.tag || 'ts-groupware-notification',
       renotify: true,
@@ -33,25 +33,54 @@ self.addEventListener('push', (event) => {
   }
 })
 
+function getNotificationTargetUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl || '/', self.location.origin)
+    if (url.origin !== self.location.origin) return `${self.location.origin}/groups`
+    return url.href
+  } catch {
+    return `${self.location.origin}/groups`
+  }
+}
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
 
-  const urlToOpen = event.notification.data?.url || '/'
+  const targetUrl = getNotificationTargetUrl(event.notification.data?.url)
 
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      for (const client of windowClients) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          client.navigate(urlToOpen)
-          return client.focus()
-        }
-      }
-
-      if (clients.openWindow) {
-        return clients.openWindow(urlToOpen)
+  event.waitUntil((async () => {
+    const target = new URL(targetUrl)
+    const windowClients = await clients.matchAll({ type: 'window', includeUncontrolled: true })
+    const sameOriginClients = windowClients.filter((client) => {
+      try {
+        return new URL(client.url).origin === self.location.origin && 'focus' in client
+      } catch {
+        return false
       }
     })
-  )
+
+    const exactClient = sameOriginClients.find((client) => {
+      const url = new URL(client.url)
+      return url.pathname === target.pathname && url.search === target.search
+    })
+    const reusableClient = exactClient || sameOriginClients.find((client) => {
+      const url = new URL(client.url)
+      return url.pathname !== '/login'
+    })
+
+    if (reusableClient) {
+      try {
+        await reusableClient.navigate(targetUrl)
+      } catch (err) {
+        console.error('[SW] Notification navigation error', err)
+      }
+      return reusableClient.focus()
+    }
+
+    if (clients.openWindow) {
+      return clients.openWindow(targetUrl)
+    }
+  })())
 })
 
 self.addEventListener('install', () => {

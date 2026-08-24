@@ -1,0 +1,2 @@
+-- Canonical copy: supabase/migrations/202608130001_correct_aoi_identity_mapping.sql
+-- Apply the migration file above. This pointer keeps the numbered SQL index in sync.

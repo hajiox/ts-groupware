@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TSG 勤怠タイムレコーダー運用マニュアル</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;color:#111827;background:#f8fafc;margin:0;line-height:1.75}
+    main{max-width:920px;margin:0 auto;padding:32px 24px;background:#fff}
+    h1{font-size:32px;line-height:1.25;margin:8px 0 12px} h2{font-size:22px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:34px}
+    .cover{border:1px solid #cbd5e1;border-radius:8px;padding:24px;background:#eff6ff}.label{font-weight:800;color:#2563eb}
+    dl{display:grid;grid-template-columns:120px 1fr;gap:6px 16px;margin-top:18px}dt{font-weight:800;color:#475569}dd{margin:0}
+    .note{border-left:4px solid #2563eb;background:#eff6ff;padding:10px 12px;color:#1e3a8a}
+    .screens{display:grid;grid-template-columns:1fr 1fr;gap:16px}.screens figure{margin:0;border:1px solid #cbd5e1;border-radius:8px;padding:10px;break-inside:avoid}.screens img{width:100%;height:auto;border-radius:6px;border:1px solid #e2e8f0}.screens figcaption strong,.screens figcaption span{display:block}.screens figcaption span{color:#475569;font-size:13px}
+    table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #cbd5e1;padding:8px 10px;text-align:left;vertical-align:top}th{background:#e0f2fe}
+    @page{size:A4;margin:14mm}
+    @media print{body{background:#fff}main{max-width:none;padding:0}.cover{background:#fff}.screens{grid-template-columns:1fr 1fr}h2{break-after:avoid}figure,table,.note{break-inside:avoid}}
+  </style>
+</head>
+<body>
+<main>
+  <section class="cover">
+    <div class="label">TS Groupware</div>
+    <h1>勤怠タイムレコーダー運用マニュアル</h1>
+    <p>本社・道の駅の専用端末で、スタッフ本人が自分の名前を押して出勤・退勤を記録するための運用手順です。</p>
+    <dl>
+      <dt>対象</dt><dd>本社・道の駅タイムレコーダー端末、TSG管理者、給与確認担当</dd>
+      <dt>方式</dt><dd>専用端末 / PINなし / 名前選択 / 管理者修正ログあり</dd>
+      <dt>更新日</dt><dd>2026年6月9日</dd>
+    </dl>
+  </section>
+  <h2>1. 基本方針</h2>
+  <ul><li>打刻は原則として、本社・道の駅に設置した専用端末で行います。</li><li>スタッフは自分の名前を押し、確認画面で出勤または退勤を押します。</li><li>PIN入力は行いません。誤打刻は削除せず、管理者が無効化して履歴を残します。</li><li>給与閲覧・給与計算に進める権限は、佐藤正彦さん・佐藤ちさとさんの2名に限定します。</li></ul>
+  <h2>2. 専用端末の準備</h2>
+  <ol><li>TSGに管理者でログインします。</li><li>下メニューの「管理」を開きます。</li><li>「勤怠」タブを開きます。</li><li>本社または道の駅の「端末URL」をコピーします。</li><li>設置する端末のブラウザでURLを開き、ホーム画面またはブックマークに登録します。</li></ol>
+  <p class="note">端末URLには端末キーが含まれます。通常スタッフに共有する必要はなく、設置端末だけで使います。</p>
+  <h2>3. 出勤・退勤の手順</h2>
+  <ol><li>専用端末でタイムレコーダー画面を開きます。</li><li>自分の名前ボタンを押します。</li><li>表示された名前が自分であることを確認します。</li><li>出勤時は「出勤」、退勤時は「退勤」を押します。</li><li>完了メッセージが表示されたら打刻完了です。数秒後に名前一覧へ戻ります。</li></ol>
+  <p class="note">システムは直前の打刻から次に押すべきボタンを自動判定します。出勤済みの人には退勤、未出勤の人には出勤が表示されます。</p>
+  <h2>4. 画面イメージ</h2>
+  <div class="screens">
+    <figure><img src="../public/manual/screenshots/time-clock-staff-list.png" alt="タイムレコーダー 名前一覧"><figcaption><strong>名前一覧</strong><span>スタッフ名が部署ごとにスクエアボタンで表示されます。</span></figcaption></figure>
+    <figure><img src="../public/manual/screenshots/time-clock-confirm.png" alt="タイムレコーダー 出勤退勤確認"><figcaption><strong>出勤/退勤確認</strong><span>名前を押すと、次に必要な打刻だけを大きく表示します。</span></figcaption></figure>
+  </div>
+  <h2>5. 管理者の確認・修正</h2>
+  <ol><li>TSGの「管理」を開きます。</li><li>「勤怠」タブを開きます。</li><li>日付を選び、当日の打刻ログを確認します。</li><li>誤打刻がある場合は「無効化」を押し、理由を入力します。</li><li>不足している打刻がある場合は、スタッフ・出勤/退勤・時刻・端末・メモを入力して追加します。</li></ol>
+  <p class="note">打刻ログは監査用に残します。誤打刻は物理削除ではなく無効化で処理します。</p>
+  <h2>6. 権限</h2>
+  <table><thead><tr><th>機能</th><th>利用できる人</th></tr></thead><tbody><tr><td>ユーザー管理</td><td>TSG管理者</td></tr><tr><td>グループ管理</td><td>TSG管理者</td></tr><tr><td>勤怠確認・打刻修正</td><td>TSG管理者</td></tr><tr><td>給与閲覧・給与計算</td><td>佐藤正彦さん、佐藤ちさとさん</td></tr></tbody></table>
+  <h2>7. 日次運用チェック</h2>
+  <ul><li>朝: 専用端末がタイムレコーダー画面を表示しているか確認します。</li><li>昼: 端末がスリープやログアウトで止まっていないか確認します。</li><li>終業後: 管理画面の勤怠タブで未退勤・不自然な打刻を確認します。</li><li>月末: 管理者が誤打刻を修正し、給与担当が集計に進みます。</li></ul>
+  <h2>8. トラブル対応</h2>
+  <table><thead><tr><th>状況</th><th>対応</th></tr></thead><tbody><tr><td>名前が表示されない</td><td>管理のユーザーで承認済みになっているか確認します。</td></tr><tr><td>間違えて他人の名前で押した</td><td>管理者が該当打刻を無効化し、正しい打刻を手動追加します。</td></tr><tr><td>端末が動かない</td><td>ブラウザ更新、端末再起動、別端末で端末URLを開く順に確認します。</td></tr><tr><td>退勤ではなく出勤が出る</td><td>前回の出勤打刻が無効化されている、または打刻漏れの可能性があります。管理画面でログを確認します。</td></tr></tbody></table>
+</main>
+</body>
+</html>

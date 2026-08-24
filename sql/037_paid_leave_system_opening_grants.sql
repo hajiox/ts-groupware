@@ -1,0 +1,2 @@
+-- Canonical copy: supabase/migrations/202607260004_paid_leave_system_opening_grants.sql
+-- Apply the migration file above. This pointer keeps the numbered SQL index in sync.

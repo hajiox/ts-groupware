@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
+import { isManagementRole } from '@/lib/user-roles'
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getUserSession()
@@ -29,19 +30,15 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     .eq('group_id', groupId)
 
   const memberIds = [...new Set((memberships || []).map(member => member.user_id))]
-  const hasAccess = user.role === 'admin' || memberIds.includes(user.id)
+  const hasAccess = memberIds.includes(user.id)
   if (!hasAccess) {
     return NextResponse.json({ error: 'アクセス権がありません' }, { status: 403 })
-  }
-
-  if (user.role === 'admin' && !memberIds.includes(user.id)) {
-    memberIds.push(user.id)
   }
 
   const { data: users } = memberIds.length > 0
     ? await adminClient
       .from('gw_users')
-      .select('id, display_name, real_name, picture_url, role, status')
+      .select('id, display_name, real_name, picture_url, role, department, status')
       .in('id', memberIds)
       .eq('status', 'approved')
     : { data: [] }
@@ -53,12 +50,13 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       display_name: member.real_name || member.display_name,
       picture_url: member.picture_url || null,
       role: member.role || 'member',
-      groupRole: roleMap.get(member.id) || (member.id === user.id && user.role === 'admin' ? 'admin' : 'member'),
+      department: member.department || '製造',
+      groupRole: roleMap.get(member.id) || 'member',
       isSelf: member.id === user.id,
     }))
     .sort((a, b) => {
-      const aIsAdmin = a.role === 'admin' || a.groupRole === 'admin'
-      const bIsAdmin = b.role === 'admin' || b.groupRole === 'admin'
+      const aIsAdmin = isManagementRole(a.role) || a.groupRole === 'admin'
+      const bIsAdmin = isManagementRole(b.role) || b.groupRole === 'admin'
       if (aIsAdmin !== bIsAdmin) return aIsAdmin ? -1 : 1
       if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1
       return a.display_name.localeCompare(b.display_name, 'ja')

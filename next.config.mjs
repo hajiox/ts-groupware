@@ -6,6 +6,9 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  outputFileTracingIncludes: {
+    "/api/pledges": ["./assets/fonts/NotoSansJP-Regular.ttf"],
+  },
 }
 
 export default nextConfig

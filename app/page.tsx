@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { isSessionExpired, parseSessionCookieValue, SESSION_COOKIE_NAME } from "@/lib/session-cookie";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://v0-line-blush.vercel.app";
 const lineLoginUrl = `${siteUrl}/api/auth/line`;
@@ -14,8 +15,8 @@ const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=1
 export default async function RootPage() {
   // セッションCookie確認 → ログイン済みなら直接グループ一覧へ
   const cookieStore = await cookies();
-  const session = cookieStore.get("gw_user_session");
-  if (session?.value) {
+  const session = parseSessionCookieValue(cookieStore.get(SESSION_COOKIE_NAME)?.value);
+  if (session && !isSessionExpired(session)) {
     redirect("/groups");
   }
 
@@ -60,4 +61,3 @@ export default async function RootPage() {
     </main>
   );
 }
-

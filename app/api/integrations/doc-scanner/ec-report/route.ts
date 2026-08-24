@@ -90,6 +90,38 @@ async function getExistingPost(groupId: string, userId: string, content: string)
   return ((data || []) as PostRow[])[0] || null
 }
 
+function isZeroEcReportContent(content: string) {
+  if (!content.includes('EC速報')) return false
+
+  return (
+    /合計件数\s*\/\s*0件/.test(content) ||
+    /本日件数\s*\/\s*0件/.test(content)
+  )
+}
+
+async function getZeroEcReportPosts(groupId: string, userId: string, limit: number) {
+  const { data, error } = await adminClient
+    .from('gw_posts')
+    .select('id, group_id, user_id, content, created_at')
+    .eq('group_id', groupId)
+    .eq('user_id', userId)
+    .is('parent_id', null)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) throw new Error(error.message)
+
+  return ((data || []) as PostRow[])
+    .filter(post => isZeroEcReportContent(String(post.content || '')))
+    .map(post => ({
+      id: post.id,
+      group_id: post.group_id,
+      user_id: post.user_id,
+      content: post.content,
+      created_at: post.created_at,
+    }))
+}
+
 export async function GET(request: NextRequest) {
   const authError = assertIntegrationSecret(request)
   if (authError) return authError
@@ -100,6 +132,27 @@ export async function GET(request: NextRequest) {
 
     if (!tsgUserId) {
       return NextResponse.json({ error: 'TSG君 user was not found' }, { status: 500 })
+    }
+
+    if (request.nextUrl.searchParams.get('action') === 'zero-posts') {
+      const limit = Math.min(Math.max(parseInt(request.nextUrl.searchParams.get('limit') || '200', 10) || 200, 1), 500)
+      const posts = await getZeroEcReportPosts(group.id, tsgUserId, limit)
+
+      return NextResponse.json({
+        group: {
+          id: group.id,
+          name: group.name,
+        },
+        poster: {
+          id: tsgUserId,
+          displayName: 'TSG君',
+        },
+        posts: posts.map(post => ({
+          id: post.id,
+          created_at: post.created_at,
+          content: post.content,
+        })),
+      })
     }
 
     return NextResponse.json({

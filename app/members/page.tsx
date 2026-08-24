@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { HomeCompanyMessages } from "@/components/home-company-messages";
+import { SafeLineAvatar } from "@/components/safe-line-avatar";
 import { getDeviceHeaders } from "@/lib/device-id";
 
 type Member = {
@@ -13,25 +16,8 @@ type Member = {
   lastMessageAt?: string | null;
 };
 
-function AvatarPlaceholder({
-  initials,
-  size = 38,
-}: {
-  initials: string;
-  size?: number;
-}) {
-  return (
-    <div
-      className="avatar-placeholder"
-      style={{ width: size, height: size, fontSize: size * 0.42 }}
-      aria-hidden="true"
-    >
-      {initials}
-    </div>
-  );
-}
-
 export default function MembersPage() {
+  const router = useRouter();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingChatUserId, setCreatingChatUserId] = useState("");
@@ -85,7 +71,7 @@ export default function MembersPage() {
     const data = await res.json().catch(() => ({}));
 
     if (res.ok && data.group?.id) {
-      window.location.href = `/chat/${data.group.id}`;
+      router.push(`/chat/${data.group.id}`);
       return;
     }
 
@@ -101,6 +87,8 @@ export default function MembersPage() {
       </header>
 
       <section className="members-page page-content" aria-label="メンバー一覧">
+        <HomeCompanyMessages mode="composer" />
+        <HomeCompanyMessages mode="history" />
         <div className="chat-privacy-banner">
           <span className="chat-privacy-banner__icon" aria-hidden="true">🔒</span>
           <span>個人チャットは安全に保護されています。通信はすべて暗号化され、会話内容が第三者に共有されることはありません。</span>
@@ -125,12 +113,7 @@ export default function MembersPage() {
                   title={member.isSelf ? "自分用メモを開く" : `${member.display_name} とChat`}
                 >
                   <span className="member-directory__avatar-wrap">
-                    {member.picture_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={member.picture_url} alt="" className="avatar" width={38} height={38} />
-                    ) : (
-                      <AvatarPlaceholder initials={member.display_name.charAt(0)} />
-                    )}
+                    <SafeLineAvatar name={member.display_name} pictureUrl={member.picture_url} size={38} alt="" />
                     {unread > 0 && (
                       <span className="member-directory__unread" aria-label={`未読${unread}件`}>
                         {unread > 99 ? "99+" : unread}

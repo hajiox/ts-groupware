@@ -1,4 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  createSessionCookieValue,
+  getSessionCookieOptions,
+  isSessionExpired,
+  parseSessionCookieValue,
+  SESSION_COOKIE_NAME,
+} from '@/lib/session-cookie'
 
 /**
  * Proxy: 認証チェック
@@ -9,15 +16,29 @@ import { NextRequest, NextResponse } from 'next/server'
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
+  const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim()
+  if (process.env.VERCEL_ENV === 'production' && configuredSiteUrl) {
+    const canonicalOrigin = new URL(configuredSiteUrl).origin
+    const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+    const requestHost = forwardedHost || request.headers.get('host') || request.nextUrl.host
+    if (requestHost !== new URL(canonicalOrigin).host) {
+      const canonicalUrl = new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, canonicalOrigin)
+      return NextResponse.redirect(canonicalUrl, 308)
+    }
+  }
+
   // 認証不要なパス
   const publicPaths = [
     '/login',
     '/api/auth',
+    '/api/time-clock',
     '/api/integrations/tsa',
     '/api/integrations/doc-scanner',
+    '/time-clock',
     '/_next',
     '/favicon.ico',
     '/manifest.json',
+    '/manual',
     '/sw.js',
     '/icon',
     '/apple-icon',
@@ -29,13 +50,26 @@ export function proxy(request: NextRequest) {
   }
 
   // セッション Cookie の存在チェック
-  const session = request.cookies.get('gw_user_session')
-  if (!session?.value) {
+  const session = request.cookies.get(SESSION_COOKIE_NAME)
+  const parsedSession = parseSessionCookieValue(session?.value)
+  if (!parsedSession || isSessionExpired(parsedSession)) {
     const loginUrl = new URL('/login', request.url)
-    return NextResponse.redirect(loginUrl)
+    const nextPath = `${request.nextUrl.pathname}${request.nextUrl.search}`
+    if (nextPath !== '/login') {
+      loginUrl.searchParams.set('next', nextPath)
+    }
+    const response = NextResponse.redirect(loginUrl)
+    response.cookies.delete(SESSION_COOKIE_NAME)
+    return response
   }
 
-  return NextResponse.next()
+  const response = NextResponse.next()
+  response.cookies.set(
+    SESSION_COOKIE_NAME,
+    createSessionCookieValue(parsedSession.userId),
+    getSessionCookieOptions(),
+  )
+  return response
 }
 
 export const config = {

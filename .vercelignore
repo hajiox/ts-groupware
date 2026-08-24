@@ -1,0 +1,6 @@
+.codex-tmp/
+tmp/
+backups/
+.env*
+*.log
+*.tsbuildinfo

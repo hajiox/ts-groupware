@@ -3,6 +3,8 @@ import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
 import { markGroupRead } from '@/lib/read-status'
 import { deleteFileFromDrive } from '@/lib/drive'
+import { normalizeMentionContent } from '@/lib/mention-names'
+import { isManagementRole } from '@/lib/user-roles'
 
 type Attachment = {
   url?: string
@@ -13,7 +15,14 @@ type Attachment = {
   webViewLink?: string
 }
 
-async function getChatAccess(groupId: string, userId: string, userRole: string) {
+function getDirectChatUserIds(description?: string | null) {
+  if (!description?.startsWith('direct:')) return []
+
+  const [, userIdA, userIdB] = description.split(':')
+  return [...new Set([userIdA, userIdB].filter((id): id is string => Boolean(id)))]
+}
+
+async function getChatAccess(groupId: string, userId: string) {
   const [{ data: group }, { data: membership }] = await Promise.all([
     adminClient
       .from('gw_groups')
@@ -33,11 +42,39 @@ async function getChatAccess(groupId: string, userId: string, userRole: string) 
   }
 
   const isDirectChat = typeof group.description === 'string' && group.description.startsWith('direct:')
-  if (!membership && (userRole !== 'admin' || isDirectChat)) {
+  let effectiveMembership = membership
+
+  if (isDirectChat) {
+    const directUserIds = getDirectChatUserIds(group.description)
+    const isDirectMember = directUserIds.includes(userId)
+
+    if (isDirectMember) {
+      const { error: repairError } = await adminClient
+        .from('gw_group_members')
+        .upsert(
+          directUserIds.map(directUserId => ({
+            group_id: group.id,
+            user_id: directUserId,
+            role: 'member',
+          })),
+          { onConflict: 'group_id,user_id' },
+        )
+
+      if (repairError) {
+        return { group: null, membership: null, error: repairError.message, status: 500 }
+      }
+
+      if (!effectiveMembership) {
+        effectiveMembership = { role: 'member' }
+      }
+    }
+  }
+
+  if (!effectiveMembership) {
     return { group: null, membership: null, error: 'このチャットに参加していません', status: 403 }
   }
 
-  return { group, membership: membership || { role: 'admin' }, error: null, status: 0 }
+  return { group, membership: effectiveMembership, error: null, status: 0 }
 }
 
 function normalizeAttachments(value: unknown): Attachment[] {
@@ -88,7 +125,7 @@ function getAttachmentDriveIds(attachments?: Attachment[] | null) {
 }
 
 function canManageMessage(messageUserId: string, userId: string, userRole: string, groupRole?: string | null) {
-  return messageUserId === userId || userRole === 'admin' || groupRole === 'admin'
+  return messageUserId === userId || isManagementRole(userRole) || groupRole === 'admin'
 }
 
 export async function GET(request: NextRequest) {
@@ -102,7 +139,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'group_id が必要です' }, { status: 400 })
   }
 
-  const access = await getChatAccess(groupId, user.id, user.role)
+  const access = await getChatAccess(groupId, user.id)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -141,6 +178,7 @@ export async function GET(request: NextRequest) {
   const userIds = [...new Set([
     ...messages.map(message => message.user_id),
     ...(memberRows || []).map(member => member.user_id),
+    ...(readRows || []).map(receipt => receipt.user_id),
   ])]
 
   const messageIds = messages.map(message => message.id)
@@ -148,7 +186,7 @@ export async function GET(request: NextRequest) {
     userIds.length > 0
       ? adminClient
         .from('gw_users')
-        .select('id, display_name, real_name, picture_url, role')
+        .select('id, display_name, real_name, picture_url, role, department')
         .in('id', userIds)
       : Promise.resolve({ data: [] }),
     messageIds.length > 0
@@ -172,6 +210,7 @@ export async function GET(request: NextRequest) {
         display_name: memberUser.display_name,
         picture_url: memberUser.picture_url,
         role: memberUser.role,
+        department: memberUser.department || '製造',
         group_role: member.role,
       }
     })
@@ -190,13 +229,20 @@ export async function GET(request: NextRequest) {
   // 既読情報: 自分以外のメンバーのlast_read_atを返す
   const readReceipts = (readRows || [])
     .filter(r => r.user_id !== user.id)
-    .map(r => ({
-      user_id: r.user_id,
-      last_read_at: r.last_read_at,
-    }))
+    .map(r => {
+      const reader = userMap[r.user_id]
+      return {
+        user_id: r.user_id,
+        last_read_at: r.last_read_at,
+        display_name: reader?.display_name || 'メンバー',
+        picture_url: reader?.picture_url || null,
+      }
+    })
 
   markGroupRead(user.id, groupId)
-    .then(undefined, e => console.error('[Chat read status update error]', e))
+    .then(result => {
+      if (result.error) console.error('[Chat read status update error]', result.error)
+    }, e => console.error('[Chat read status update error]', e))
 
   return NextResponse.json({
     group: access.group,
@@ -206,6 +252,7 @@ export async function GET(request: NextRequest) {
       display_name: user.display_name,
       picture_url: user.picture_url,
       role: user.role,
+      department: user.department || '製造',
       group_role: access.membership?.role || null,
     },
     messages: messages.map(message => ({
@@ -226,7 +273,7 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json()
   const groupId = body.group_id
-  const content = typeof body.content === 'string' ? body.content.trim() : ''
+  const content = typeof body.content === 'string' ? normalizeMentionContent(body.content.trim()) : ''
   const attachments = normalizeAttachments(body.attachments)
 
   if (!groupId) {
@@ -236,7 +283,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'メッセージまたは添付ファイルが必要です' }, { status: 400 })
   }
 
-  const access = await getChatAccess(groupId, user.id, user.role)
+  const access = await getChatAccess(groupId, user.id)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -304,8 +351,12 @@ export async function POST(request: NextRequest) {
 
     if (mentionedUsers.length > 0) {
       await sendMentionNotifications(mentionedUsers, {
+        senderId: user.id,
         senderName: user.display_name || '\u30e1\u30f3\u30d0\u30fc',
+        groupId,
         groupName: access.group?.name || null,
+        contextType: isDirect ? 'dm' : 'chat',
+        contextLabel: isDirect ? 'DM' : 'Chat',
         content: bodyText,
         url: `/chat/${groupId}`,
         postId: message.id,
@@ -358,7 +409,10 @@ export async function PATCH(request: NextRequest) {
 
   const body = await request.json().catch(() => ({}))
   const messageId = typeof body.message_id === 'string' ? body.message_id : ''
-  const content = typeof body.content === 'string' ? body.content.trim() : ''
+  const contentEditRequested = Object.prototype.hasOwnProperty.call(body, 'content')
+  const requestedContent = typeof body.content === 'string' ? normalizeMentionContent(body.content.trim()) : ''
+  const attachmentsEditRequested = Object.prototype.hasOwnProperty.call(body, 'attachments')
+  const requestedAttachments = attachmentsEditRequested ? normalizeAttachments(body.attachments) : null
 
   if (!messageId) {
     return NextResponse.json({ error: 'message_id が必要です' }, { status: 400 })
@@ -378,7 +432,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Chatメッセージではありません' }, { status: 400 })
   }
 
-  const access = await getChatAccess(existing.group_id, user.id, user.role)
+  const access = await getChatAccess(existing.group_id, user.id)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -387,7 +441,8 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: '編集権限がありません' }, { status: 403 })
   }
 
-  const attachments = Array.isArray(existing.attachments) ? existing.attachments : []
+  const content = contentEditRequested ? requestedContent : (typeof existing.content === 'string' ? existing.content : '')
+  const attachments = attachmentsEditRequested ? (requestedAttachments || []) : (Array.isArray(existing.attachments) ? existing.attachments : [])
   if (!content && attachments.length === 0) {
     return NextResponse.json({ error: '本文が必要です' }, { status: 400 })
   }
@@ -397,9 +452,10 @@ export async function PATCH(request: NextRequest) {
     .update({
       content: content || null,
       updated_at: new Date().toISOString(),
+      ...(attachmentsEditRequested ? { attachments } : {}),
     })
     .eq('id', messageId)
-    .select('id, content, updated_at')
+    .select('id, content, attachments, updated_at')
     .single()
 
   if (error || !message) {
@@ -434,14 +490,14 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'Chatメッセージではありません' }, { status: 400 })
   }
 
-  const access = await getChatAccess(existing.group_id, user.id, user.role)
+  const access = await getChatAccess(existing.group_id, user.id)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   const isDirect = typeof access.group?.description === 'string' && access.group.description.startsWith('direct:')
-  if (isDirect) {
-    return NextResponse.json({ error: 'DMでは削除できません' }, { status: 403 })
+  if (isDirect && existing.user_id !== user.id) {
+    return NextResponse.json({ error: 'DMでは自分のメッセージのみ削除できます' }, { status: 403 })
   }
 
   if (!canManageMessage(existing.user_id, user.id, user.role, access.membership?.role)) {
