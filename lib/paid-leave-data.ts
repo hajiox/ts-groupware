@@ -10,6 +10,7 @@ import {
   type ISODate,
   type PaidLeaveGrantScheduleEstimate,
 } from '@/lib/paid-leave'
+import { analyzeAttendanceDeviations } from '@/lib/attendance-deviations'
 import { loadAttendanceCalculationPolicy } from '@/lib/payroll-attendance-policy-data'
 import { summarizeAttendance, type PayrollCalculationType } from '@/lib/payroll-calculation'
 import { adminClient } from '@/lib/supabase/admin'
@@ -24,6 +25,7 @@ type EmployeeRow = {
   department: string | null
   work_style: string | null
   payroll_status: string
+  raw_payload: Record<string, unknown> | null
 }
 
 type GrantRow = {
@@ -74,6 +76,7 @@ type ResolutionRow = {
   manager_memo: string | null
   employee_answered_at: string | null
   confirmed_at: string | null
+  raw_payload: Record<string, unknown> | null
 }
 
 type AssignmentRow = {
@@ -100,6 +103,7 @@ type PunchRow = {
 const ACTIVE_REQUEST_STATUSES = new Set(['approved', 'consumed'])
 const PAID_LEAVE_SHIFT_LABELS = new Set(['有給（全休）', '有給（半休）'])
 const PAID_LEAVE_SYSTEM_START_DATE = '2026-08-01' as ISODate
+const ATTENDANCE_DEVIATION_SYSTEM_START_DATE = '2026-08-25' as ISODate
 const PAID_LEAVE_ATTENDANCE_DISPLAY_DATE = '2026-11-01' as ISODate
 const PAID_LEAVE_ATTENDANCE_MEASUREMENT_END_DATE = '2026-10-31' as ISODate
 const LIVE_ATTENDANCE_START_DATE = '2026-06-16' as ISODate
@@ -247,10 +251,38 @@ function minutesBetween(startTime: string | null, endTime: string | null, breakM
   return Math.max(0, minutes - Math.max(0, breakMinutes))
 }
 
+function assignmentsWithBasicSchedule(assignments: AssignmentRow[], employee: EmployeeRow) {
+  const profile = employee.raw_payload?.hr_profile
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return assignments
+  const row = profile as {
+    basic_work_start?: string | null
+    basic_work_end?: string | null
+    basic_break_minutes?: number | string | null
+  }
+  const basicStart = row.basic_work_start || null
+  const basicEnd = row.basic_work_end || null
+  const basicBreak = toNumber(row.basic_break_minutes)
+  if (!basicStart || !basicEnd) return assignments
+
+  return assignments.map((assignment) => {
+    if (!assignment.shift_label || (assignment.start_time && assignment.end_time)) return assignment
+    const startTime = assignment.start_time || basicStart
+    const endTime = assignment.end_time || basicEnd
+    const breakMinutes = assignment.break_minutes ?? basicBreak
+    return {
+      ...assignment,
+      start_time: startTime,
+      end_time: endTime,
+      break_minutes: breakMinutes,
+      work_minutes: assignment.work_minutes ?? minutesBetween(startTime, endTime, breakMinutes),
+    }
+  })
+}
+
 async function loadEmployee(userId: string) {
   const { data, error } = await adminClient
     .from('gw_payroll_employees')
-    .select('id, user_id, employee_code, display_name, real_name, hire_date, department, work_style, payroll_status')
+    .select('id, user_id, employee_code, display_name, real_name, hire_date, department, work_style, payroll_status, raw_payload')
     .eq('user_id', userId)
     .maybeSingle()
 
@@ -410,9 +442,13 @@ async function attendanceForPeriod(employee: EmployeeRow, startDate: string, end
   ])
   if (requestsResult.error || resolutionsResult.error) throw requestsResult.error || resolutionsResult.error
 
+  const validPunchDates = validPunchDateSet(punches)
   const excludedDates = new Set(
     (resolutionsResult.data || [])
-      .filter((row) => row.resolution_type !== 'bereavement_leave')
+      .filter((row) => (
+        row.resolution_type === 'employer_shutdown'
+        || (row.resolution_type === 'work_schedule_changed' && !validPunchDates.has(row.work_date))
+      ))
       .map((row) => row.work_date),
   )
   const bereavementDates = new Set(
@@ -425,7 +461,6 @@ async function attendanceForPeriod(employee: EmployeeRow, startDate: string, end
       .filter((assignment) => Boolean(assignment.shift_label) && !excludedDates.has(assignment.work_date))
       .map((assignment) => assignment.work_date),
   )
-  const validPunchDates = validPunchDateSet(punches)
   const paidLeaveByDate = new Map<string, number>()
   for (const request of requestsResult.data || []) {
     if (isOpeningBalanceAdjustment(request)) continue
@@ -741,7 +776,10 @@ export async function loadPaidLeaveDashboard(userId: string, actorUserId?: strin
   }
 
   const today = jstDate()
-  const pendingStart = addDays(today, -90)
+  const attendanceHistoryStart = employee.hire_date && employee.hire_date > PAID_LEAVE_SYSTEM_START_DATE
+    ? employee.hire_date
+    : PAID_LEAVE_SYSTEM_START_DATE
+  const attendanceHistoryEnd = addDays(today, -1)
   const [
     grantsResult,
     requestsResult,
@@ -751,6 +789,7 @@ export async function loadPaidLeaveDashboard(userId: string, actorUserId?: strin
     average,
     profileResult,
     balanceLotsResult,
+    attendancePolicy,
   ] = await Promise.all([
     adminClient
       .from('gw_paid_leave_grant_lots')
@@ -764,12 +803,12 @@ export async function loadPaidLeaveDashboard(userId: string, actorUserId?: strin
       .order('leave_date', { ascending: false }),
     adminClient
       .from('gw_workday_resolutions')
-      .select('id, employee_id, user_id, work_date, shift_period_id, shift_assignment_id, scheduled_minutes_snapshot, resolution_type, resolution_status, paid_leave_request_id, employee_memo, manager_memo, employee_answered_at, confirmed_at')
+      .select('id, employee_id, user_id, work_date, shift_period_id, shift_assignment_id, scheduled_minutes_snapshot, resolution_type, resolution_status, paid_leave_request_id, employee_memo, manager_memo, employee_answered_at, confirmed_at, raw_payload')
       .eq('employee_id', employee.id)
       .order('work_date', { ascending: false }),
-    loadConfirmedAssignments(employee, pendingStart, addDays(today, -1)),
-    loadPunchDates(employee, pendingStart, addDays(today, -1)),
-    loadThreeMonthAverage(employee, addDays(today, -1) as ISODate),
+    loadConfirmedAssignments(employee, attendanceHistoryStart, attendanceHistoryEnd),
+    loadPunchDates(employee, attendanceHistoryStart, attendanceHistoryEnd),
+    loadThreeMonthAverage(employee, attendanceHistoryEnd as ISODate),
     adminClient
       .from('gw_paid_leave_profiles')
       .select('next_grant_date, projected_grant_days, attendance_threshold, grant_when_equal_to_threshold, wage_method, half_day_enabled, notes')
@@ -780,6 +819,7 @@ export async function loadPaidLeaveDashboard(userId: string, actorUserId?: strin
       .select('grant_lot_id, grant_date, expires_on, granted_days, allocated_days, remaining_days')
       .eq('employee_id', employee.id)
       .order('expires_on', { ascending: true }),
+    loadAttendanceCalculationPolicy(attendanceHistoryEnd),
   ])
   const dbError = grantsResult.error || requestsResult.error || resolutionsResult.error || profileResult.error || balanceLotsResult.error
   if (dbError) throw dbError
@@ -814,7 +854,6 @@ export async function loadPaidLeaveDashboard(userId: string, actorUserId?: strin
   }
 
   const punchDates = validPunchDateSet(punches)
-  const resolutionDates = new Set(resolutions.filter((row) => row.resolution_status !== 'voided').map((row) => row.work_date))
   const fullPaidLeaveDates = new Set(
     requests
       .filter((row) => (
@@ -824,21 +863,30 @@ export async function loadPaidLeaveDashboard(userId: string, actorUserId?: strin
       ))
       .map((row) => row.leave_date),
   )
-  const unresolved = assignments
-    .filter((assignment) => Boolean(assignment.shift_label))
+  const halfPaidLeaveDatesWithPunches = new Set(
+    requests
+      .filter((row) => (
+        ACTIVE_REQUEST_STATUSES.has(row.request_status)
+        && row.leave_unit !== 'full_day'
+        && punchDates.has(row.leave_date)
+        && !isOpeningBalanceAdjustment(row)
+      ))
+      .map((row) => row.leave_date),
+  )
+  const classifiedLeaveDates = new Set([...fullPaidLeaveDates, ...halfPaidLeaveDatesWithPunches])
+  const scheduledAssignments = assignmentsWithBasicSchedule(assignments, employee)
     .filter((assignment) => !PAID_LEAVE_SHIFT_LABELS.has(assignment.shift_label || ''))
-    .filter((assignment) => !punchDates.has(assignment.work_date))
-    .filter((assignment) => !resolutionDates.has(assignment.work_date))
-    .filter((assignment) => !fullPaidLeaveDates.has(assignment.work_date))
-    .map((assignment) => ({
-      assignmentId: assignment.id,
-      periodId: assignment.period_id,
-      workDate: assignment.work_date,
-      shiftLabel: assignment.shift_label,
-      startTime: assignment.start_time,
-      endTime: assignment.end_time,
-      scheduledMinutes: assignment.work_minutes ?? minutesBetween(assignment.start_time, assignment.end_time, assignment.break_minutes),
-    }))
+  const deviationSummary = analyzeAttendanceDeviations({
+    assignments: scheduledAssignments,
+    punches,
+    resolutions,
+    workStyle: employee.work_style,
+    policy: attendancePolicy,
+    currentDate: today,
+    deviationStartDate: ATTENDANCE_DEVIATION_SYSTEM_START_DATE,
+    skipDates: classifiedLeaveDates,
+  })
+  const unresolved = deviationSummary.actionable
 
   const confirmedAbsences = resolutions.filter((row) => row.resolution_type === 'absence' && row.resolution_status === 'admin_confirmed')
   const currentMonth = today.slice(0, 7)
@@ -877,6 +925,7 @@ export async function loadPaidLeaveDashboard(userId: string, actorUserId?: strin
     requests,
     resolutions,
     unresolved,
+    attendanceDeviations: deviationSummary.totals,
     absences: {
       month: confirmedAbsences.filter((row) => row.work_date.startsWith(currentMonth)).length,
       year: confirmedAbsences.filter((row) => row.work_date.startsWith(currentYear)).length,
@@ -906,7 +955,7 @@ export async function paidLeaveWageSnapshot(
   ] = await Promise.all([
     adminClient
       .from('gw_payroll_employees')
-      .select('id, user_id, employee_code, display_name, real_name, hire_date, department, work_style, payroll_status')
+      .select('id, user_id, employee_code, display_name, real_name, hire_date, department, work_style, payroll_status, raw_payload')
       .eq('id', employeeId)
       .maybeSingle(),
     adminClient

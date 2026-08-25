@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CalendarCheck, Clock3, Send, WalletCards } from "lucide-react";
+import { attendanceDeviationLabel, type AttendanceDeviationKind } from "@/lib/attendance-deviations";
 import { isRegularEmployeeWorkStyle } from "@/lib/bereavement-leave";
 
 type DashboardPayload = {
@@ -63,7 +64,17 @@ type DashboardPayload = {
     startTime: string | null;
     endTime: string | null;
     scheduledMinutes: number | null;
+    actualStartTime: string | null;
+    actualEndTime: string | null;
+    lateMinutes: number;
+    earlyLeaveMinutes: number;
+    issueKind: AttendanceDeviationKind;
   }[];
+  attendanceDeviations: {
+    month: DeviationTotals;
+    year: DeviationTotals;
+    sinceSystemStart: DeviationTotals;
+  };
   absences: {
     month: number;
     year: number;
@@ -97,13 +108,21 @@ type DashboardPayload = {
   };
 };
 
+type DeviationTotals = {
+  lateCount: number;
+  earlyLeaveCount: number;
+  missingPunchCount: number;
+  lateMinutes: number;
+  earlyLeaveMinutes: number;
+};
+
 const ANSWER_OPTIONS = [
   { value: "punch_missing", label: "打刻忘れ" },
   { value: "paid_leave_full", label: "有給（全休）" },
-  { value: "paid_leave_half", label: "有給（半休）" },
+  { value: "paid_leave_half", label: "有給（半休・0.5日）" },
   { value: "bereavement_leave", label: "忌引き休", regularOnly: true },
   { value: "absence", label: "欠勤" },
-  { value: "work_schedule_changed", label: "勤務変更" },
+  { value: "work_schedule_changed", label: "管理者に連絡" },
 ] as const;
 
 const REQUEST_STATUS_LABELS: Record<string, string> = {
@@ -189,7 +208,7 @@ export default function PaidLeavePage() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "回答を保存できませんでした");
-      setMessage("回答を保存しました。管理者の確認後に勤怠へ反映されます");
+      setMessage("回答を送信しました。管理者の確認後に勤怠へ反映されます");
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "回答を保存できませんでした");
@@ -358,22 +377,25 @@ export default function PaidLeavePage() {
                   <AlertTriangle size={21} />
                   <div>
                     <span>確認が必要です</span>
-                    <h2>勤務予定日に打刻がありません</h2>
+                    <h2>勤務予定と打刻の確認</h2>
                   </div>
                 </div>
-                <p>打刻がないだけでは欠勤になりません。内容を回答し、管理者が確定します。</p>
+                <p>欠勤・有給半休・管理者への連絡から内容を選び、管理者へ送信してください。</p>
                 {payload.unresolved.map((row) => (
                   <article key={row.assignmentId} className="leave-missing__item">
                     <div className="leave-missing__date">
                       <strong>{row.workDate.slice(5).replace("-", "/")}</strong>
-                      <span>{row.shiftLabel || "勤務予定"}</span>
+                      <span>{attendanceDeviationLabel(row)}</span>
                       <small>{row.startTime?.slice(0, 5) || "--:--"} - {row.endTime?.slice(0, 5) || "--:--"}</small>
+                      <small>実績 {row.actualStartTime || "--:--"} - {row.actualEndTime || "--:--"}</small>
                     </div>
                     <div className="leave-missing__form">
                       <div className="leave-answer-options">
                         {ANSWER_OPTIONS
                           .filter((option) => !("regularOnly" in option)
                             || isRegularEmployeeWorkStyle(payload.employee.workStyle))
+                          .filter((option) => row.issueKind.startsWith("missing_")
+                            || ["paid_leave_half", "absence", "work_schedule_changed"].includes(option.value))
                           .map((option) => (
                             <button
                               key={option.value}
@@ -385,11 +407,17 @@ export default function PaidLeavePage() {
                             </button>
                           ))}
                       </div>
+                      {answers[row.assignmentId] === "paid_leave_half" && (
+                        <small className="leave-answer-note">有給残日数から0.5日を使用します。</small>
+                      )}
+                      {answers[row.assignmentId] === "work_schedule_changed" && (
+                        <small className="leave-answer-note">遅出・退勤時刻変更など、管理者へ伝える内容を下へ入力してください。</small>
+                      )}
                       <input
                         className="form-input"
                         value={memos[row.assignmentId] || ""}
                         onChange={(event) => setMemos((current) => ({ ...current, [row.assignmentId]: event.target.value }))}
-                        placeholder="補足があれば入力"
+                        placeholder={answers[row.assignmentId] === "work_schedule_changed" ? "変更理由・変更後の勤務時間" : "補足があれば入力"}
                       />
                       <button type="button" className="btn-primary" disabled={busyId === row.assignmentId} onClick={() => void submitAnswer(row)}>
                         {busyId === row.assignmentId ? "送信中..." : "回答する"}
@@ -444,6 +472,28 @@ export default function PaidLeavePage() {
               <div><span>今月の欠勤</span><strong>{payload.absences.month}回</strong></div>
               <div><span>今年の欠勤</span><strong>{payload.absences.year}回</strong></div>
               <div><span>入社後の欠勤</span><strong>{payload.absences.tenure}回</strong></div>
+            </section>
+
+            <section className="leave-stat-strip leave-stat-strip--attendance">
+              <div>
+                <span>今月の遅刻</span>
+                <strong>{payload.attendanceDeviations.month.lateCount}回</strong>
+                <small>
+                  計 {payload.attendanceDeviations.month.lateMinutes}分 / 年{payload.attendanceDeviations.year.lateCount}回
+                </small>
+              </div>
+              <div>
+                <span>今月の早退</span>
+                <strong>{payload.attendanceDeviations.month.earlyLeaveCount}回</strong>
+                <small>
+                  計 {payload.attendanceDeviations.month.earlyLeaveMinutes}分 / 年{payload.attendanceDeviations.year.earlyLeaveCount}回
+                </small>
+              </div>
+              <div>
+                <span>今月の不完全打刻</span>
+                <strong>{payload.attendanceDeviations.month.missingPunchCount}回</strong>
+                <small>管理者承認済みの勤務変更は除外</small>
+              </div>
             </section>
 
             <section className="attendance-log leave-reference">

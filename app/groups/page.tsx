@@ -91,6 +91,9 @@ type PaidLeaveHomeStatus = {
   unresolved: {
     assignmentId: string;
     workDate: string;
+    issueKind: string;
+    lateMinutes: number;
+    earlyLeaveMinutes: number;
   }[];
 };
 
@@ -726,8 +729,8 @@ export default function GroupsPage() {
         {paidLeaveStatus?.managed && !!paidLeaveStatus.unresolved.length && (
           <Link href="/leave" className="leave-home-alert">
             <span>勤怠の確認が必要です</span>
-            <strong>勤務予定日に打刻がない日が{paidLeaveStatus.unresolved.length}件あります</strong>
-            <small>有給・欠勤・忌引き休・打刻忘れから回答してください</small>
+            <strong>打刻なし・遅刻・早退の確認が{paidLeaveStatus.unresolved.length}件あります</strong>
+            <small>欠勤・有給半休・管理者への連絡から回答してください</small>
             <em>確認する</em>
           </Link>
         )}

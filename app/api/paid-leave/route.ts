@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { attendanceDeviationLabel } from '@/lib/attendance-deviations'
 import { isRegularEmployeeWorkStyle } from '@/lib/bereavement-leave'
 import { canProxyStaffView } from '@/lib/management-permissions'
 import { loadPaidLeaveDashboard, paidLeaveWageSnapshot } from '@/lib/paid-leave-data'
@@ -257,6 +258,19 @@ export async function POST(request: NextRequest) {
     if (!unresolved) {
       return NextResponse.json({ error: 'この勤務日は回答済み、または打刻が確認されています' }, { status: 409 })
     }
+    const missingPunchIssue = unresolved.issueKind.startsWith('missing_')
+    const allowedResolutionTypes = missingPunchIssue
+      ? new Set(['punch_missing', 'paid_leave_full', 'paid_leave_half', 'bereavement_leave', 'absence', 'work_schedule_changed'])
+      : new Set(['paid_leave_half', 'absence', 'work_schedule_changed'])
+    if (!allowedResolutionTypes.has(resolutionType)) {
+      return NextResponse.json({ error: 'この勤怠差異では選択できない回答です' }, { status: 400 })
+    }
+    if (!missingPunchIssue && !isRegularEmployeeWorkStyle(dashboard.employee.workStyle)) {
+      return NextResponse.json({ error: '時間制スタッフの遅刻・早退は実働時間で自動集計されます' }, { status: 400 })
+    }
+    if (resolutionType === 'work_schedule_changed' && !employeeMemo) {
+      return NextResponse.json({ error: '管理者へ連絡する内容を入力してください' }, { status: 400 })
+    }
 
     let paidLeaveRequestId: string | null = null
     let createdPaidLeaveRequest = false
@@ -272,11 +286,13 @@ export async function POST(request: NextRequest) {
         requestedDays,
         workDate as `${number}-${number}-${number}`,
       )
-      const sourceKey = `missing-punch:${dashboard.employee.id}:${workDate}`
+      const sourceKey = `attendance-resolution:${dashboard.employee.id}:${workDate}`
       const { data: existingLeave, error: existingLeaveError } = await adminClient
         .from('gw_paid_leave_requests')
         .select('id')
-        .eq('source_key', sourceKey)
+        .eq('employee_id', dashboard.employee.id)
+        .eq('leave_date', workDate)
+        .eq('request_source', 'missing_punch_resolution')
         .maybeSingle()
       if (existingLeaveError) throw existingLeaveError
 
@@ -299,6 +315,7 @@ export async function POST(request: NextRequest) {
             rejected_at: null,
             cancelled_by: null,
             cancelled_at: null,
+            source_key: sourceKey,
             updated_at: new Date().toISOString(),
           })
           .eq('id', existingLeave.id)
@@ -344,20 +361,31 @@ export async function POST(request: NextRequest) {
     if (existingResolutionError) throw existingResolutionError
 
     const resolutionPayload = {
-        employee_id: dashboard.employee.id,
-        user_id: user.id,
-        work_date: workDate,
-        shift_period_id: unresolved.periodId,
-        shift_assignment_id: unresolved.assignmentId,
-        scheduled_minutes_snapshot: unresolved.scheduledMinutes,
-        resolution_type: resolutionType,
-        resolution_status: 'employee_answered',
-        paid_leave_request_id: paidLeaveRequestId,
-        employee_answered_by: user.id,
-        employee_answered_at: new Date().toISOString(),
-        employee_memo: employeeMemo || null,
-        source_key: resolutionSourceKey,
-      }
+      employee_id: dashboard.employee.id,
+      user_id: user.id,
+      work_date: workDate,
+      shift_period_id: unresolved.periodId,
+      shift_assignment_id: unresolved.assignmentId,
+      scheduled_minutes_snapshot: unresolved.scheduledMinutes,
+      resolution_type: resolutionType,
+      resolution_status: 'employee_answered',
+      paid_leave_request_id: paidLeaveRequestId,
+      employee_answered_by: user.id,
+      employee_answered_at: new Date().toISOString(),
+      employee_memo: employeeMemo || null,
+      source_key: resolutionSourceKey,
+      raw_payload: {
+        attendance_issue: {
+          issue_kind: unresolved.issueKind,
+          scheduled_start_time: unresolved.startTime,
+          scheduled_end_time: unresolved.endTime,
+          actual_start_time: unresolved.actualStartTime,
+          actual_end_time: unresolved.actualEndTime,
+          late_minutes: unresolved.lateMinutes,
+          early_leave_minutes: unresolved.earlyLeaveMinutes,
+        },
+      },
+    }
     const { error: resolutionError } = existingResolution
       ? await adminClient
         .from('gw_workday_resolutions')
@@ -371,6 +399,20 @@ export async function POST(request: NextRequest) {
         await adminClient.from('gw_paid_leave_requests').delete().eq('id', paidLeaveRequestId)
       }
       throw resolutionError
+    }
+
+    try {
+      const approverIds = await paidLeaveApproverIdsForEmployee(dashboard.employee.id)
+      const { sendPushNotificationToUser } = await import('@/lib/web-push')
+      const issueLabel = attendanceDeviationLabel(unresolved)
+      await Promise.allSettled(approverIds.map((approverId) => sendPushNotificationToUser(approverId, {
+        title: '勤怠確認が届きました',
+        body: `${dashboard.employee.name}さん / ${workDate} / ${issueLabel}`,
+        url: '/groups',
+        tag: `tsg-attendance-resolution-${dashboard.employee.id}-${workDate}`,
+      })))
+    } catch (error) {
+      console.error('[Attendance resolution push error]', error)
     }
 
     return NextResponse.json({ success: true })

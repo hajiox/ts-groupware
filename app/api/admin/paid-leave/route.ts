@@ -3,6 +3,7 @@ import { addYearsToISODate, type ISODate } from '@/lib/paid-leave'
 import { canProxyStaffView, getManagementPermissions } from '@/lib/management-permissions'
 import { isPaidLeaveManagedEmployeeName, jstDate, loadPaidLeaveDashboard, paidLeaveWageSnapshot } from '@/lib/paid-leave-data'
 import {
+  canApprovePaidLeaveEmployee,
   canApprovePaidLeaveRequest,
   canReceivePaidLeaveApprovals,
   canRegisterPaidLeaveForEmployee,
@@ -129,6 +130,26 @@ async function notifyRequestResult(requestId: string, approved: boolean) {
   }
 }
 
+async function notifyWorkdayResolutionResult(row: {
+  id: string
+  user_id: string | null
+  work_date: string
+  resolution_type: string
+}, approved: boolean) {
+  if (!row.user_id) return
+  try {
+    const { sendPushNotificationToUser } = await import('@/lib/web-push')
+    await sendPushNotificationToUser(row.user_id, {
+      title: approved ? '勤怠回答が承認されました' : '勤怠回答が差し戻されました',
+      body: `${row.work_date} / ${row.resolution_type === 'work_schedule_changed' ? '勤務時間の変更' : '勤怠確認'}`,
+      url: '/leave',
+      tag: `tsg-workday-resolution-${row.id}`,
+    })
+  } catch (error) {
+    console.error('[Workday resolution result push error]', error)
+  }
+}
+
 export async function GET(request: NextRequest) {
   const auth = await requireLeaveAdmin()
   if (auth.error) return auth.error
@@ -154,7 +175,7 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       adminClient
         .from('gw_workday_resolutions')
-        .select('id, employee_id, work_date, resolution_type, resolution_status, employee_memo')
+        .select('id, employee_id, work_date, resolution_type, resolution_status, employee_memo, raw_payload')
         .in('resolution_status', ['employee_answered', 'reopened'])
         .order('work_date', { ascending: false }),
       adminClient
@@ -231,6 +252,9 @@ export async function GET(request: NextRequest) {
       : false
 
     const canViewAs = await canProxyStaffView(auth.user)
+    const canConfirmSelectedResolution = dashboard
+      ? await canApprovePaidLeaveEmployee(auth.user, dashboard.employee.id)
+      : false
     const approvableRequestIds = dashboard
       ? (await Promise.all(dashboard.requests
         .filter((row) => row.request_status === 'submitted')
@@ -245,6 +269,7 @@ export async function GET(request: NextRequest) {
       canApprovePaidLeave: auth.canApprovePaidLeave,
       approvableRequestIds,
       canRegisterSelectedEmployee,
+      canConfirmSelectedResolution,
     }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
     return NextResponse.json({
@@ -397,23 +422,49 @@ export async function POST(request: NextRequest) {
       const resolutionId = cleanText(body.resolution_id, 80)
       const managerMemo = cleanText(body.manager_memo, 500)
       if (!resolutionId) return NextResponse.json({ error: '未打刻回答を選択してください' }, { status: 400 })
+      const { data: resolution, error: resolutionLookupError } = await adminClient
+        .from('gw_workday_resolutions')
+        .select('id, employee_id, user_id, work_date, resolution_type, paid_leave_request_id')
+        .eq('id', resolutionId)
+        .maybeSingle()
+      if (resolutionLookupError) throw resolutionLookupError
+      if (!resolution) return NextResponse.json({ error: '勤怠回答が見つかりません' }, { status: 404 })
+      if (!await canApprovePaidLeaveEmployee(auth.user!, resolution.employee_id)) {
+        return NextResponse.json({ error: 'この勤怠回答を承認する権限がありません' }, { status: 403 })
+      }
       const { error } = await adminClient.rpc('gw_confirm_workday_resolution', {
         p_resolution_id: resolutionId,
         p_actor_user_id: auth.user!.id,
         p_manager_memo: managerMemo || null,
       })
       if (error) throw error
+      if (resolution.paid_leave_request_id) {
+        await notifyRequestResult(resolution.paid_leave_request_id, true)
+      } else {
+        await notifyWorkdayResolutionResult(resolution, true)
+      }
       return NextResponse.json({ success: true })
     }
 
     if (action === 'reopen_resolution') {
       const resolutionId = cleanText(body.resolution_id, 80)
       if (!resolutionId) return NextResponse.json({ error: '未打刻回答を選択してください' }, { status: 400 })
+      const { data: resolution, error: resolutionLookupError } = await adminClient
+        .from('gw_workday_resolutions')
+        .select('id, employee_id, user_id, work_date, resolution_type')
+        .eq('id', resolutionId)
+        .maybeSingle()
+      if (resolutionLookupError) throw resolutionLookupError
+      if (!resolution) return NextResponse.json({ error: '勤怠回答が見つかりません' }, { status: 404 })
+      if (!await canApprovePaidLeaveEmployee(auth.user!, resolution.employee_id)) {
+        return NextResponse.json({ error: 'この勤怠回答を差し戻す権限がありません' }, { status: 403 })
+      }
       const { error } = await adminClient.rpc('gw_reopen_workday_resolution', {
         p_resolution_id: resolutionId,
         p_actor_user_id: auth.user!.id,
       })
       if (error) throw error
+      await notifyWorkdayResolutionResult(resolution, false)
       return NextResponse.json({ success: true })
     }
 

@@ -1091,6 +1091,12 @@ html[data-theme="light"] .company-messages__status {
   color: #dbeafe;
 }
 
+.leave-answer-note {
+  color: #fbbf24;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .leave-overview {
   display: grid;
   grid-template-columns: 1.3fr repeat(2, minmax(0, 1fr));
@@ -1183,6 +1189,18 @@ html[data-theme="light"] .company-messages__status {
 .leave-stat-strip strong {
   margin-top: 2px;
   font-size: 17px;
+}
+
+.leave-stat-strip small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.leave-stat-strip--attendance {
+  background: rgba(30, 64, 175, 0.08);
 }
 
 .leave-request-panel__help {
@@ -1614,6 +1632,14 @@ html[data-theme="light"] .leave-balance-row__figures em {
   margin-top: 2px;
   color: var(--text-muted);
   font-size: 10px;
+}
+
+.leave-review-list__deviation {
+  display: block;
+  margin-top: 4px;
+  color: #93c5fd;
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .leave-review-list__actions {

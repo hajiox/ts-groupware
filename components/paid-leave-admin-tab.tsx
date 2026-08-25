@@ -36,6 +36,25 @@ type Resolution = {
   resolution_status: string;
   employee_memo: string | null;
   manager_memo: string | null;
+  raw_payload: {
+    attendance_issue?: {
+      issue_kind?: string;
+      scheduled_start_time?: string | null;
+      scheduled_end_time?: string | null;
+      actual_start_time?: string | null;
+      actual_end_time?: string | null;
+      late_minutes?: number | string | null;
+      early_leave_minutes?: number | string | null;
+    };
+  } | null;
+};
+
+type DeviationTotals = {
+  lateCount: number;
+  earlyLeaveCount: number;
+  missingPunchCount: number;
+  lateMinutes: number;
+  earlyLeaveMinutes: number;
 };
 
 type Dashboard = {
@@ -68,6 +87,11 @@ type Dashboard = {
   }[];
   requests: LeaveRequest[];
   resolutions: Resolution[];
+  attendanceDeviations: {
+    month: DeviationTotals;
+    year: DeviationTotals;
+    sinceSystemStart: DeviationTotals;
+  };
   absences: {
     month: number;
     year: number;
@@ -102,6 +126,7 @@ type AdminPayload = {
   canApprovePaidLeave: boolean;
   approvableRequestIds: string[];
   canRegisterSelectedEmployee: boolean;
+  canConfirmSelectedResolution: boolean;
 };
 
 const RESOLUTION_LABELS: Record<string, string> = {
@@ -111,7 +136,7 @@ const RESOLUTION_LABELS: Record<string, string> = {
   paid_leave_half: "有給（半休）",
   bereavement_leave: "忌引き休",
   absence: "欠勤",
-  work_schedule_changed: "勤務変更",
+  work_schedule_changed: "勤務時間変更の承認",
   employer_shutdown: "会社都合休業",
 };
 
@@ -380,6 +405,17 @@ export function PaidLeaveAdminTab() {
               </small>
             </article>
             <article><span>欠勤</span><strong>今月 {dashboard.absences.month}回</strong><small>年{dashboard.absences.year} / 入社後{dashboard.absences.tenure}</small></article>
+            <article>
+              <span>遅刻・早退</span>
+              <strong>今月 {dashboard.attendanceDeviations.month.lateCount + dashboard.attendanceDeviations.month.earlyLeaveCount}回</strong>
+              <small>
+                遅刻 {dashboard.attendanceDeviations.month.lateCount}回・{dashboard.attendanceDeviations.month.lateMinutes}分
+                {" / "}
+                早退 {dashboard.attendanceDeviations.month.earlyLeaveCount}回・{dashboard.attendanceDeviations.month.earlyLeaveMinutes}分
+                {" / "}
+                年 {dashboard.attendanceDeviations.year.lateCount + dashboard.attendanceDeviations.year.earlyLeaveCount}回
+              </small>
+            </article>
           </section>
           <p className="leave-attendance-note">
             {dashboard.attendance.isMeasuring
@@ -492,13 +528,24 @@ export function PaidLeaveAdminTab() {
                 <article key={row.id}>
                   <div>
                     <strong>{row.work_date} / {RESOLUTION_LABELS[row.resolution_type] || row.resolution_type}</strong>
+                    {row.raw_payload?.attendance_issue && (
+                      <small className="leave-review-list__deviation">
+                        予定 {row.raw_payload.attendance_issue.scheduled_start_time?.slice(0, 5) || "--:--"}
+                        -{row.raw_payload.attendance_issue.scheduled_end_time?.slice(0, 5) || "--:--"}
+                        {" / "}
+                        実績 {row.raw_payload.attendance_issue.actual_start_time || "--:--"}
+                        -{row.raw_payload.attendance_issue.actual_end_time || "--:--"}
+                        {Number(row.raw_payload.attendance_issue.late_minutes || 0) > 0 && ` / 遅刻${Number(row.raw_payload.attendance_issue.late_minutes)}分`}
+                        {Number(row.raw_payload.attendance_issue.early_leave_minutes || 0) > 0 && ` / 早退${Number(row.raw_payload.attendance_issue.early_leave_minutes)}分`}
+                      </small>
+                    )}
                     <span>{row.employee_memo || "本人メモなし"}</span>
                   </div>
                   <div className="leave-review-list__actions">
-                    <button type="button" className="btn-primary" disabled={busy} onClick={() => post({ action: "confirm_resolution", resolution_id: row.id }, "回答を確定しました")}>
-                      <Check size={15} /> 確定
+                    <button type="button" className="btn-primary" disabled={busy || !payload?.canConfirmSelectedResolution} onClick={() => post({ action: "confirm_resolution", resolution_id: row.id }, "回答を承認しました")}>
+                      <Check size={15} /> 承認
                     </button>
-                    <button type="button" className="admin-btn-outline" disabled={busy} onClick={() => post({ action: "reopen_resolution", resolution_id: row.id }, "本人へ差し戻しました")}>
+                    <button type="button" className="admin-btn-outline" disabled={busy || !payload?.canConfirmSelectedResolution} onClick={() => post({ action: "reopen_resolution", resolution_id: row.id }, "本人へ差し戻しました")}>
                       <RotateCcw size={15} /> 差戻し
                     </button>
                   </div>
