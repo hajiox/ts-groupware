@@ -9307,6 +9307,70 @@ html[data-theme="light"] .admin-payroll-diff-breakdown__row--delta strong:last-c
   gap: 2px;
 }
 
+.admin-user-directory {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-user-directory__tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: min(100%, 520px);
+}
+
+.admin-user-directory__tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text-sub);
+  font: inherit;
+  cursor: pointer;
+}
+
+.admin-user-directory__tab span {
+  min-width: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.admin-user-directory__tab b {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.admin-user-directory__tab--active {
+  border-color: rgba(59, 130, 246, 0.8);
+  background: rgba(37, 99, 235, 0.16);
+  color: #60a5fa;
+  box-shadow: inset 3px 0 0 #3b82f6;
+}
+
+.admin-item.admin-item--retired {
+  border-left: 3px solid var(--text-muted);
+  background: color-mix(in srgb, var(--card) 92%, var(--bg));
+}
+
+.admin-retired-user__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 6px;
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .admin-item {
   display: flex;
   align-items: center;
@@ -9429,6 +9493,11 @@ html[data-theme="light"] .admin-payroll-diff-breakdown__row--delta strong:last-c
 .admin-status--suspended {
   background: rgba(239, 68, 68, 0.12);
   color: #fca5a5;
+}
+.admin-status--retired {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+  vertical-align: middle;
 }
 
 .admin-item__actions {

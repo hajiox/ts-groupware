@@ -171,7 +171,43 @@ export async function GET() {
     return NextResponse.json({ error: dbError.message }, { status: 500 })
   }
 
-  return NextResponse.json({ users: users || [] })
+  const userRows = users || []
+  const userIds = userRows.map((user) => user.id)
+  const employmentByUserId = new Map<string, {
+    payroll_status: string
+    resigned_date: string | null
+  }>()
+
+  if (userIds.length > 0) {
+    const { data: employees, error: employeeError } = await adminClient
+      .from('gw_payroll_employees')
+      .select('user_id, payroll_status, resigned_date')
+      .in('user_id', userIds)
+
+    if (employeeError) {
+      return NextResponse.json({ error: employeeError.message }, { status: 500 })
+    }
+
+    for (const employee of employees || []) {
+      if (!employee.user_id) continue
+      const existing = employmentByUserId.get(employee.user_id)
+      // A retired record must win if legacy data contains more than one linked row.
+      if (!existing || employee.payroll_status === 'retired') {
+        employmentByUserId.set(employee.user_id, {
+          payroll_status: employee.payroll_status,
+          resigned_date: employee.resigned_date,
+        })
+      }
+    }
+  }
+
+  return NextResponse.json({
+    users: userRows.map((user) => ({
+      ...user,
+      payroll_status: employmentByUserId.get(user.id)?.payroll_status || null,
+      resigned_date: employmentByUserId.get(user.id)?.resigned_date || null,
+    })),
+  })
 }
 
 export async function PUT(request: NextRequest) {

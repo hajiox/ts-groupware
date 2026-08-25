@@ -59,6 +59,8 @@ type User = {
   department: UserDepartment;
   status: "pending" | "approved" | "suspended";
   created_at: string;
+  payroll_status: "active" | "inactive" | "retired" | null;
+  resigned_date: string | null;
 };
 
 type ManagementPermissions = {
@@ -1058,6 +1060,7 @@ function resumeOcrStatusLabel(value: HRResumeDocument["ocr_status"]) {
 function UsersTab({ currentUser }: { currentUser: User | null }) {
   const [users, setUsers] = useState<User[]>([]);
   const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
+  const [directoryView, setDirectoryView] = useState<"current" | "retired">("current");
   const [loading, setLoading] = useState(true);
 
   function loadUsers() {
@@ -1147,115 +1150,172 @@ function UsersTab({ currentUser }: { currentUser: User | null }) {
   if (loading) return <p className="admin-empty">読み込み中...</p>;
 
   const sortedUsers = [...users].sort((a, b) => compareUsers(a, b, currentUser));
+  const currentUsers = sortedUsers.filter(user => user.payroll_status !== "retired");
+  const retiredUsers = sortedUsers.filter(user => user.payroll_status === "retired");
   const currentUserIsExecutive = isExecutiveUser(currentUser);
 
   return (
-    <div className="admin-list">
-      {sortedUsers.map(user => (
-        <div key={user.id} className="admin-item">
-          <Avatar user={user} size={40} />
-          <div className="admin-item__info">
-            <div className="admin-item__name">
-              {user.display_name}
-              <UserRoleBadge user={user} />
+    <div className="admin-user-directory">
+      <div className="admin-user-directory__tabs" role="tablist" aria-label="ユーザー一覧の表示切替">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={directoryView === "current"}
+          aria-controls="current-users-panel"
+          className={directoryView === "current" ? "admin-user-directory__tab admin-user-directory__tab--active" : "admin-user-directory__tab"}
+          onClick={() => setDirectoryView("current")}
+        >
+          <UsersRound size={18} aria-hidden="true" />
+          <span>在籍者</span>
+          <b>{currentUsers.length}名</b>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={directoryView === "retired"}
+          aria-controls="retired-users-panel"
+          className={directoryView === "retired" ? "admin-user-directory__tab admin-user-directory__tab--active" : "admin-user-directory__tab"}
+          onClick={() => setDirectoryView("retired")}
+        >
+          <FolderArchive size={18} aria-hidden="true" />
+          <span>退職者</span>
+          <b>{retiredUsers.length}名</b>
+        </button>
+      </div>
+
+      {directoryView === "current" ? (
+        <div id="current-users-panel" role="tabpanel" className="admin-list">
+          {currentUsers.length === 0 && <p className="admin-empty">在籍者はいません</p>}
+          {currentUsers.map(user => (
+            <div key={user.id} className="admin-item">
+              <Avatar user={user} size={40} />
+              <div className="admin-item__info">
+                <div className="admin-item__name">
+                  {user.display_name}
+                  <UserRoleBadge user={user} />
+                </div>
+                <div className="admin-name-editor">
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="本名 (任意)"
+                    value={nameDrafts[user.id] ?? (user.real_name || "")}
+                    onChange={e => setNameDrafts(current => ({ ...current, [user.id]: e.target.value }))}
+                    disabled={isExecutiveUser(user) && !currentUserIsExecutive}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") handleRealNameSave(user);
+                    }}
+                    aria-label={`${user.display_name} の本名`}
+                  />
+                  <button
+                    type="button"
+                    className="admin-btn-outline"
+                    onClick={() => handleRealNameSave(user)}
+                    disabled={
+                      (isExecutiveUser(user) && !currentUserIsExecutive)
+                      || (nameDrafts[user.id] ?? (user.real_name || "")).trim() === (user.real_name || "")
+                    }
+                  >
+                    保存
+                  </button>
+                </div>
+                <div className="admin-item__sub">
+                  {new Date(user.created_at).toLocaleDateString("ja-JP")} 登録
+                  <span className={`admin-status admin-status--${user.status || "approved"}`}>
+                    {user.status === "pending" ? "承認待ち" : user.status === "suspended" ? "停止中" : "承認済み"}
+                  </span>
+                </div>
+              </div>
+              <div className="admin-item__actions">
+                {user.status === "pending" && (
+                  <button
+                    type="button"
+                    className="admin-btn-accent"
+                    onClick={() => handleStatusChange(user.id, "approved")}
+                    disabled={isExecutiveUser(user) && !currentUserIsExecutive}
+                  >
+                    承認
+                  </button>
+                )}
+                {user.status === "approved" && (
+                  <button
+                    type="button"
+                    className="admin-btn-outline"
+                    onClick={() => handleStatusChange(user.id, "suspended")}
+                    disabled={isExecutiveUser(user)}
+                  >
+                    停止
+                  </button>
+                )}
+                {user.status === "suspended" && (
+                  <button
+                    type="button"
+                    className="admin-btn-accent"
+                    onClick={() => handleStatusChange(user.id, "approved")}
+                    disabled={isExecutiveUser(user) && !currentUserIsExecutive}
+                  >
+                    再開
+                  </button>
+                )}
+                <select
+                  value={getEffectiveUserRole(user)}
+                  onChange={e => handleRoleChange(user.id, e.target.value)}
+                  className="admin-select"
+                  aria-label={`${user.display_name} の権限`}
+                  disabled={isExecutiveUser(user)}
+                >
+                  {USER_ROLE_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <select
+                  value={user.department || DEFAULT_USER_DEPARTMENT}
+                  onChange={e => handleDepartmentChange(user.id, e.target.value as UserDepartment)}
+                  className="admin-select"
+                  aria-label={`${user.display_name} の部署`}
+                  disabled={isExecutiveUser(user) && !currentUserIsExecutive}
+                >
+                  {USER_DEPARTMENTS.map(department => (
+                    <option key={department} value={department}>{department}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="admin-btn-danger"
+                  onClick={() => handleDelete(user)}
+                  title={isExecutiveUser(user) ? "役員アカウントは削除できません" : "削除"}
+                  aria-label={`${user.display_name} を削除`}
+                  disabled={isExecutiveUser(user)}
+                >
+                  <Trash2 size={15} aria-hidden="true" />
+                </button>
+              </div>
             </div>
-            <div className="admin-name-editor">
-              <input
-                type="text"
-                className="form-input"
-                placeholder="本名 (任意)"
-                value={nameDrafts[user.id] ?? (user.real_name || "")}
-                onChange={e => setNameDrafts(current => ({ ...current, [user.id]: e.target.value }))}
-                disabled={isExecutiveUser(user) && !currentUserIsExecutive}
-                onKeyDown={e => {
-                  if (e.key === "Enter") handleRealNameSave(user);
-                }}
-                aria-label={`${user.display_name} の本名`}
-              />
-              <button
-                type="button"
-                className="admin-btn-outline"
-                onClick={() => handleRealNameSave(user)}
-                disabled={
-                  (isExecutiveUser(user) && !currentUserIsExecutive)
-                  || (nameDrafts[user.id] ?? (user.real_name || "")).trim() === (user.real_name || "")
-                }
-              >
-                保存
-              </button>
-            </div>
-            <div className="admin-item__sub">
-              {new Date(user.created_at).toLocaleDateString("ja-JP")} 登録
-              <span className={`admin-status admin-status--${user.status || "approved"}`}>
-                {user.status === "pending" ? "承認待ち" : user.status === "suspended" ? "停止中" : "承認済み"}
-              </span>
-            </div>
-          </div>
-          <div className="admin-item__actions">
-            {user.status === "pending" && (
-              <button
-                type="button"
-                className="admin-btn-accent"
-                onClick={() => handleStatusChange(user.id, "approved")}
-                disabled={isExecutiveUser(user) && !currentUserIsExecutive}
-              >
-                承認
-              </button>
-            )}
-            {user.status === "approved" && (
-              <button
-                type="button"
-                className="admin-btn-outline"
-                onClick={() => handleStatusChange(user.id, "suspended")}
-                disabled={isExecutiveUser(user)}
-              >
-                停止
-              </button>
-            )}
-            {user.status === "suspended" && (
-              <button
-                type="button"
-                className="admin-btn-accent"
-                onClick={() => handleStatusChange(user.id, "approved")}
-                disabled={isExecutiveUser(user) && !currentUserIsExecutive}
-              >
-                再開
-              </button>
-            )}
-            <select
-              value={getEffectiveUserRole(user)}
-              onChange={e => handleRoleChange(user.id, e.target.value)}
-              className="admin-select"
-              aria-label={`${user.display_name} の権限`}
-              disabled={isExecutiveUser(user)}
-            >
-              {USER_ROLE_OPTIONS.map(option => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <select
-              value={user.department || DEFAULT_USER_DEPARTMENT}
-              onChange={e => handleDepartmentChange(user.id, e.target.value as UserDepartment)}
-              className="admin-select"
-              aria-label={`${user.display_name} の部署`}
-              disabled={isExecutiveUser(user) && !currentUserIsExecutive}
-            >
-              {USER_DEPARTMENTS.map(department => (
-                <option key={department} value={department}>{department}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="admin-btn-danger"
-              onClick={() => handleDelete(user)}
-              title={isExecutiveUser(user) ? "役員アカウントは削除できません" : "削除"}
-              disabled={isExecutiveUser(user)}
-            >
-              🗑
-            </button>
-          </div>
+          ))}
         </div>
-      ))}
+      ) : (
+        <div id="retired-users-panel" role="tabpanel" className="admin-list">
+          {retiredUsers.length === 0 && <p className="admin-empty">退職者はいません</p>}
+          {retiredUsers.map(user => (
+            <div key={user.id} className="admin-item admin-item--retired">
+              <Avatar user={user} size={40} />
+              <div className="admin-item__info">
+                <div className="admin-item__name">
+                  {user.real_name || user.display_name}
+                  <span className="admin-status admin-status--retired">退職済み</span>
+                </div>
+                {user.real_name && user.real_name !== user.display_name && (
+                  <div className="admin-item__sub">LINE表示名: {user.display_name}</div>
+                )}
+                <div className="admin-retired-user__meta">
+                  <span>{user.department || DEFAULT_USER_DEPARTMENT}</span>
+                  <span>{user.resigned_date ? `${new Date(`${user.resigned_date}T00:00:00`).toLocaleDateString("ja-JP")} 退職` : "退職日未設定"}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
