@@ -120,7 +120,8 @@ function BottomNav() {
         const isActive =
           item.href === "/groups"
             ? pathname.startsWith("/groups") ||
-              pathname.startsWith("/board")
+              pathname.startsWith("/board") ||
+              pathname.startsWith("/notifications")
             : item.href === "/members"
             ? pathname.startsWith("/members") ||
               pathname.startsWith("/chat")

@@ -2458,6 +2458,30 @@ img {
 .shift-shortcut:hover {
   border-color: #22c55e;
 }
+.notification-shortcut {
+  position: relative;
+  color: #facc15;
+}
+.notification-shortcut:hover {
+  border-color: #eab308;
+}
+.notification-shortcut__badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  border: 2px solid var(--card);
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 14px;
+  padding: 0 3px;
+  text-align: center;
+  white-space: nowrap;
+}
 .user-menu {
   position: absolute;
   top: calc(100% + 8px);
@@ -2579,8 +2603,19 @@ img {
 }
 
 @media (max-width: 420px) {
+  .groups-header {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
   .groups-header__logo {
-    font-size: 16px;
+    font-size: 15px;
+  }
+  .groups-header__actions {
+    gap: 6px;
+  }
+  .calendar-shortcut {
+    width: 36px;
+    height: 36px;
   }
   .groups-header__user > span {
     display: none;

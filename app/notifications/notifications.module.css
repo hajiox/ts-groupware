@@ -1,0 +1,263 @@
+.page {
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: 18px 16px calc(var(--nav-height) + 28px);
+}
+
+.intro {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.eyebrow {
+  display: block;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin-bottom: 3px;
+}
+
+.intro h2 {
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.total {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.filters {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 4px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card);
+  scrollbar-width: none;
+}
+
+.filters::-webkit-scrollbar {
+  display: none;
+}
+
+.filter,
+.filterActive {
+  flex: 1 0 auto;
+  min-width: 76px;
+  min-height: 34px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 10px;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.filter:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+
+.filterActive {
+  background: var(--accent);
+  color: #fff;
+}
+
+.list {
+  border-top: 1px solid var(--border);
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 12px;
+  min-height: 96px;
+  padding: 13px 4px;
+  border-bottom: 1px solid var(--border);
+  color: inherit;
+  transition: background 0.15s;
+}
+
+.item:hover {
+  background: color-mix(in srgb, var(--card-hover) 72%, transparent);
+}
+
+.typeIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.typeIconMention {
+  background: rgba(34, 211, 238, 0.14);
+  color: #67e8f9;
+}
+
+.typeIconTask {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+}
+
+.typeIconReaction {
+  background: rgba(244, 63, 94, 0.14);
+  color: #fb7185;
+}
+
+.typeIconComment {
+  background: rgba(34, 197, 94, 0.14);
+  color: #4ade80;
+}
+
+.emoji {
+  font-size: 19px;
+  line-height: 1;
+}
+
+.itemMain {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.itemHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.itemTitle {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.itemHeader time {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.actor {
+  color: var(--text-sub);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  margin-top: 1px;
+}
+
+.summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+  margin-top: 6px;
+}
+
+.taskDue,
+.taskDone {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.taskDue {
+  color: #fbbf24;
+}
+
+.taskDone {
+  color: #4ade80;
+}
+
+.chevron {
+  color: var(--text-muted);
+}
+
+.state,
+.empty,
+.error {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.empty,
+.error {
+  flex-direction: column;
+  gap: 10px;
+}
+
+.error {
+  color: #fca5a5;
+}
+
+.error button {
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0 14px;
+}
+
+.spinning {
+  animation: notificationSpin 0.8s linear infinite;
+}
+
+@keyframes notificationSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 420px) {
+  .page {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .item {
+    grid-template-columns: 38px minmax(0, 1fr) 16px;
+    gap: 9px;
+    padding-right: 2px;
+    padding-left: 2px;
+  }
+
+  .typeIcon {
+    width: 36px;
+    height: 36px;
+  }
+}

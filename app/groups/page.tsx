@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from "react";
 import { Check, X } from "lucide-react";
 import { CalendarShortcut } from "@/components/calendar-shortcut";
 import { HomeCompanyMessages } from "@/components/home-company-messages";
+import { NotificationShortcut } from "@/components/notification-shortcut";
 import { ShiftShortcut } from "@/components/shift-shortcut";
 import { shiftDeadlineInfo } from "@/lib/shift-deadline";
 import { getDeviceHeaders } from "@/lib/device-id";
@@ -604,6 +605,7 @@ export default function GroupsPage() {
       <header className="groups-header" role="banner">
         <span className="groups-header__logo">TS Groupware</span>
         <div className="groups-header__actions">
+          <NotificationShortcut />
           <CalendarShortcut />
           <ShiftShortcut />
           <div className="groups-header__user-wrap">
