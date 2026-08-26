@@ -261,6 +261,8 @@ export default function BoardPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
   const [hasMorePosts, setHasMorePosts] = useState(false);
+  const [postingDisabled, setPostingDisabled] = useState(false);
+  const [postingDisabledMessage, setPostingDisabledMessage] = useState("");
   const [isPosting, setIsPosting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -348,7 +350,12 @@ export default function BoardPage() {
       limit: String(POSTS_PAGE_LIMIT),
     });
     fetch(`/api/posts?${params.toString()}`, { headers: getDeviceHeaders() })
-      .then((res) => (res.ok ? res.json() : { posts: [], groupName: null }))
+      .then((res) => (res.ok ? res.json() : {
+        posts: [],
+        groupName: null,
+        postingDisabled: false,
+        postingDisabledMessage: null,
+      }))
       .then((data) => {
         const loadedPosts = (data.posts || []) as Post[];
         setPosts(loadedPosts);
@@ -360,6 +367,8 @@ export default function BoardPage() {
         ));
         setExpandedCommentsByPost({});
         setHasMorePosts(Boolean(data.hasMore));
+        setPostingDisabled(Boolean(data.postingDisabled));
+        setPostingDisabledMessage(data.postingDisabledMessage || "");
         if (data.groupName) setGroupName(data.groupName);
       })
       .catch(() => {})
@@ -870,15 +879,17 @@ export default function BoardPage() {
   }
 
   function canEditPost(post: Post) {
+    if (postingDisabled) return false;
     return currentUser?.id === post.user_id || (isManagementRole(currentUser?.role) && Boolean(post.tasks?.length));
   }
 
   function canDeletePost(post: Post) {
+    if (postingDisabled) return isManagementRole(currentUser?.role);
     return currentUser?.id === post.user_id || isManagementRole(currentUser?.role);
   }
 
   function canAnnotatePost(post: Post) {
-    return canDeletePost(post);
+    return !postingDisabled && canDeletePost(post);
   }
 
   function canPinPost(post: Post) {
@@ -1359,9 +1370,11 @@ export default function BoardPage() {
             </div>
           )}
           <div className="post-comment__actions">
-            <button type="button" onClick={() => openReplyComposer(parentPostId, post)}>
-              返信
-            </button>
+            {!postingDisabled && (
+              <button type="button" onClick={() => openReplyComposer(parentPostId, post)}>
+                返信
+              </button>
+            )}
             {(canEditPost(post) || canDeletePost(post)) && (
               <>
               {canEditPost(post) && (
@@ -1565,7 +1578,7 @@ export default function BoardPage() {
     const commentsExpanded = expandedCommentsByPost[post.id] === true;
     const visibleComments = commentsExpanded ? comments : comments.slice(-COMMENT_PREVIEW_LIMIT);
     const hiddenCommentCount = Math.max(0, post.commentCount - visibleComments.length);
-    const showCommentsSection = post.commentCount > 0 || isComposerActive;
+    const showCommentsSection = post.commentCount > 0 || (!postingDisabled && isComposerActive);
     const isPinnedExpanded = !post.is_pinned || expandedPinnedPosts[post.id] === true;
     const readers = currentUser?.id === post.user_id
       ? readReceipts.filter(receipt => new Date(receipt.last_read_at) >= new Date(post.created_at))
@@ -1666,9 +1679,11 @@ export default function BoardPage() {
             <span className="post-card__footer-btn">
               💬 {post.commentCount}件のコメント
             </span>
-            <button type="button" className="post-card__footer-btn" onClick={() => openCommentComposer(post.id)}>
-              コメントする
-            </button>
+            {!postingDisabled && (
+              <button type="button" className="post-card__footer-btn" onClick={() => openCommentComposer(post.id)}>
+                コメントする
+              </button>
+            )}
           </div>
           {showCommentsSection && (
             <section
@@ -1692,7 +1707,7 @@ export default function BoardPage() {
               {post.commentCount > 0 && visibleComments.length === 0 && (
                 <p className="post-comments__empty">コメントを読み込み中...</p>
               )}
-              {isComposerActive && renderCommentComposer(post)}
+              {!postingDisabled && isComposerActive && renderCommentComposer(post)}
             </section>
           )}
         </div>
@@ -1758,10 +1773,10 @@ export default function BoardPage() {
   return (
     <div
       className={`board-page${postDropActive ? " board-page--drop-active" : ""}`}
-      onDragEnter={handlePostDragEnter}
-      onDragOver={handlePostDragOver}
-      onDragLeave={handlePostDragLeave}
-      onDrop={handlePostDrop}
+      onDragEnter={postingDisabled ? undefined : handlePostDragEnter}
+      onDragOver={postingDisabled ? undefined : handlePostDragOver}
+      onDragLeave={postingDisabled ? undefined : handlePostDragLeave}
+      onDrop={postingDisabled ? undefined : handlePostDrop}
     >
       {postDropActive && (
         <div className="page-file-drop-indicator" aria-hidden="true">
@@ -1809,7 +1824,9 @@ export default function BoardPage() {
         {loading ? (
           <p className="post-list__state">読み込み中...</p>
         ) : posts.length === 0 ? (
-          <p className="post-list__state">投稿がありません。最初の投稿をしてみましょう。</p>
+          <p className="post-list__state">
+            {postingDisabled ? "保存されている投稿はありません。" : "投稿がありません。最初の投稿をしてみましょう。"}
+          </p>
         ) : filteredPosts.length === 0 ? (
           <>
             <p className="post-list__state">検索条件に一致する投稿はありません。</p>
@@ -1823,6 +1840,19 @@ export default function BoardPage() {
         )}
       </section>
 
+      {!loading && (postingDisabled ? (
+        <footer className="board-footer board-footer--read-only">
+          <div className="board-read-only" role="status">
+            <div>
+              <strong>閲覧専用</strong>
+              <span>{postingDisabledMessage || "この掲示板への投稿・コメントは終了しました。"}</span>
+            </div>
+            <button type="button" className="btn-primary" onClick={() => router.push("/leave")}>
+              有給申請を開く
+            </button>
+          </div>
+        </footer>
+      ) : (
       <footer className="board-footer">
         <div className="post-input-bar post-input-bar--stacked">
         {selectedFile && (
@@ -1995,6 +2025,7 @@ export default function BoardPage() {
         </form>
         </div>
       </footer>
+      ))}
 
       {annotatingImage && (
         <ImageAnnotationEditor

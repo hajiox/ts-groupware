@@ -64,6 +64,35 @@ type PostRow = {
   is_pinned?: boolean
 }
 
+type GroupPostingPolicy = {
+  postingDisabled: boolean
+  message: string | null
+}
+
+async function loadGroupPostingPolicy(groupId: string): Promise<GroupPostingPolicy> {
+  const { data, error } = await adminClient
+    .from('gw_groups')
+    .select('posting_disabled, posting_disabled_message')
+    .eq('id', groupId)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) throw new Error('掲示板が見つかりません')
+
+  return {
+    postingDisabled: Boolean(data.posting_disabled),
+    message: typeof data.posting_disabled_message === 'string' && data.posting_disabled_message.trim()
+      ? data.posting_disabled_message.trim()
+      : null,
+  }
+}
+
+function postingDisabledResponse(policy: GroupPostingPolicy) {
+  return NextResponse.json({
+    error: policy.message || 'この掲示板は閲覧専用です',
+  }, { status: 403 })
+}
+
 async function hasGroupMembership(groupId: string, userId: string) {
   const { data, error } = await adminClient
     .from('gw_group_members')
@@ -401,7 +430,7 @@ export async function GET(request: NextRequest) {
     markGroupRead(user.id, groupId),
     adminClient
       .from('gw_groups')
-      .select('name')
+      .select('name, posting_disabled, posting_disabled_message')
       .eq('id', groupId)
       .single(),
   ])
@@ -436,7 +465,14 @@ export async function GET(request: NextRequest) {
     commentPreview: (commentPreviewMap[post.id] || []).map(enrichPost),
   }))
 
-  return NextResponse.json({ posts: enrichedPosts, groupName: groupInfo?.name || null, hasMore, readReceipts })
+  return NextResponse.json({
+    posts: enrichedPosts,
+    groupName: groupInfo?.name || null,
+    postingDisabled: Boolean(groupInfo?.posting_disabled),
+    postingDisabledMessage: groupInfo?.posting_disabled_message || null,
+    hasMore,
+    readReceipts,
+  })
 }
 
 export async function POST(request: NextRequest) {
@@ -455,14 +491,17 @@ export async function POST(request: NextRequest) {
   if (!group_id) {
     return NextResponse.json({ error: 'group_id が必要です' }, { status: 400 })
   }
+  let postingPolicy: GroupPostingPolicy
   try {
     if (!await hasGroupMembership(group_id, user.id)) {
       return NextResponse.json({ error: 'この掲示板に参加していません' }, { status: 403 })
     }
+    postingPolicy = await loadGroupPostingPolicy(group_id)
   } catch (error) {
     const message = error instanceof Error ? error.message : '所属確認に失敗しました'
     return NextResponse.json({ error: message }, { status: 500 })
   }
+  if (postingPolicy.postingDisabled) return postingDisabledResponse(postingPolicy)
   if (!trimmedContent && (!attachments || attachments.length === 0)) {
     return NextResponse.json({ error: '内容が必要です' }, { status: 400 })
   }
@@ -717,10 +756,12 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: '投稿が見つかりません' }, { status: 404 })
   }
 
+  let postingPolicy: GroupPostingPolicy
   try {
     if (!await hasGroupMembership(existing.group_id, user.id)) {
       return NextResponse.json({ error: 'この掲示板に参加していません' }, { status: 403 })
     }
+    postingPolicy = await loadGroupPostingPolicy(existing.group_id)
   } catch (error) {
     const message = error instanceof Error ? error.message : '所属確認に失敗しました'
     return NextResponse.json({ error: message }, { status: 500 })
@@ -757,6 +798,8 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ post })
   }
+
+  if (postingPolicy.postingDisabled) return postingDisabledResponse(postingPolicy)
 
   if (action === 'attachments') {
     if (!attachmentsEditRequested) {
@@ -961,13 +1004,19 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: '投稿が見つかりません' }, { status: 404 })
   }
 
+  let postingPolicy: GroupPostingPolicy
   try {
     if (!await hasGroupMembership(post.group_id, user.id)) {
       return NextResponse.json({ error: 'この掲示板に参加していません' }, { status: 403 })
     }
+    postingPolicy = await loadGroupPostingPolicy(post.group_id)
   } catch (error) {
     const message = error instanceof Error ? error.message : '所属確認に失敗しました'
     return NextResponse.json({ error: message }, { status: 500 })
+  }
+
+  if (postingPolicy.postingDisabled && !isManagementUser(user)) {
+    return postingDisabledResponse(postingPolicy)
   }
 
   if (post.user_id !== user.id && !isManagementUser(user)) {

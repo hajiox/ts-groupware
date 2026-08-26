@@ -37,7 +37,7 @@ export function PaidLeaveOperationManual() {
           <div><dt>対象</dt><dd>有給管理対象の全ユーザー</dd></div>
           <div><dt>区分</dt><dd>有給（全休）1日 / 有給（半休）0.5日</dd></div>
           <div><dt>運用開始</dt><dd>2026年8月1日</dd></div>
-          <div><dt>更新日</dt><dd>2026年7月30日</dd></div>
+          <div><dt>更新日</dt><dd>2026年8月27日</dd></div>
         </dl>
       </header>
 
@@ -141,6 +141,7 @@ export function PaidLeaveOperationManual() {
       <section className="manual-section">
         <h2>7. 注意事項</h2>
         <ul>
+          <li>「TS（有給管理）」掲示板は閲覧専用です。掲示板へ書き込んでも有給申請にはなりません。</li>
           <li>口頭・電話・DMで連絡しただけでは、TSG上の有給申請は完了しません。</li>
           <li>申請前に、画面に表示される有給残日数を確認してください。</li>
           <li>申請内容の変更や取消しが必要な場合は、承認前後を問わず所属管理者へ連絡してください。</li>

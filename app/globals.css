@@ -10826,6 +10826,53 @@ body,
   line-height: 1.35;
 }
 
+.board-footer--read-only {
+  padding: 10px 12px;
+}
+
+.board-read-only {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+}
+
+.board-read-only > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.board-read-only strong {
+  color: #fbbf24;
+  font-size: 14px;
+}
+
+.board-read-only span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.board-read-only .btn-primary {
+  flex: 0 0 auto;
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .board-read-only {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .board-read-only .btn-primary {
+    width: 100%;
+  }
+}
+
 .menu-page,
 .groups-list,
 .members-page,
