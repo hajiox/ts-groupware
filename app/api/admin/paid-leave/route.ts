@@ -432,18 +432,22 @@ export async function POST(request: NextRequest) {
       if (!await canApprovePaidLeaveEmployee(auth.user!, resolution.employee_id)) {
         return NextResponse.json({ error: 'この勤怠回答を承認する権限がありません' }, { status: 403 })
       }
-      const { error } = await adminClient.rpc('gw_confirm_workday_resolution', {
+      const { data, error } = await adminClient.rpc('gw_confirm_workday_resolution', {
         p_resolution_id: resolutionId,
         p_actor_user_id: auth.user!.id,
         p_manager_memo: managerMemo || null,
       })
       if (error) throw error
       if (resolution.paid_leave_request_id) {
+        await notifyManagementApprovalPost((data || {}) as ApprovalResult)
         await notifyRequestResult(resolution.paid_leave_request_id, true)
       } else {
         await notifyWorkdayResolutionResult(resolution, true)
       }
-      return NextResponse.json({ success: true })
+      return NextResponse.json({
+        success: true,
+        managementPostId: (data as ApprovalResult | null)?.management_post_id || null,
+      })
     }
 
     if (action === 'reopen_resolution') {

@@ -99,6 +99,9 @@ type PaidLeaveHomeStatus = {
 
 type PendingLeaveApproval = {
   id: string;
+  approval_kind: "paid_leave_request" | "workday_resolution";
+  request_id: string;
+  resolution_id: string | null;
   employee_id: string;
   employee_name: string;
   department: string | null;
@@ -508,24 +511,29 @@ export default function GroupsPage() {
     }
   }
 
-  async function handleLeaveApproval(requestId: string, approved: boolean) {
+  async function handleLeaveApproval(request: PendingLeaveApproval, approved: boolean) {
     if (leaveApprovalBusyId) return;
-    if (!approved && !window.confirm("この有給申請を却下しますか？")) return;
+    const isWorkdayResolution = request.approval_kind === "workday_resolution";
+    if (!approved && !window.confirm(isWorkdayResolution ? "この有給回答を差し戻しますか？" : "この有給申請を却下しますか？")) return;
 
-    setLeaveApprovalBusyId(requestId);
+    setLeaveApprovalBusyId(request.id);
     setLeaveApprovalMessage("");
     try {
       const response = await fetch("/api/admin/paid-leave", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: approved ? "approve_request" : "reject_request",
-          request_id: requestId,
+          action: isWorkdayResolution
+            ? (approved ? "confirm_resolution" : "reopen_resolution")
+            : (approved ? "approve_request" : "reject_request"),
+          ...(isWorkdayResolution
+            ? { resolution_id: request.resolution_id }
+            : { request_id: request.request_id }),
         }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "有給申請を更新できませんでした");
-      setLeaveApprovalMessage(approved ? "有給申請を承認しました" : "有給申請を却下しました");
+      setLeaveApprovalMessage(approved ? "有給申請を承認しました" : isWorkdayResolution ? "有給回答を差し戻しました" : "有給申請を却下しました");
       loadPendingLeaveApprovals();
       loadPaidLeaveStatus();
     } catch (error) {
@@ -696,6 +704,7 @@ export default function GroupsPage() {
                     <span>
                       {request.leave_date} / {request.leave_unit === "full_day" ? "全休" : "半休"}
                       {request.department ? ` / ${request.department}` : ""}
+                      {request.approval_kind === "workday_resolution" ? " / 打刻確認" : ""}
                     </span>
                     {request.employee_memo && <small>{request.employee_memo}</small>}
                   </div>
@@ -704,7 +713,7 @@ export default function GroupsPage() {
                       type="button"
                       className="leave-approval-home__approve"
                       disabled={Boolean(leaveApprovalBusyId)}
-                      onClick={() => void handleLeaveApproval(request.id, true)}
+                      onClick={() => void handleLeaveApproval(request, true)}
                     >
                       <Check size={16} /> 承認
                     </button>
@@ -712,8 +721,8 @@ export default function GroupsPage() {
                       type="button"
                       className="leave-approval-home__reject"
                       disabled={Boolean(leaveApprovalBusyId)}
-                      onClick={() => void handleLeaveApproval(request.id, false)}
-                      aria-label={`${request.employee_name}さんの有給申請を却下`}
+                      onClick={() => void handleLeaveApproval(request, false)}
+                      aria-label={`${request.employee_name}さんの${request.approval_kind === "workday_resolution" ? "有給回答を差し戻す" : "有給申請を却下"}`}
                     >
                       <X size={16} />
                     </button>
