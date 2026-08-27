@@ -95,11 +95,26 @@ export async function resolvePaidLeaveRequestSchedule(options: {
   leaveDate: string
   leaveUnit: LeaveUnit
 }): Promise<PaidLeaveScheduleResult> {
+  const { data: employee, error: employeeError } = await adminClient
+    .from('gw_payroll_employees')
+    .select('department, raw_payload')
+    .eq('id', options.employeeId)
+    .maybeSingle()
+  if (employeeError) throw employeeError
+  if (!employee?.department) {
+    return {
+      ok: false,
+      status: 400,
+      error: '所属部署が未設定のため確定シフトを特定できません。人事管理で所属部署を設定してください',
+    }
+  }
+
   const { data: periods, error: periodsError } = await adminClient
     .from('gw_shift_periods')
     .select('id, start_date, end_date, status')
     .in('status', ['confirmed', 'exported', 'archived'])
     .eq('is_test_mode', false)
+    .eq('department', employee.department)
     .lte('start_date', options.leaveDate)
     .gte('end_date', options.leaveDate)
     .order('start_date', { ascending: false })
@@ -115,7 +130,7 @@ export async function resolvePaidLeaveRequestSchedule(options: {
   }
 
   const assignmentFilter = `employee_id.eq.${options.employeeId},user_id.eq.${options.userId}`
-  const [assignmentResult, periodAssignmentsResult, employeeResult, requestResult] = await Promise.all([
+  const [assignmentResult, periodAssignmentsResult, requestResult] = await Promise.all([
     adminClient
       .from('gw_shift_assignments')
       .select('id, period_id, work_date, shift_label, start_time, end_time, break_minutes, work_minutes, note')
@@ -131,11 +146,6 @@ export async function resolvePaidLeaveRequestSchedule(options: {
       .or(assignmentFilter)
       .order('work_date', { ascending: true }),
     adminClient
-      .from('gw_payroll_employees')
-      .select('raw_payload')
-      .eq('id', options.employeeId)
-      .maybeSingle(),
-    adminClient
       .from('gw_shift_requests')
       .select('request_type')
       .eq('period_id', period.id)
@@ -145,7 +155,6 @@ export async function resolvePaidLeaveRequestSchedule(options: {
   ])
   const lookupError = assignmentResult.error
     || periodAssignmentsResult.error
-    || employeeResult.error
     || requestResult.error
   if (lookupError) throw lookupError
 
@@ -173,7 +182,7 @@ export async function resolvePaidLeaveRequestSchedule(options: {
     }
   }
 
-  const employeeProfileBasis = profileBasis(employeeResult.data?.raw_payload)
+  const employeeProfileBasis = profileBasis(employee.raw_payload)
   const nearbyAssignment = ((periodAssignmentsResult.data || []) as AssignmentRow[])
     .filter(isWorkAssignment)
     .sort((left, right) => dateDistance(left.work_date, options.leaveDate) - dateDistance(right.work_date, options.leaveDate))[0]
