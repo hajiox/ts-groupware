@@ -218,7 +218,10 @@ export function PaidLeaveAdminTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function post(body: Record<string, unknown>, successMessage: string) {
+  async function post(
+    body: Record<string, unknown>,
+    successMessage: string | ((data: Record<string, unknown>) => string),
+  ) {
     setBusy(true);
     setMessage("");
     try {
@@ -229,7 +232,7 @@ export function PaidLeaveAdminTab() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "更新できませんでした");
-      setMessage(successMessage);
+      setMessage(typeof successMessage === "function" ? successMessage(data) : successMessage);
       await load(selectedUserId);
       return true;
     } catch (error) {
@@ -248,7 +251,9 @@ export function PaidLeaveAdminTab() {
       leave_date: leaveDate,
       leave_unit: leaveUnit,
       memo: leaveMemo,
-    }, "有給を登録し、残日数へ反映しました");
+    }, (data) => data.approvalPending
+      ? "有給申請を登録しました。所属長の承認待ちです。"
+      : "有給を承認し、残日数と確定シフトへ反映しました。");
     if (success) {
       setLeaveDate("");
       setLeaveUnit("full_day");
@@ -456,7 +461,7 @@ export function PaidLeaveAdminTab() {
               <div className="admin-panel__header">
                 <div>
                   <h4>所属スタッフの有給を登録</h4>
-                  <p>希望提出期限後やシフト確定後の申請を、確定勤務日と有給残へ反映します。</p>
+                  <p>希望提出期限後やシフト確定後も登録できます。休みの日は全休の承認後に有給へ変更します。</p>
                 </div>
               </div>
               <div className="leave-action-row">
@@ -467,7 +472,7 @@ export function PaidLeaveAdminTab() {
                 </select>
                 <input className="form-input" value={leaveMemo} onChange={(event) => setLeaveMemo(event.target.value)} placeholder="本人からの申請内容・備考" />
                 <button type="button" className="btn-primary" disabled={busy || !leaveDate} onClick={() => void registerEmployeeLeave()}>
-                  有給を登録
+                  有給を設定
                 </button>
               </div>
             </section>

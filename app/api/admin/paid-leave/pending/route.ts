@@ -19,7 +19,7 @@ export async function GET() {
         .from('gw_paid_leave_requests')
         .select('id, employee_id, leave_date, leave_unit, requested_days, employee_memo, requested_at')
         .eq('request_status', 'submitted')
-        .eq('request_source', 'employee')
+        .in('request_source', ['employee', 'admin'])
         .order('requested_at', { ascending: true }),
       adminClient
         .from('gw_workday_resolutions')

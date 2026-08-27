@@ -7,7 +7,9 @@ import {
   canApprovePaidLeaveRequest,
   canReceivePaidLeaveApprovals,
   canRegisterPaidLeaveForEmployee,
+  paidLeaveApproverIdsForEmployee,
 } from '@/lib/paid-leave-approval'
+import { resolvePaidLeaveRequestSchedule } from '@/lib/paid-leave-request-schedule'
 import { getUserSession } from '@/lib/session'
 import { adminClient } from '@/lib/supabase/admin'
 
@@ -23,22 +25,6 @@ function cleanDate(value: unknown) {
 function cleanDays(value: unknown) {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed > 0 && Number.isInteger(parsed * 2) ? parsed : null
-}
-
-function scheduledMinutesFromAssignment(assignment: {
-  work_minutes?: number | null
-  start_time?: string | null
-  end_time?: string | null
-  break_minutes?: number | null
-} | null) {
-  if (!assignment) return 0
-  if (Number(assignment.work_minutes || 0) > 0) return Number(assignment.work_minutes)
-  if (!assignment.start_time || !assignment.end_time) return 0
-  const [startHour, startMinute] = assignment.start_time.slice(0, 5).split(':').map(Number)
-  const [endHour, endMinute] = assignment.end_time.slice(0, 5).split(':').map(Number)
-  let minutes = endHour * 60 + endMinute - (startHour * 60 + startMinute)
-  if (minutes < 0) minutes += 24 * 60
-  return Math.max(0, minutes - Number(assignment.break_minutes || 0))
 }
 
 async function requireLeaveAdmin() {
@@ -71,7 +57,7 @@ type ApprovalResult = {
 }
 
 async function allocateRequest(requestId: string, actorId: string) {
-  const { data, error } = await adminClient.rpc('gw_approve_paid_leave_request_with_management_post', {
+  const { data, error } = await adminClient.rpc('gw_approve_paid_leave_request_flexible', {
     p_request_id: requestId,
     p_actor_user_id: actorId,
   })
@@ -130,6 +116,27 @@ async function notifyRequestResult(requestId: string, approved: boolean) {
   }
 }
 
+async function notifyPaidLeaveApprovers(options: {
+  employeeId: string
+  employeeName: string
+  leaveDate: string
+  leaveUnit: 'full_day' | 'half_day'
+  requestId: string
+}) {
+  try {
+    const approverIds = await paidLeaveApproverIdsForEmployee(options.employeeId)
+    const { sendPushNotificationToUser } = await import('@/lib/web-push')
+    await Promise.allSettled(approverIds.map((approverId) => sendPushNotificationToUser(approverId, {
+      title: '有給申請が届きました',
+      body: `${options.employeeName}さん / ${options.leaveDate} / ${options.leaveUnit === 'full_day' ? '全休' : '半休'}`,
+      url: '/groups',
+      tag: `tsg-paid-leave-request-${options.requestId}`,
+    })))
+  } catch (error) {
+    console.error('[Paid leave approver push error]', error)
+  }
+}
+
 async function notifyWorkdayResolutionResult(row: {
   id: string
   user_id: string | null
@@ -182,7 +189,7 @@ export async function GET(request: NextRequest) {
         .from('gw_paid_leave_requests')
         .select('employee_id')
         .eq('request_status', 'submitted')
-        .eq('request_source', 'employee'),
+        .in('request_source', ['employee', 'admin']),
       employeeIds.length
         ? adminClient
           .from('gw_paid_leave_grant_balances')
@@ -326,33 +333,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '取得日時点の有給残日数が不足します' }, { status: 400 })
       }
 
-      const { data: periods, error: periodsError } = await adminClient
-        .from('gw_shift_periods')
-        .select('id')
-        .in('status', ['confirmed', 'exported', 'archived'])
-        .eq('is_test_mode', false)
-        .lte('start_date', leaveDate)
-        .gte('end_date', leaveDate)
-      if (periodsError) throw periodsError
-      const periodIds = (periods || []).map((period) => period.id)
-      if (!periodIds.length) {
-        return NextResponse.json({ error: '確定前のシフトはシフト作成画面で有給を設定してください' }, { status: 400 })
+      const scheduleResult = await resolvePaidLeaveRequestSchedule({
+        employeeId,
+        userId: employee.user_id,
+        leaveDate,
+        leaveUnit,
+      })
+      if (!scheduleResult.ok) {
+        return NextResponse.json({ error: scheduleResult.error }, { status: scheduleResult.status })
       }
-      const { data: assignmentRows, error: assignmentError } = await adminClient
-        .from('gw_shift_assignments')
-        .select('id, period_id, work_minutes, start_time, end_time, break_minutes')
-        .in('period_id', periodIds)
-        .eq('work_date', leaveDate)
-        .or(`employee_id.eq.${employeeId},user_id.eq.${employee.user_id}`)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-      if (assignmentError) throw assignmentError
-      const assignment = assignmentRows?.[0] || null
-      const scheduledMinutes = scheduledMinutesFromAssignment(assignment)
-      if (!assignment || scheduledMinutes <= 0) {
-        return NextResponse.json({ error: 'この日は確定シフト上の勤務日ではありません' }, { status: 400 })
-      }
-      const wage = await paidLeaveWageSnapshot(employeeId, scheduledMinutes, requestedDays, leaveDate as `${number}-${number}-${number}`)
+      const schedule = scheduleResult.schedule
+      const wage = await paidLeaveWageSnapshot(employeeId, schedule.scheduledMinutes, requestedDays, leaveDate as `${number}-${number}-${number}`)
       const { data: createdRequest, error: createError } = await adminClient
         .from('gw_paid_leave_requests')
         .insert({
@@ -362,9 +353,9 @@ export async function POST(request: NextRequest) {
           leave_unit: leaveUnit,
           request_source: 'admin',
           request_status: 'submitted',
-          shift_period_id: assignment.period_id,
-          shift_assignment_id: assignment.id,
-          scheduled_minutes_snapshot: scheduledMinutes,
+          shift_period_id: schedule.periodId,
+          shift_assignment_id: schedule.assignmentId,
+          scheduled_minutes_snapshot: schedule.scheduledMinutes,
           wage_method: 'ordinary_wage',
           hourly_rate_snapshot: wage.hourlyRate || null,
           payable_minutes_snapshot: wage.payableMinutes,
@@ -375,15 +366,46 @@ export async function POST(request: NextRequest) {
           raw_payload: {
             wage_basis: wage.basis,
             included_in_monthly_salary: wage.includedInMonthlySalary,
+            paid_leave_schedule: {
+              source: schedule.source,
+              start_time: schedule.startTime,
+              end_time: schedule.endTime,
+              break_minutes: schedule.breakMinutes,
+              converts_non_workday: schedule.convertsNonWorkday,
+              previous_shift_request_type: schedule.previousShiftRequestType,
+            },
           },
         })
         .select('id')
         .single()
       if (createError) throw createError
-      const approvalResult = await allocateRequest(createdRequest.id, auth.user!.id)
-      await notifyManagementApprovalPost(approvalResult)
-      await notifyRequestResult(createdRequest.id, true)
-      return NextResponse.json({ success: true, requestId: createdRequest.id })
+      const canApproveCreatedRequest = await canApprovePaidLeaveEmployee(auth.user!, employeeId)
+      if (canApproveCreatedRequest) {
+        const approvalResult = await allocateRequest(createdRequest.id, auth.user!.id)
+        await notifyManagementApprovalPost(approvalResult)
+        await notifyRequestResult(createdRequest.id, true)
+        return NextResponse.json({
+          success: true,
+          requestId: createdRequest.id,
+          approved: true,
+          convertsNonWorkday: schedule.convertsNonWorkday,
+        })
+      }
+
+      await notifyPaidLeaveApprovers({
+        employeeId,
+        employeeName: dashboard.employee.name,
+        leaveDate,
+        leaveUnit,
+        requestId: createdRequest.id,
+      })
+      return NextResponse.json({
+        success: true,
+        requestId: createdRequest.id,
+        approved: false,
+        approvalPending: true,
+        convertsNonWorkday: schedule.convertsNonWorkday,
+      })
     }
 
     if (action === 'approve_request') {

@@ -241,7 +241,9 @@ export default function PaidLeavePage() {
       setLeaveUnit("full_day");
       setLeaveMemo("");
       await load();
-      setMessage("有給申請を送信しました。管理者の承認をお待ちください。");
+      setMessage(data.convertsNonWorkday
+        ? "有給申請を送信しました。承認後に休みから有給へ変更されます。"
+        : "有給申請を送信しました。管理者の承認をお待ちください。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "有給申請を送信できませんでした");
     } finally {
@@ -320,7 +322,7 @@ export default function PaidLeavePage() {
               <p className="leave-request-panel__help">
                 {payload.viewer.viewingAs
                   ? "この欄からスタッフ本人が申請します。代理閲覧中は操作できません。"
-                  : "取得日と全休・半休を選んで申請してください。管理者の承認後に確定します。"}
+                  : "確定シフトが休みの日も、全休なら申請できます。管理者の承認後にシフトと有給残へ反映されます。"}
               </p>
               <div className="leave-request-form">
                 <label>

@@ -4,6 +4,7 @@ import { isRegularEmployeeWorkStyle } from '@/lib/bereavement-leave'
 import { canProxyStaffView } from '@/lib/management-permissions'
 import { loadPaidLeaveDashboard, paidLeaveWageSnapshot } from '@/lib/paid-leave-data'
 import { paidLeaveApproverIdsForEmployee } from '@/lib/paid-leave-approval'
+import { resolvePaidLeaveRequestSchedule } from '@/lib/paid-leave-request-schedule'
 import { getUserSession } from '@/lib/session'
 import { adminClient } from '@/lib/supabase/admin'
 
@@ -18,22 +19,6 @@ const RESOLUTION_TYPES = new Set([
 
 function cleanText(value: unknown, max = 500) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
-}
-
-function scheduledMinutesFromAssignment(assignment: {
-  work_minutes?: number | null
-  start_time?: string | null
-  end_time?: string | null
-  break_minutes?: number | null
-} | null) {
-  if (!assignment) return 0
-  if (Number(assignment.work_minutes || 0) > 0) return Number(assignment.work_minutes)
-  if (!assignment.start_time || !assignment.end_time) return 0
-  const [startHour, startMinute] = assignment.start_time.slice(0, 5).split(':').map(Number)
-  const [endHour, endMinute] = assignment.end_time.slice(0, 5).split(':').map(Number)
-  let minutes = endHour * 60 + endMinute - (startHour * 60 + startMinute)
-  if (minutes < 0) minutes += 24 * 60
-  return Math.max(0, minutes - Number(assignment.break_minutes || 0))
 }
 
 async function submitPaidLeaveRequest(
@@ -82,42 +67,20 @@ async function submitPaidLeaveRequest(
     }, { status: 400 })
   }
 
-  const { data: periods, error: periodsError } = await adminClient
-    .from('gw_shift_periods')
-    .select('id')
-    .in('status', ['confirmed', 'exported', 'archived'])
-    .eq('is_test_mode', false)
-    .lte('start_date', leaveDate)
-    .gte('end_date', leaveDate)
-  if (periodsError) throw periodsError
-  const periodIds = (periods || []).map((period) => period.id)
-  if (periodIds.length === 0) {
-    return NextResponse.json({
-      error: 'この日の確定シフトがありません。シフト確定前は希望回収画面から申請してください',
-    }, { status: 400 })
+  const scheduleResult = await resolvePaidLeaveRequestSchedule({
+    employeeId: dashboard.employee.id,
+    userId: user.id,
+    leaveDate,
+    leaveUnit,
+  })
+  if (!scheduleResult.ok) {
+    return NextResponse.json({ error: scheduleResult.error }, { status: scheduleResult.status })
   }
-
-  const assignmentQuery = adminClient
-    .from('gw_shift_assignments')
-    .select('id, period_id, work_minutes, start_time, end_time, break_minutes')
-    .in('period_id', periodIds)
-    .eq('work_date', leaveDate)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-  const { data: assignmentRows, error: assignmentError } = await assignmentQuery
-    .or(`employee_id.eq.${dashboard.employee.id},user_id.eq.${user.id}`)
-  if (assignmentError) throw assignmentError
-  const assignment = assignmentRows?.[0] || null
-  const scheduledMinutes = scheduledMinutesFromAssignment(assignment)
-  if (!assignment || scheduledMinutes <= 0) {
-    return NextResponse.json({
-      error: 'この日は確定シフト上の勤務日ではありません。勤務日を確認してください',
-    }, { status: 400 })
-  }
+  const schedule = scheduleResult.schedule
 
   const wage = await paidLeaveWageSnapshot(
     dashboard.employee.id,
-    scheduledMinutes,
+    schedule.scheduledMinutes,
     requestedDays,
     leaveDate as `${number}-${number}-${number}`,
   )
@@ -130,9 +93,9 @@ async function submitPaidLeaveRequest(
       leave_unit: leaveUnit,
       request_source: 'employee',
       request_status: 'submitted',
-      shift_period_id: assignment.period_id,
-      shift_assignment_id: assignment.id,
-      scheduled_minutes_snapshot: scheduledMinutes,
+      shift_period_id: schedule.periodId,
+      shift_assignment_id: schedule.assignmentId,
+      scheduled_minutes_snapshot: schedule.scheduledMinutes,
       wage_method: 'ordinary_wage',
       hourly_rate_snapshot: wage.hourlyRate || null,
       payable_minutes_snapshot: wage.payableMinutes,
@@ -142,6 +105,14 @@ async function submitPaidLeaveRequest(
       raw_payload: {
         wage_basis: wage.basis,
         included_in_monthly_salary: wage.includedInMonthlySalary,
+        paid_leave_schedule: {
+          source: schedule.source,
+          start_time: schedule.startTime,
+          end_time: schedule.endTime,
+          break_minutes: schedule.breakMinutes,
+          converts_non_workday: schedule.convertsNonWorkday,
+          previous_shift_request_type: schedule.previousShiftRequestType,
+        },
       },
     })
     .select('id')
@@ -173,7 +144,11 @@ async function submitPaidLeaveRequest(
     console.error('[Paid leave request push error]', error)
   }
 
-  return NextResponse.json({ success: true, requestId: createdRequest.id })
+  return NextResponse.json({
+    success: true,
+    requestId: createdRequest.id,
+    convertsNonWorkday: schedule.convertsNonWorkday,
+  })
 }
 
 export async function GET(request: NextRequest) {
