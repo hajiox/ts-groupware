@@ -1009,15 +1009,33 @@ function assignmentPayload(options: {
   periodId: string
   workDate: string
   pattern: ShiftPattern | null
+  employee?: ShiftEmployee | null
   actorId: string
   employeeId?: string | null
 }) {
   const shiftLabel = cleanText(options.body.shift_label, 120)
-  const startTime = cleanTime(options.body.start_time) || cleanTime(options.pattern?.start_time || null)
-  const endTime = cleanTime(options.body.end_time) || cleanTime(options.pattern?.end_time || null)
-  const breakMinutes = options.body.break_minutes === null || options.body.break_minutes === undefined || options.body.break_minutes === ''
-    ? options.pattern?.break_minutes || 0
-    : Math.max(0, Number(options.body.break_minutes) || 0)
+  const requestedStart = cleanTime(options.body.start_time)
+  const requestedEnd = cleanTime(options.body.end_time)
+  const patternStart = cleanTime(options.pattern?.start_time || null)
+  const patternEnd = cleanTime(options.pattern?.end_time || null)
+  const personalBasic = options.employee && options.pattern && isBasicShiftPattern(options.pattern)
+    ? basicShiftForEmployee(options.employee)
+    : null
+  const usesPatternDefault = Boolean(personalBasic && (
+    (!requestedStart && !requestedEnd) ||
+    (requestedStart === patternStart && requestedEnd === patternEnd)
+  ))
+  const startTime = usesPatternDefault
+    ? personalBasic?.startTime || null
+    : requestedStart || personalBasic?.startTime || patternStart
+  const endTime = usesPatternDefault
+    ? personalBasic?.endTime || null
+    : requestedEnd || personalBasic?.endTime || patternEnd
+  const breakMinutes = usesPatternDefault
+    ? personalBasic?.breakMinutes || 0
+    : options.body.break_minutes === null || options.body.break_minutes === undefined || options.body.break_minutes === ''
+      ? personalBasic?.breakMinutes ?? options.pattern?.break_minutes ?? 0
+      : Math.max(0, Number(options.body.break_minutes) || 0)
   const calculatedWorkMinutes = workMinutes(startTime, endTime, breakMinutes)
 
   return {
@@ -1246,7 +1264,9 @@ async function generateDraft(period: ShiftPeriod, actorId: string, overwriteAi: 
         return []
       }
 
-      const basicShift = period.department === '製造' ? basicShiftForEmployee(employee) : null
+      const basicShift = period.department === '製造' || isBasicShiftPattern(defaultPattern)
+        ? basicShiftForEmployee(employee)
+        : null
       const startTime = request?.request_type === 'time_preference'
         ? cleanTime(request.start_time) || basicShift?.startTime || defaultPattern.start_time
         : basicShift?.startTime || defaultPattern.start_time
@@ -1254,7 +1274,9 @@ async function generateDraft(period: ShiftPeriod, actorId: string, overwriteAi: 
         ? cleanTime(request.end_time) || basicShift?.endTime || defaultPattern.end_time
         : basicShift?.endTime || defaultPattern.end_time
       const breakMinutes = basicShift?.breakMinutes ?? defaultPattern.break_minutes ?? 0
-      const shiftLabel = basicShift?.label || defaultPattern.label
+      const shiftLabel = period.department === '製造' && basicShift?.label
+        ? basicShift.label
+        : defaultPattern.label
       const minutes = workMinutes(startTime, endTime, breakMinutes) ?? defaultPattern.work_minutes ?? 0
       const nextDates = new Set(state.dates)
       nextDates.add(date)
@@ -1339,9 +1361,10 @@ async function generateDraft(period: ShiftPeriod, actorId: string, overwriteAi: 
       fujitaConstraints &&
       fujitaState.periodAssigned < fujitaConstraints.targetWorkDays
     ) {
-      const startTime = basicWorkPattern.start_time
-      const endTime = basicWorkPattern.end_time
-      const breakMinutes = basicWorkPattern.break_minutes || 0
+      const personalBasic = basicShiftForEmployee(fujita)
+      const startTime = personalBasic?.startTime || basicWorkPattern.start_time
+      const endTime = personalBasic?.endTime || basicWorkPattern.end_time
+      const breakMinutes = personalBasic?.breakMinutes ?? basicWorkPattern.break_minutes ?? 0
       const minutes = workMinutes(startTime, endTime, breakMinutes) ?? basicWorkPattern.work_minutes ?? 0
       upserts.push({
         period_id: period.id,
@@ -2175,6 +2198,7 @@ export async function PATCH(request: NextRequest) {
           periodId: period.id,
           workDate,
           pattern,
+          employee,
           actorId: auth.user!.id,
           employeeId: employee.id,
         }))
@@ -2743,6 +2767,7 @@ export async function PATCH(request: NextRequest) {
           periodId: period.id,
           workDate,
           pattern,
+          employee,
           actorId: auth.user!.id,
           employeeId: employee.id,
         }), { onConflict: 'period_id,user_id,work_date' })

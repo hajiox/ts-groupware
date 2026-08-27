@@ -223,6 +223,38 @@ function isBasicShiftPattern(pattern: Pick<ShiftPattern, "label" | "pattern_role
     pattern.label.startsWith("基本勤務");
 }
 
+function shiftTimingForEmployee(employee: ShiftEmployee, pattern: ShiftPattern | undefined) {
+  const patternStart = pattern?.start_time?.slice(0, 5) || null;
+  const patternEnd = pattern?.end_time?.slice(0, 5) || null;
+  const usePersonalBasic = Boolean(
+    pattern &&
+    isBasicShiftPattern(pattern) &&
+    employee.basic_work_start &&
+    employee.basic_work_end,
+  );
+  const startTime = usePersonalBasic ? employee.basic_work_start!.slice(0, 5) : patternStart;
+  const endTime = usePersonalBasic ? employee.basic_work_end!.slice(0, 5) : patternEnd;
+  const breakMinutes = usePersonalBasic
+    ? employee.basic_break_minutes ?? pattern?.break_minutes ?? 0
+    : pattern?.break_minutes ?? 0;
+
+  if (!startTime || !endTime) {
+    return { startTime, endTime, breakMinutes, workMinutes: pattern?.work_minutes ?? null };
+  }
+
+  const [startHour, startMinute] = startTime.split(":").map(Number);
+  const [endHour, endMinute] = endTime.split(":").map(Number);
+  const start = startHour * 60 + startMinute;
+  const rawEnd = endHour * 60 + endMinute;
+  const end = rawEnd < start ? rawEnd + 1440 : rawEnd;
+  return {
+    startTime,
+    endTime,
+    breakMinutes,
+    workMinutes: Math.max(0, end - start - Math.max(0, breakMinutes)),
+  };
+}
+
 function patternOptionsForEmployee(employee: ShiftEmployee, patterns: ShiftPattern[]) {
   if (isRegularEmployee(employee)) return patterns;
   return patterns.filter((pattern) => {
@@ -1833,6 +1865,7 @@ export function ShiftAdminTab() {
       return;
     }
     const pattern = patternByLabel.get(shiftLabel);
+    const timing = shiftTimingForEmployee(employee, pattern);
     setPayload((currentPayload) => {
       if (!currentPayload) return currentPayload;
       const current = currentPayload.assignments.find((item) => item.user_id === employee.user_id && item.work_date === date);
@@ -1844,10 +1877,10 @@ export function ShiftAdminTab() {
         work_date: date,
         pattern_id: pattern?.id || null,
         shift_label: shiftLabel,
-        start_time: pattern?.start_time || current?.start_time || null,
-        end_time: pattern?.end_time || current?.end_time || null,
-        break_minutes: pattern?.break_minutes ?? current?.break_minutes ?? 0,
-        work_minutes: pattern?.work_minutes ?? current?.work_minutes ?? null,
+        start_time: timing.startTime || current?.start_time || null,
+        end_time: timing.endTime || current?.end_time || null,
+        break_minutes: pattern ? timing.breakMinutes : current?.break_minutes ?? 0,
+        work_minutes: timing.workMinutes ?? current?.work_minutes ?? null,
         note: isCompanyOffAssignment(current) ? null : current?.note || null,
         source: "manual",
       };
