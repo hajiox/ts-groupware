@@ -13,7 +13,8 @@
     "test:recipe-product-name-notification": "node scripts/test-recipe-product-name-notification.cjs",
     "test:tsa-direct-message-notification": "node scripts/test-tsa-direct-message-notification.cjs",
     "test:account-read-status": "node scripts/test-account-read-status.cjs",
-    "test:attendance-deviations": "node --experimental-strip-types scripts/test-attendance-deviations.mjs"
+    "test:attendance-deviations": "node --experimental-strip-types scripts/test-attendance-deviations.mjs",
+    "test:doc-scanner-fax-post": "node --experimental-strip-types scripts/test-doc-scanner-fax-post.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

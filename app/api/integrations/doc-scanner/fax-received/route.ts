@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getTsgUserId } from '@/lib/tsg-ai'
 import { uploadFileToDrive } from '@/lib/drive'
+import {
+  buildFaxReceivedPostContent,
+  isFaxSummaryStatus,
+  normalizeFaxSummaryText,
+  preserveResolvedFaxSummary,
+  updateFaxSummaryInContent,
+} from '@/lib/doc-scanner-fax-post'
 import sharp from 'sharp'
 
 type GroupRow = {
@@ -349,41 +356,8 @@ async function storeIncomingImageAttachments(attachments: Attachment[]): Promise
   return stored.filter(item => item.url || item.viewUrl || item.webViewLink)
 }
 
-function formatDateTime(value: unknown) {
-  const raw = typeof value === 'string' ? value : ''
-  const date = raw ? new Date(raw) : new Date()
-  if (Number.isNaN(date.getTime())) return raw || new Date().toLocaleString('ja-JP')
-
-  return new Intl.DateTimeFormat('ja-JP', {
-    timeZone: 'Asia/Tokyo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
-}
-
 function getBodyString(body: Record<string, unknown>, key: string) {
   return typeof body[key] === 'string' ? String(body[key]).trim() : ''
-}
-
-function buildContent(body: Record<string, unknown>, attachments: Attachment[]) {
-  const sourceKey = getBodyString(body, 'sourceKey')
-  const senderLabel = getBodyString(body, 'senderLabel') || getBodyString(body, 'from') || '不明'
-  const subject = getBodyString(body, 'subject') || '(件名なし)'
-  const imageCount = attachments.length
-
-  return [
-    '【FAX受信】',
-    'eFAXで新しいFAXを受信しました。',
-    '',
-    `受信日時: ${formatDateTime(body.receivedAt)}`,
-    `送信元: ${senderLabel}`,
-    `件名: ${subject}`,
-    imageCount ? `FAX画像: ${imageCount}枚添付` : '',
-    sourceKey ? `受信ID: ${sourceKey}` : '',
-  ].filter(Boolean).join('\n')
 }
 
 async function getExistingPost(groupId: string, userId: string, sourceKey: string, content: string) {
@@ -468,17 +442,28 @@ export async function POST(request: NextRequest) {
     }
 
     const sourceKey = getBodyString(bodyObject, 'sourceKey')
-    const content = buildContent(bodyObject, attachments)
+    const summaryStatus = isFaxSummaryStatus(bodyObject.summaryStatus) ? bodyObject.summaryStatus : 'pending'
+    const content = buildFaxReceivedPostContent({
+      sourceKey,
+      senderLabel: getBodyString(bodyObject, 'senderLabel'),
+      from: getBodyString(bodyObject, 'from'),
+      subject: getBodyString(bodyObject, 'subject'),
+      receivedAt: bodyObject.receivedAt,
+      imageCount: attachments.length,
+      summaryStatus,
+      summary: normalizeFaxSummaryText(bodyObject.summary),
+    })
     const existingPost = await getExistingPost(group.id, tsgUserId, sourceKey, content)
 
     if (existingPost) {
       const storedAttachments = await storeIncomingImageAttachments(attachments)
+      const mergedContent = preserveResolvedFaxSummary(existingPost.content, content)
 
       if (storedAttachments.length > 0) {
         const { data: updatedPost, error: updateError } = await adminClient
           .from('gw_posts')
           .update({
-            content,
+            content: mergedContent,
             attachments: storedAttachments,
           })
           .eq('id', existingPost.id)
@@ -580,6 +565,66 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to create FAX received post' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  const authError = assertIntegrationSecret(request)
+  if (authError) return authError
+
+  try {
+    const body = await request.json()
+    const bodyObject = body && typeof body === 'object' ? body as Record<string, unknown> : {}
+    const sourceKey = getBodyString(bodyObject, 'sourceKey')
+    const summaryStatus = bodyObject.summaryStatus
+    const summary = normalizeFaxSummaryText(bodyObject.summary)
+
+    if (!sourceKey) return NextResponse.json({ error: 'sourceKey is required' }, { status: 400 })
+    if (!isFaxSummaryStatus(summaryStatus) || summaryStatus === 'pending') {
+      return NextResponse.json({ error: 'summaryStatus must be completed, needs_review, or failed' }, { status: 400 })
+    }
+    if (summaryStatus !== 'failed' && !summary) {
+      return NextResponse.json({ error: 'summary is required' }, { status: 400 })
+    }
+
+    const group = await getTargetGroup()
+    const tsgUserId = await getTsgUserId()
+    if (!tsgUserId) return NextResponse.json({ error: 'TSG君 user was not found' }, { status: 500 })
+
+    const post = await getExistingPost(group.id, tsgUserId, sourceKey, '')
+    if (!post) return NextResponse.json({ error: 'FAX received post was not found' }, { status: 404 })
+
+    const content = updateFaxSummaryInContent(post.content, summaryStatus, summary)
+    if (content === post.content) {
+      return NextResponse.json({ ok: true, unchanged: true, post })
+    }
+
+    const { data: updatedPost, error } = await adminClient
+      .from('gw_posts')
+      .update({ content })
+      .eq('id', post.id)
+      .select('id, group_id, user_id, content, attachments, created_at')
+      .single()
+    if (error || !updatedPost) {
+      return NextResponse.json({ error: error?.message || 'Failed to update FAX summary' }, { status: 500 })
+    }
+
+    await adminClient
+      .from('gw_groups')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', group.id)
+
+    return NextResponse.json({
+      ok: true,
+      unchanged: false,
+      post: updatedPost,
+      url: `/board/${group.id}#post-${updatedPost.id}`,
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to update FAX summary' },
       { status: 500 }
     )
   }
