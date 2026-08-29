@@ -790,6 +790,7 @@ export async function loadPaidLeaveDashboard(userId: string, actorUserId?: strin
     profileResult,
     balanceLotsResult,
     attendancePolicy,
+    dailyNotesResult,
   ] = await Promise.all([
     adminClient
       .from('gw_paid_leave_grant_lots')
@@ -820,8 +821,21 @@ export async function loadPaidLeaveDashboard(userId: string, actorUserId?: strin
       .eq('employee_id', employee.id)
       .order('expires_on', { ascending: true }),
     loadAttendanceCalculationPolicy(attendanceHistoryEnd),
+    employee.user_id
+      ? adminClient
+        .from('gw_attendance_daily_notes')
+        .select('work_date, memo')
+        .eq('user_id', employee.user_id)
+        .gte('work_date', attendanceHistoryStart)
+        .lte('work_date', attendanceHistoryEnd)
+      : Promise.resolve({ data: [], error: null }),
   ])
-  const dbError = grantsResult.error || requestsResult.error || resolutionsResult.error || profileResult.error || balanceLotsResult.error
+  const dbError = grantsResult.error
+    || requestsResult.error
+    || resolutionsResult.error
+    || profileResult.error
+    || balanceLotsResult.error
+    || dailyNotesResult.error
   if (dbError) throw dbError
 
   const grants = (grantsResult.data || []) as GrantRow[]
@@ -886,7 +900,28 @@ export async function loadPaidLeaveDashboard(userId: string, actorUserId?: strin
     deviationStartDate: ATTENDANCE_DEVIATION_SYSTEM_START_DATE,
     skipDates: classifiedLeaveDates,
   })
-  const unresolved = deviationSummary.actionable
+  const scheduledDateSet = new Set(scheduledAssignments.map((assignment) => assignment.work_date))
+  const unscheduledWorkedDates = [...punchDates]
+    .filter((workDate) => !scheduledDateSet.has(workDate) && !classifiedLeaveDates.has(workDate))
+    .sort()
+  const dailyNoteByDate = new Map(
+    (dailyNotesResult.data || []).map((row) => [row.work_date, row.memo]),
+  )
+  const unresolved = deviationSummary.actionable.map((issue) => ({
+    ...issue,
+    managerNote: dailyNoteByDate.get(issue.workDate) || null,
+    possibleReplacementDates: issue.issueKind === 'missing_all'
+      ? unscheduledWorkedDates.filter((workDate) => workDate.slice(0, 7) === issue.workDate.slice(0, 7))
+      : [],
+  }))
+  const missingIssues = unresolved.filter((issue) => issue.issueKind === 'missing_all')
+  const missingMonths = new Set(missingIssues.map((issue) => issue.workDate.slice(0, 7)))
+  const relevantUnscheduledWorkedDates = unscheduledWorkedDates.filter((workDate) => missingMonths.has(workDate.slice(0, 7)))
+  const unexplainedDayDeficit = [...missingMonths].reduce((sum, month) => {
+    const missingCount = missingIssues.filter((issue) => issue.workDate.startsWith(month)).length
+    const replacementCount = relevantUnscheduledWorkedDates.filter((workDate) => workDate.startsWith(month)).length
+    return sum + Math.max(0, missingCount - replacementCount)
+  }, 0)
 
   const confirmedAbsences = resolutions.filter((row) => row.resolution_type === 'absence' && row.resolution_status === 'admin_confirmed')
   const currentMonth = today.slice(0, 7)
@@ -925,6 +960,11 @@ export async function loadPaidLeaveDashboard(userId: string, actorUserId?: strin
     requests,
     resolutions,
     unresolved,
+    attendanceReconciliation: {
+      missingScheduledDays: missingIssues.length,
+      unscheduledWorkedDates: relevantUnscheduledWorkedDates,
+      unexplainedDayDeficit,
+    },
     attendanceDeviations: deviationSummary.totals,
     absences: {
       month: confirmedAbsences.filter((row) => row.work_date.startsWith(currentMonth)).length,

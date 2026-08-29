@@ -27,6 +27,8 @@ function cleanDays(value: unknown) {
   return Number.isFinite(parsed) && parsed > 0 && Number.isInteger(parsed * 2) ? parsed : null
 }
 
+const MANAGER_RESOLUTION_TYPES = new Set(['absence', 'work_schedule_changed'])
+
 async function requireLeaveAdmin() {
   const user = await getUserSession()
   if (!user) return { error: NextResponse.json({ error: '認証が必要です' }, { status: 401 }) }
@@ -155,6 +157,69 @@ async function notifyWorkdayResolutionResult(row: {
   } catch (error) {
     console.error('[Workday resolution result push error]', error)
   }
+}
+
+async function notifyManagerWorkdayResolution(row: {
+  id: string
+  user_id: string | null
+  work_date: string
+  resolution_type: string
+}) {
+  if (!row.user_id) return
+  try {
+    const { sendPushNotificationToUser } = await import('@/lib/web-push')
+    await sendPushNotificationToUser(row.user_id, {
+      title: '勤怠が管理者確認されました',
+      body: `${row.work_date} / ${row.resolution_type === 'absence' ? '欠勤' : '勤務日変更'}`,
+      url: '/leave',
+      tag: `tsg-manager-workday-resolution-${row.id}`,
+    })
+  } catch (error) {
+    console.error('[Manager workday resolution push error]', error)
+  }
+}
+
+async function syncResolutionDailyNote(row: {
+  user_id: string | null
+  work_date: string
+  resolution_type: string
+  employee_memo?: string | null
+}, actorId: string, managerMemo?: string | null) {
+  if (!row.user_id || !MANAGER_RESOLUTION_TYPES.has(row.resolution_type)) return
+  const { data: existingNote, error: existingNoteError } = await adminClient
+    .from('gw_attendance_daily_notes')
+    .select('memo')
+    .eq('user_id', row.user_id)
+    .eq('work_date', row.work_date)
+    .maybeSingle()
+  if (existingNoteError) throw existingNoteError
+
+  const detail = cleanText(managerMemo || row.employee_memo, 450)
+  const classification = row.resolution_type === 'absence'
+    ? '欠勤'
+    : `勤務日変更${detail ? `: ${detail}` : ''}`
+  const currentMemo = existingNote?.memo?.trim() || ''
+  const dailyMemo = cleanText(currentMemo.includes(classification)
+    ? currentMemo
+    : [currentMemo, classification].filter(Boolean).join(' / '), 500)
+  const now = new Date().toISOString()
+  const result = existingNote
+    ? await adminClient
+      .from('gw_attendance_daily_notes')
+      .update({ memo: dailyMemo, updated_by: actorId, updated_at: now })
+      .eq('user_id', row.user_id)
+      .eq('work_date', row.work_date)
+    : await adminClient
+      .from('gw_attendance_daily_notes')
+      .insert({
+        user_id: row.user_id,
+        work_date: row.work_date,
+        memo: dailyMemo,
+        created_by: actorId,
+        updated_by: actorId,
+        updated_at: now,
+      })
+  if (result.error) throw result.error
 }
 
 export async function GET(request: NextRequest) {
@@ -423,6 +488,124 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    if (action === 'resolve_unanswered_issue') {
+      const employeeId = cleanText(body.employee_id, 80)
+      const assignmentId = cleanText(body.assignment_id, 80)
+      const workDate = cleanDate(body.work_date)
+      const resolutionType = cleanText(body.resolution_type, 40)
+      const managerMemo = cleanText(body.manager_memo, 500)
+      if (!employeeId || !assignmentId || !workDate || !MANAGER_RESOLUTION_TYPES.has(resolutionType)) {
+        return NextResponse.json({ error: '対象日と確定内容を確認してください' }, { status: 400 })
+      }
+      if (resolutionType === 'work_schedule_changed' && !managerMemo) {
+        return NextResponse.json({ error: '勤務日変更の内容を入力してください' }, { status: 400 })
+      }
+      if (!await canRegisterPaidLeaveForEmployee(auth.user!, employeeId)) {
+        return NextResponse.json({ error: 'このスタッフの勤怠を確定する権限がありません' }, { status: 403 })
+      }
+
+      const employee = await activeEmployee(employeeId)
+      if (!employee?.user_id) return NextResponse.json({ error: '在籍スタッフが見つかりません' }, { status: 404 })
+      const dashboard = await loadPaidLeaveDashboard(employee.user_id, auth.user!.id)
+      const issue = dashboard.unresolved.find((row) => (
+        row.assignmentId === assignmentId && row.workDate === workDate
+      ))
+      if (!issue) {
+        return NextResponse.json({ error: 'この勤怠差異は回答済み、または打刻・休暇が確認されています' }, { status: 409 })
+      }
+
+      const sourceKey = `confirmed-shift:${employeeId}:${workDate}`
+      const { data: existingResolution, error: existingResolutionError } = await adminClient
+        .from('gw_workday_resolutions')
+        .select('id, resolution_status')
+        .eq('source_key', sourceKey)
+        .maybeSingle()
+      if (existingResolutionError) throw existingResolutionError
+      if (existingResolution && existingResolution.resolution_status !== 'voided') {
+        return NextResponse.json({ error: 'この勤務日はすでに確認処理されています' }, { status: 409 })
+      }
+
+      const now = new Date().toISOString()
+      const resolutionPayload = {
+        employee_id: employeeId,
+        user_id: employee.user_id,
+        work_date: workDate,
+        shift_period_id: issue.periodId,
+        shift_assignment_id: issue.assignmentId,
+        scheduled_minutes_snapshot: issue.scheduledMinutes,
+        resolution_type: resolutionType,
+        resolution_status: 'admin_confirmed',
+        paid_leave_request_id: null,
+        clock_in_punch_id: null,
+        clock_out_punch_id: null,
+        employee_answered_by: null,
+        employee_answered_at: null,
+        employee_memo: null,
+        manager_memo: managerMemo || null,
+        confirmed_by: auth.user!.id,
+        confirmed_at: now,
+        source_key: sourceKey,
+        raw_payload: {
+          manager_direct_resolution: true,
+          attendance_issue: {
+            issue_kind: issue.issueKind,
+            scheduled_start_time: issue.startTime,
+            scheduled_end_time: issue.endTime,
+            actual_start_time: issue.actualStartTime,
+            actual_end_time: issue.actualEndTime,
+            late_minutes: issue.lateMinutes,
+            early_leave_minutes: issue.earlyLeaveMinutes,
+            possible_replacement_dates: issue.possibleReplacementDates,
+          },
+        },
+        updated_at: now,
+      }
+      const resolutionResult = existingResolution
+        ? await adminClient
+          .from('gw_workday_resolutions')
+          .update(resolutionPayload)
+          .eq('id', existingResolution.id)
+          .select('id, user_id, work_date, resolution_type')
+          .single()
+        : await adminClient
+          .from('gw_workday_resolutions')
+          .insert(resolutionPayload)
+          .select('id, user_id, work_date, resolution_type')
+          .single()
+      if (resolutionResult.error) throw resolutionResult.error
+
+      try {
+        await syncResolutionDailyNote(resolutionResult.data, auth.user!.id, managerMemo)
+      } catch (dailyNoteError) {
+        await adminClient
+          .from('gw_workday_resolutions')
+          .update({ resolution_status: 'voided', updated_at: new Date().toISOString() })
+          .eq('id', resolutionResult.data.id)
+        throw dailyNoteError
+      }
+
+      const { error: auditError } = await adminClient
+        .from('gw_paid_leave_audit_logs')
+        .insert({
+          employee_id: employeeId,
+          user_id: employee.user_id,
+          entity_type: 'workday_resolution',
+          entity_id: resolutionResult.data.id,
+          action: 'resolve',
+          actor_user_id: auth.user!.id,
+          actor_type: 'user',
+          source: 'admin_direct_attendance_resolution',
+          after_payload: {
+            resolution_type: resolutionType,
+            manager_direct_resolution: true,
+          },
+        })
+      if (auditError) console.error('[Manager workday resolution audit error]', auditError)
+
+      await notifyManagerWorkdayResolution(resolutionResult.data)
+      return NextResponse.json({ success: true, resolutionId: resolutionResult.data.id })
+    }
+
     if (action === 'reject_request') {
       const requestId = cleanText(body.request_id, 80)
       const managerMemo = cleanText(body.manager_memo, 500)
@@ -446,7 +629,7 @@ export async function POST(request: NextRequest) {
       if (!resolutionId) return NextResponse.json({ error: '未打刻回答を選択してください' }, { status: 400 })
       const { data: resolution, error: resolutionLookupError } = await adminClient
         .from('gw_workday_resolutions')
-        .select('id, employee_id, user_id, work_date, resolution_type, paid_leave_request_id')
+        .select('id, employee_id, user_id, work_date, resolution_type, paid_leave_request_id, employee_memo')
         .eq('id', resolutionId)
         .maybeSingle()
       if (resolutionLookupError) throw resolutionLookupError
@@ -460,6 +643,11 @@ export async function POST(request: NextRequest) {
         p_manager_memo: managerMemo || null,
       })
       if (error) throw error
+      try {
+        await syncResolutionDailyNote(resolution, auth.user!.id, managerMemo)
+      } catch (dailyNoteError) {
+        console.error('[Confirmed workday resolution daily note error]', dailyNoteError)
+      }
       if (resolution.paid_leave_request_id) {
         await notifyManagementApprovalPost((data || {}) as ApprovalResult)
         await notifyRequestResult(resolution.paid_leave_request_id, true)

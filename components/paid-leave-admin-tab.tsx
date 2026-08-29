@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Check, Eye, RefreshCw, RotateCcw, Users } from "lucide-react";
+import { AlertTriangle, CalendarDays, Check, Eye, RefreshCw, RotateCcw, Users } from "lucide-react";
 
 type EmployeeOption = {
   id: string;
@@ -49,6 +49,23 @@ type Resolution = {
   } | null;
 };
 
+type AttendanceIssue = {
+  assignmentId: string;
+  periodId: string;
+  workDate: string;
+  shiftLabel: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  scheduledMinutes: number | null;
+  actualStartTime: string | null;
+  actualEndTime: string | null;
+  lateMinutes: number;
+  earlyLeaveMinutes: number;
+  issueKind: string;
+  managerNote: string | null;
+  possibleReplacementDates: string[];
+};
+
 type DeviationTotals = {
   lateCount: number;
   earlyLeaveCount: number;
@@ -87,6 +104,12 @@ type Dashboard = {
   }[];
   requests: LeaveRequest[];
   resolutions: Resolution[];
+  unresolved: AttendanceIssue[];
+  attendanceReconciliation: {
+    missingScheduledDays: number;
+    unscheduledWorkedDates: string[];
+    unexplainedDayDeficit: number;
+  };
   attendanceDeviations: {
     month: DeviationTotals;
     year: DeviationTotals;
@@ -193,6 +216,7 @@ export function PaidLeaveAdminTab() {
   const [leaveDate, setLeaveDate] = useState("");
   const [leaveUnit, setLeaveUnit] = useState<"full_day" | "half_day">("full_day");
   const [leaveMemo, setLeaveMemo] = useState("");
+  const [resolutionMemos, setResolutionMemos] = useState<Record<string, string>>({});
 
   const load = useCallback(async (nextUserId = selectedUserId) => {
     setLoading(true);
@@ -259,6 +283,34 @@ export function PaidLeaveAdminTab() {
       setLeaveUnit("full_day");
       setLeaveMemo("");
     }
+  }
+
+  async function resolveUnansweredIssue(issue: AttendanceIssue, resolutionType: "absence" | "work_schedule_changed") {
+    if (!dashboard) return;
+    const managerMemo = resolutionMemos[issue.assignmentId]?.trim() || "";
+    if (resolutionType === "work_schedule_changed" && !managerMemo) {
+      setMessage("勤務日変更の内容を入力してください。");
+      return;
+    }
+    if (
+      resolutionType === "absence"
+      && !window.confirm(`${issue.workDate}を欠勤として確定します。給与・出勤率へ反映してよいですか？`)
+    ) return;
+    await post({
+      action: "resolve_unanswered_issue",
+      employee_id: dashboard.employee.id,
+      assignment_id: issue.assignmentId,
+      work_date: issue.workDate,
+      resolution_type: resolutionType,
+      manager_memo: managerMemo,
+    }, resolutionType === "absence" ? "欠勤として確定しました" : "勤務日変更として確定しました");
+  }
+
+  function preparePaidLeave(issue: AttendanceIssue) {
+    setLeaveDate(issue.workDate);
+    setLeaveUnit(issue.issueKind === "missing_all" ? "full_day" : "half_day");
+    setLeaveMemo(resolutionMemos[issue.assignmentId]?.trim() || issue.managerNote || "勤怠差異から管理者設定");
+    requestAnimationFrame(() => document.getElementById("leave-admin-register")?.scrollIntoView({ behavior: "smooth", block: "center" }));
   }
 
   const dashboard = payload?.dashboard || null;
@@ -457,7 +509,7 @@ export function PaidLeaveAdminTab() {
           </section>
 
           {payload?.canRegisterSelectedEmployee && (
-            <section className="admin-panel leave-admin__actions">
+            <section className="admin-panel leave-admin__actions" id="leave-admin-register">
               <div className="admin-panel__header">
                 <div>
                   <h4>所属スタッフの有給を登録</h4>
@@ -477,6 +529,55 @@ export function PaidLeaveAdminTab() {
               </div>
             </section>
           )}
+
+          <section className="admin-panel leave-admin__issues">
+            <div className="admin-panel__header">
+              <div>
+                <h4><AlertTriangle size={17} /> 未処理の勤怠差異</h4>
+                <p>確定シフトと打刻を照合した要確認日です。シフト外出勤が同月にある場合は、勤務日変更の可能性も表示します。</p>
+              </div>
+              <strong>{dashboard.unresolved.length}件</strong>
+            </div>
+            {dashboard.attendanceReconciliation.missingScheduledDays > 0 && (
+              <div className="leave-reconciliation-summary">
+                <span>打刻なし {dashboard.attendanceReconciliation.missingScheduledDays}日</span>
+                <span>シフト外出勤 {dashboard.attendanceReconciliation.unscheduledWorkedDates.length}日</span>
+                <strong>日数不足 {dashboard.attendanceReconciliation.unexplainedDayDeficit}日</strong>
+              </div>
+            )}
+            <div className="leave-review-list">
+              {dashboard.unresolved.length === 0 ? <p className="admin-empty">未処理の勤怠差異はありません</p> : dashboard.unresolved.map((issue) => (
+                <article key={`${issue.assignmentId}:${issue.workDate}`}>
+                  <div>
+                    <strong>{issue.workDate} / {issue.issueKind === "missing_all" ? "出勤・退勤の打刻なし" : issue.issueKind === "missing_clock_in" ? "出勤打刻なし" : issue.issueKind === "missing_clock_out" ? "退勤打刻なし" : issue.lateMinutes && issue.earlyLeaveMinutes ? `遅刻${issue.lateMinutes}分・早退${issue.earlyLeaveMinutes}分` : issue.lateMinutes ? `遅刻${issue.lateMinutes}分` : `早退${issue.earlyLeaveMinutes}分`}</strong>
+                    <small className="leave-review-list__deviation">
+                      予定 {issue.startTime?.slice(0, 5) || "--:--"}-{issue.endTime?.slice(0, 5) || "--:--"}
+                      {issue.actualStartTime || issue.actualEndTime ? ` / 実績 ${issue.actualStartTime || "--:--"}-${issue.actualEndTime || "--:--"}` : " / 実績なし"}
+                    </small>
+                    {issue.managerNote && <span>勤怠備考: {issue.managerNote}</span>}
+                    {issue.possibleReplacementDates.length > 0 && (
+                      <span className="leave-review-list__replacement">同月のシフト外出勤: {issue.possibleReplacementDates.join("、")}</span>
+                    )}
+                    {payload?.canRegisterSelectedEmployee && (
+                      <input
+                        className="form-input leave-review-list__memo"
+                        value={resolutionMemos[issue.assignmentId] || ""}
+                        onChange={(event) => setResolutionMemos((current) => ({ ...current, [issue.assignmentId]: event.target.value }))}
+                        placeholder="勤務日変更の振替日・確認内容"
+                      />
+                    )}
+                  </div>
+                  {payload?.canRegisterSelectedEmployee && (
+                    <div className="leave-review-list__actions leave-review-list__actions--issue">
+                      <button type="button" className="admin-btn-outline admin-btn-danger" disabled={busy} onClick={() => void resolveUnansweredIssue(issue, "absence")}>欠勤で確定</button>
+                      <button type="button" className="admin-btn-outline" disabled={busy || !resolutionMemos[issue.assignmentId]?.trim()} onClick={() => void resolveUnansweredIssue(issue, "work_schedule_changed")}>勤務日変更</button>
+                      <button type="button" className="admin-btn-outline" disabled={busy} onClick={() => preparePaidLeave(issue)}>有給を設定</button>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
 
           <section className="admin-panel leave-admin__actions">
             <div className="admin-panel__header">

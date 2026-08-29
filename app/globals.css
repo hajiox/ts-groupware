@@ -1642,6 +1642,39 @@ html[data-theme="light"] .leave-balance-row__figures em {
   line-height: 1.45;
 }
 
+.leave-admin__issues .admin-panel__header h4 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.leave-reconciliation-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.34);
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.08);
+  padding: 9px 11px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.leave-reconciliation-summary strong {
+  color: #fbbf24;
+}
+
+.leave-review-list__replacement {
+  color: #fbbf24 !important;
+}
+
+.leave-review-list__memo {
+  width: min(100%, 520px);
+  min-height: 38px;
+  margin-top: 8px;
+}
+
 .leave-review-list__actions {
   display: flex;
   gap: 6px;
@@ -1652,6 +1685,16 @@ html[data-theme="light"] .leave-balance-row__figures em {
   align-items: center;
   gap: 5px;
   min-height: 36px;
+}
+
+.leave-review-list__actions--issue {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 360px;
+}
+
+.leave-review-list__actions--issue button {
+  white-space: nowrap;
 }
 
 .leave-history-list em {
@@ -1781,6 +1824,11 @@ html[data-theme="light"] .leave-request-status--voided {
   .leave-review-list__actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .leave-review-list__actions--issue {
+    grid-template-columns: 1fr;
+    max-width: none;
   }
 }
 

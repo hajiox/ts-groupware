@@ -105,4 +105,34 @@ const missingHourlyPunches = analyzeAttendanceDeviations({
 assert.equal(missingHourlyPunches.actionable.length, 1)
 assert.equal(missingHourlyPunches.actionable[0].issueKind, 'missing_all')
 
+const employeeAnsweredMissingPunch = analyzeAttendanceDeviations({
+  assignments: [assignment()],
+  punches: [],
+  resolutions: [{
+    work_date: '2026-08-20',
+    resolution_type: 'absence',
+    resolution_status: 'employee_answered',
+  }],
+  workStyle: 'regular_5d_8h',
+  policy,
+  currentDate: '2026-08-21',
+})
+assert.equal(employeeAnsweredMissingPunch.issues.length, 1)
+assert.equal(employeeAnsweredMissingPunch.actionable.length, 0)
+
+const managerConfirmedAbsence = analyzeAttendanceDeviations({
+  assignments: [assignment()],
+  punches: [],
+  resolutions: [{
+    work_date: '2026-08-20',
+    resolution_type: 'absence',
+    resolution_status: 'admin_confirmed',
+  }],
+  workStyle: 'regular_5d_8h',
+  policy,
+  currentDate: '2026-08-21',
+})
+assert.equal(managerConfirmedAbsence.issues.length, 0)
+assert.equal(managerConfirmedAbsence.actionable.length, 0)
+
 console.log('attendance deviation tests passed')
