@@ -1294,3 +1294,6 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - 既存の `TSG_INTEGRATION_SECRET` は変更せず、新しい `MEETING_TRANSCRIBER_INTEGRATION_SECRET` をこのルートだけに使用する。FAX、Indeed、TSA、既存DMの認証・API・DBスキーマには変更を加えていない。
 - 会議ID由来の `sourceKey` から決定的な投稿UUIDを生成する。同一キー・同一本文の再試行は既存投稿を返してPushを増やさず、同一キーで本文・掲示板・投稿者が異なる場合は409で停止する。同時実行の一意制約競合も再取得後に同じ条件で検証する。
 - 専用テスト、既存のTSG君DM・DocScanner FAX要約・TSAレシピ通知テスト、対象ESLint、`tsc --noEmit`、全体Lint（エラー0件・既存警告23件）、全82ルートのローカル本番ビルドに成功した。DBマイグレーションはない。
+- `POST /api/integrations/meeting-transcriber/self-dm` も追加した。認証は同じMeetingTranscriber専用Secretを使い、既存の汎用DM APIと共有 `TSG_INTEGRATION_SECRET` は変更・参照しない。宛先名はリクエストで受け取らず、TSG本番環境の `MEETING_TRANSCRIBER_DM_RECIPIENT_NAME` で1名に固定する。
+- TSGのログイン判定では `summary` と `self-dm` の2パスだけを完全一致で公開連携APIとして許可し、それ以外のMeetingTranscriber配下や既存認証範囲は変更しない。専用DM、既存汎用DM、DocScanner FAX、TSAレシピ通知、型検査、対象Lint、全体Lint（エラー0件・既存警告23件）、全83ルートのローカル本番ビルドに成功した。実DMは送信していない。
+- 本番 `dpl_9SwxnT3SqzXzpULWaM2REZQteQhB` を `https://v0-line-blush.vercel.app` へ反映した。固定URLで専用2APIが未認証401・認証済み空本文400、既存の汎用DMとDocScanner FAXが未認証401を維持することを、投稿を作らない空リクエストだけで確認した。

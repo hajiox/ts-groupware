@@ -44,8 +44,12 @@ export function proxy(request: NextRequest) {
     '/apple-icon',
     '/placeholder',
   ]
+  const publicExactPaths = [
+    '/api/integrations/meeting-transcriber/summary',
+    '/api/integrations/meeting-transcriber/self-dm',
+  ]
 
-  if (publicPaths.some(p => pathname.startsWith(p)) || pathname === '/') {
+  if (publicPaths.some(p => pathname.startsWith(p)) || publicExactPaths.includes(pathname) || pathname === '/') {
     return NextResponse.next()
   }
 
