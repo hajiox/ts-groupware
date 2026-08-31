@@ -9,7 +9,7 @@ import { SafeLineAvatar } from "@/components/safe-line-avatar";
 import { getClipboardImageFile } from "@/lib/clipboard-image";
 import { getDeviceHeaders } from "@/lib/device-id";
 import { USER_DEPARTMENTS, type UserDepartment } from "@/lib/departments";
-import { formatMentionName, mentionDisplayName } from "@/lib/mention-names";
+import { appendMentionIfMissing, formatMentionName, mentionDisplayName } from "@/lib/mention-names";
 import { REACTION_EMOJIS } from "@/lib/reactions";
 import { getEffectiveUserRole, getUserRoleLabel, isManagementRole } from "@/lib/user-roles";
 
@@ -896,20 +896,28 @@ export default function BoardPage() {
     return isManagementRole(currentUser?.role) && !post.parent_id;
   }
 
-  function toggleTaskAssignee(memberId: string) {
+  function toggleTaskAssignee(member: GroupMember) {
+    const isSelected = taskAssigneeIds.includes(member.id);
     setTaskAssigneeIds((current) => (
-      current.includes(memberId)
-        ? current.filter((id) => id !== memberId)
-        : [...current, memberId]
+      isSelected
+        ? current.filter((id) => id !== member.id)
+        : [...current, member.id]
     ));
+    if (!isSelected) {
+      setText((current) => appendMentionIfMissing(current, member.display_name));
+    }
   }
 
-  function toggleEditingTaskAssignee(memberId: string) {
+  function toggleEditingTaskAssignee(member: GroupMember) {
+    const isSelected = editingTaskAssigneeIds.includes(member.id);
     setEditingTaskAssigneeIds((current) => (
-      current.includes(memberId)
-        ? current.filter((item) => item !== memberId)
-        : [...current, memberId]
+      isSelected
+        ? current.filter((item) => item !== member.id)
+        : [...current, member.id]
     ));
+    if (!isSelected) {
+      setEditingText((current) => appendMentionIfMissing(current, member.display_name));
+    }
   }
 
   function toggleTaskRequestPanel() {
@@ -1156,7 +1164,7 @@ export default function BoardPage() {
                         key={member.id}
                         type="button"
                         className={`task-member-chip${selected ? " task-member-chip--selected" : ""}`}
-                        onClick={() => toggleEditingTaskAssignee(member.id)}
+                        onClick={() => toggleEditingTaskAssignee(member)}
                         disabled={savingEdit}
                         aria-pressed={selected}
                       >
@@ -1916,7 +1924,7 @@ export default function BoardPage() {
                       key={member.id}
                       type="button"
                       className={`task-member-chip${selected ? " task-member-chip--selected" : ""}`}
-                      onClick={() => toggleTaskAssignee(member.id)}
+                      onClick={() => toggleTaskAssignee(member)}
                       disabled={isPosting || isUploading}
                       aria-pressed={selected}
                     >

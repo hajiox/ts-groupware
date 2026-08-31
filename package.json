@@ -14,6 +14,7 @@
     "test:tsa-direct-message-notification": "node scripts/test-tsa-direct-message-notification.cjs",
     "test:account-read-status": "node scripts/test-account-read-status.cjs",
     "test:attendance-deviations": "node --experimental-strip-types scripts/test-attendance-deviations.mjs",
+    "test:task-assignee-mentions": "node --experimental-strip-types scripts/test-task-assignee-mentions.mjs",
     "test:doc-scanner-fax-post": "node --experimental-strip-types scripts/test-doc-scanner-fax-post.mjs"
   },
   "dependencies": {
