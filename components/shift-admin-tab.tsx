@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import { Building2, CheckCircle2, ChevronDown, ChevronUp, Clock3, Factory, GripVertical, LockKeyhole, MapPin, Paintbrush, Pencil, Plus, Printer, RotateCcw, Save, Trash2, Undo2, UserMinus, X } from "lucide-react";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { USER_DEPARTMENTS, type UserDepartment } from "@/lib/departments";
 import { SHIFT_COMPANY_OFF_NOTE, isCompanyOffAssignment } from "@/lib/shift-assignments";
 import { resolveShiftConstraints } from "@/lib/shift-constraints";
@@ -818,19 +817,37 @@ function ShiftEcSaleManager({
   const [newLabel, setNewLabel] = useState("");
   const [newColor, setNewColor] = useState<ShiftEcSaleColor>("red");
 
+  useEffect(() => {
+    if (!open) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onOpenChange(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onOpenChange, open]);
+
+  if (!open) return null;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="shift-sale-manager" showCloseButton={false}>
-        <DialogHeader className="shift-sale-manager__header">
+    <div className="modal-overlay shift-sale-manager-overlay" onMouseDown={() => onOpenChange(false)}>
+      <section
+        className="modal-content shift-sale-manager"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shift-sale-manager-title"
+        aria-describedby="shift-sale-manager-description"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="shift-sale-manager__header">
           <div>
             <span>備考候補</span>
-            <DialogTitle>ECセール名を編集</DialogTitle>
-            <DialogDescription className="sr-only">シフト備考で使用するECセール名を追加、変更、削除します。</DialogDescription>
+            <h2 id="shift-sale-manager-title">ECセール名を編集</h2>
+            <p id="shift-sale-manager-description" className="sr-only">シフト備考で使用するECセール名を追加、変更、削除します。</p>
           </div>
           <button type="button" onClick={() => onOpenChange(false)} aria-label="閉じる" title="閉じる">
             <X size={19} aria-hidden="true" />
           </button>
-        </DialogHeader>
+        </header>
         <div className="shift-sale-manager__body">
           {disabledReason && <div className="shift-sale-manager__notice" role="status">{disabledReason}</div>}
           <div className="shift-sale-manager__new">
@@ -865,8 +882,8 @@ function ShiftEcSaleManager({
             ))}
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </section>
+    </div>
   );
 }
 
