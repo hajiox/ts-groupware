@@ -509,6 +509,17 @@ function ShiftEcSalePicker({
           <strong>{selectedOptions.length}件</strong>
         </summary>
         <div className="shift-ec-sales__menu">
+          <button
+            type="button"
+            className="shift-ec-sales__manage"
+            onClick={() => {
+              closePicker();
+              onManage();
+            }}
+          >
+            <Pencil size={14} aria-hidden="true" />
+            ECセール名を編集
+          </button>
           {activeOptions.map((option) => {
             const checked = draftSet.has(option.id);
             const occurrenceTime = draftTimes[option.id] || { start_time: null, end_time: null };
@@ -569,17 +580,6 @@ function ShiftEcSalePicker({
             );
           })}
           <div className="shift-ec-sales__menu-actions">
-            <button
-              type="button"
-              className="shift-ec-sales__manage"
-              onClick={() => {
-                closePicker();
-                onManage();
-              }}
-            >
-              <Pencil size={14} aria-hidden="true" />
-              ECセール名を編集
-            </button>
             <button
               type="button"
               className="admin-btn-outline"

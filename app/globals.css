@@ -14310,14 +14310,17 @@ html[data-theme="light"] .board-footer .selected-file {
 
 .shift-ec-sales__manage {
   display: inline-flex;
-  grid-column: 1 / -1;
+  position: sticky;
+  top: -8px;
+  z-index: 2;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 36px;
+  min-height: 40px;
+  margin: -8px -8px 4px;
   border: 1px solid rgba(96, 165, 250, 0.45);
-  border-radius: 6px;
-  background: rgba(37, 99, 235, 0.12);
+  border-radius: 7px 7px 6px 6px;
+  background: #16243a;
   color: #93c5fd;
   font-size: 12px;
   font-weight: 900;
