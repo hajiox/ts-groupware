@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
-import { Building2, CheckCircle2, ChevronDown, ChevronUp, Clock3, Factory, GripVertical, LockKeyhole, MapPin, Paintbrush, Pencil, Plus, Printer, RotateCcw, Save, Trash2, Undo2, UserMinus } from "lucide-react";
+import { Building2, CheckCircle2, ChevronDown, ChevronUp, Clock3, Factory, GripVertical, LockKeyhole, MapPin, Paintbrush, Pencil, Plus, Printer, RotateCcw, Save, Trash2, Undo2, UserMinus, X } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { USER_DEPARTMENTS, type UserDepartment } from "@/lib/departments";
 import { SHIFT_COMPANY_OFF_NOTE, isCompanyOffAssignment } from "@/lib/shift-assignments";
 import { resolveShiftConstraints } from "@/lib/shift-constraints";
@@ -448,12 +449,14 @@ function ShiftEcSalePicker({
   times,
   disabled,
   onChange,
+  onManage,
 }: {
   options: ShiftEcSaleOption[];
   selected: string[];
   times: ShiftEcSaleTimes;
   disabled: boolean;
   onChange: (next: string[], nextTimes: ShiftEcSaleTimes) => void;
+  onManage: () => void;
 }) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const [draft, setDraft] = useState<string[]>(selected || []);
@@ -566,6 +569,17 @@ function ShiftEcSalePicker({
             );
           })}
           <div className="shift-ec-sales__menu-actions">
+            <button
+              type="button"
+              className="shift-ec-sales__manage"
+              onClick={() => {
+                closePicker();
+                onManage();
+              }}
+            >
+              <Pencil size={14} aria-hidden="true" />
+              ECセール名を編集
+            </button>
             <button
               type="button"
               className="admin-btn-outline"
@@ -783,14 +797,20 @@ function ShiftCellColorPicker({
 }
 
 function ShiftEcSaleManager({
+  open,
+  onOpenChange,
   options,
   disabled,
+  disabledReason,
   onCreate,
   onUpdate,
   onToggle,
 }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   options: ShiftEcSaleOption[];
   disabled: boolean;
+  disabledReason: string;
   onCreate: (label: string, color: ShiftEcSaleColor) => Promise<void>;
   onUpdate: (sale: ShiftEcSaleOption, label: string, color: ShiftEcSaleColor) => Promise<void>;
   onToggle: (sale: ShiftEcSaleOption) => Promise<void>;
@@ -799,35 +819,54 @@ function ShiftEcSaleManager({
   const [newColor, setNewColor] = useState<ShiftEcSaleColor>("red");
 
   return (
-    <details className="shift-sale-manager">
-      <summary>ECセール項目を管理</summary>
-      <div className="shift-sale-manager__body">
-        <div className="shift-sale-manager__new">
-          <input value={newLabel} onChange={(event) => setNewLabel(event.target.value)} placeholder="新しいECセール名" maxLength={100} />
-          <select value={newColor} onChange={(event) => setNewColor(event.target.value as ShiftEcSaleColor)}>
-            <option value="red">赤</option>
-            <option value="green">緑</option>
-            <option value="orange">オレンジ</option>
-          </select>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={disabled || !newLabel.trim()}
-            onClick={async () => {
-              await onCreate(newLabel.trim(), newColor);
-              setNewLabel("");
-            }}
-          >
-            追加
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="shift-sale-manager" showCloseButton={false}>
+        <DialogHeader className="shift-sale-manager__header">
+          <div>
+            <span>備考候補</span>
+            <DialogTitle>ECセール名を編集</DialogTitle>
+            <DialogDescription className="sr-only">シフト備考で使用するECセール名を追加、変更、削除します。</DialogDescription>
+          </div>
+          <button type="button" onClick={() => onOpenChange(false)} aria-label="閉じる" title="閉じる">
+            <X size={19} aria-hidden="true" />
           </button>
+        </DialogHeader>
+        <div className="shift-sale-manager__body">
+          {disabledReason && <div className="shift-sale-manager__notice" role="status">{disabledReason}</div>}
+          <div className="shift-sale-manager__new">
+            <input
+              value={newLabel}
+              onChange={(event) => setNewLabel(event.target.value)}
+              placeholder="新しいECセール名"
+              aria-label="新しいECセール名"
+              maxLength={100}
+            />
+            <select value={newColor} onChange={(event) => setNewColor(event.target.value as ShiftEcSaleColor)} aria-label="新しいECセールの表示色">
+              <option value="red">赤</option>
+              <option value="green">緑</option>
+              <option value="orange">オレンジ</option>
+            </select>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={disabled || !newLabel.trim()}
+              onClick={async () => {
+                await onCreate(newLabel.trim(), newColor);
+                setNewLabel("");
+              }}
+            >
+              <Plus size={16} aria-hidden="true" />
+              追加
+            </button>
+          </div>
+          <div className="shift-sale-manager__list" aria-label="登録済みECセール名">
+            {options.map((sale) => (
+              <ShiftEcSaleEditor key={`${sale.id}:${sale.label}:${sale.color}:${sale.is_active}`} sale={sale} disabled={disabled} onUpdate={onUpdate} onToggle={onToggle} />
+            ))}
+          </div>
         </div>
-        <div className="shift-sale-manager__list">
-          {options.map((sale) => (
-            <ShiftEcSaleEditor key={`${sale.id}:${sale.label}:${sale.color}:${sale.is_active}`} sale={sale} disabled={disabled} onUpdate={onUpdate} onToggle={onToggle} />
-          ))}
-        </div>
-      </div>
-    </details>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -844,19 +883,24 @@ function ShiftEcSaleEditor({
 }) {
   const [label, setLabel] = useState(sale.label);
   const [color, setColor] = useState<ShiftEcSaleColor>(sale.color);
+  const hasChanges = label.trim() !== sale.label || color !== sale.color;
   return (
     <div className={`shift-sale-manager__row${sale.is_active ? "" : " shift-sale-manager__row--inactive"}`}>
-      <input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={100} disabled={!sale.is_active} />
-      <select value={color} onChange={(event) => setColor(event.target.value as ShiftEcSaleColor)} disabled={!sale.is_active}>
+      <input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={100} disabled={!sale.is_active} aria-label={`${sale.label}の名称`} />
+      <select value={color} onChange={(event) => setColor(event.target.value as ShiftEcSaleColor)} disabled={!sale.is_active} aria-label={`${sale.label}の表示色`}>
         <option value="red">赤</option>
         <option value="green">緑</option>
         <option value="orange">オレンジ</option>
       </select>
       <div className="shift-sale-manager__actions">
         {sale.is_active && (
-          <button type="button" className="admin-btn-outline" disabled={disabled || !label.trim()} onClick={() => onUpdate(sale, label.trim(), color)}>保存</button>
+          <button type="button" className="admin-btn-outline" disabled={disabled || !label.trim() || !hasChanges} onClick={() => onUpdate(sale, label.trim(), color)}>
+            <Save size={14} aria-hidden="true" />
+            保存
+          </button>
         )}
         <button type="button" className={sale.is_active ? "admin-btn-danger" : "admin-btn-outline"} disabled={disabled} onClick={() => onToggle(sale)}>
+          {sale.is_active ? <Trash2 size={14} aria-hidden="true" /> : <RotateCcw size={14} aria-hidden="true" />}
           {sale.is_active ? "削除" : "再表示"}
         </button>
       </div>
@@ -1157,6 +1201,32 @@ function applyShiftPatternMutation(
   return patterns;
 }
 
+function applyShiftSaleMutation(
+  options: ShiftEcSaleOption[],
+  body: Record<string, unknown>,
+  result: Record<string, unknown>,
+) {
+  const action = typeof body.action === "string" ? body.action : "";
+  if (action === "create_sale") {
+    const sale = result.sale as ShiftEcSaleOption | undefined;
+    return sale ? [...options, sale].sort((a, b) => a.sort_order - b.sort_order) : options;
+  }
+
+  const saleId = typeof body.sale_id === "string" ? body.sale_id : "";
+  if (!saleId) return options;
+  if (action === "update_sale") {
+    const label = typeof body.label === "string" ? body.label : "";
+    const color = body.color === "red" || body.color === "green" || body.color === "orange" ? body.color : null;
+    return options.map((sale) => sale.id === saleId
+      ? { ...sale, label: label || sale.label, color: color || sale.color, start_time: null, end_time: null }
+      : sale);
+  }
+  if (action === "delete_sale" || action === "restore_sale") {
+    return options.map((sale) => sale.id === saleId ? { ...sale, is_active: action === "restore_sale" } : sale);
+  }
+  return options;
+}
+
 function shiftRequestKey(request: Pick<ShiftRequest, "user_id" | "work_date">) {
   return `${request.user_id}:${request.work_date}`;
 }
@@ -1214,6 +1284,7 @@ export function ShiftAdminTab() {
   const [draggedEmployeeId, setDraggedEmployeeId] = useState("");
   const [dragOverEmployeeId, setDragOverEmployeeId] = useState("");
   const [showAllPeriods, setShowAllPeriods] = useState(false);
+  const [saleManagerOpen, setSaleManagerOpen] = useState(false);
   const [shiftEmployeePage, setShiftEmployeePage] = useState(0);
   const [openTimeEditorKeys, setOpenTimeEditorKeys] = useState<Set<string>>(new Set());
   const [collectionTargetIds, setCollectionTargetIds] = useState<Set<string>>(new Set());
@@ -1499,10 +1570,6 @@ export function ShiftAdminTab() {
   }
 
   async function mutateSale(body: Record<string, unknown>, successMessage: string) {
-    if (hasUnsavedChanges) {
-      setMessage("現在のシフトを一時保存するか、変更をキャンセルしてからECセール項目を編集してください");
-      return;
-    }
     setSavingKey("sale-master");
     try {
       const response = await fetch("/api/admin/shifts", {
@@ -1512,8 +1579,21 @@ export function ShiftAdminTab() {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error || "ECセール項目を保存できませんでした");
+      const mutationResult = data && typeof data === "object" ? data as Record<string, unknown> : {};
+      if (body.action === "create_sale" && !mutationResult.sale) {
+        throw new Error("ECセール項目の保存結果を確認できませんでした");
+      }
+      setPayload((current) => current ? {
+        ...current,
+        saleOptions: applyShiftSaleMutation(current.saleOptions, body, mutationResult),
+      } : current);
+      if (savedPayloadRef.current) {
+        savedPayloadRef.current = {
+          ...savedPayloadRef.current,
+          saleOptions: applyShiftSaleMutation(savedPayloadRef.current.saleOptions, body, mutationResult),
+        };
+      }
       setMessage(successMessage);
-      await load(selectedPeriod?.id || "", selectedPeriod?.department || department);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "ECセール項目を保存できませんでした");
       throw err;
@@ -2349,22 +2429,35 @@ export function ShiftAdminTab() {
         {message && <div className="admin-message">{message}</div>}
 
         {department === "フロア" && (
-          <ShiftEcSaleManager
-            options={payload?.saleOptions || []}
-            disabled={!!savingKey || hasUnsavedChanges}
-            onCreate={(label, color) => mutateSale(
-              { action: "create_sale", label, color },
-              "ECセール項目を追加しました",
-            )}
-            onUpdate={(sale, label, color) => mutateSale(
-              { action: "update_sale", sale_id: sale.id, label, color },
-              "ECセール項目を更新しました",
-            )}
-            onToggle={(sale) => mutateSale(
-              { action: sale.is_active ? "delete_sale" : "restore_sale", sale_id: sale.id },
-              sale.is_active ? "ECセール項目を削除しました" : "ECセール項目を再表示しました",
-            )}
-          />
+          <>
+            <button type="button" className="shift-sale-manager-trigger" onClick={() => setSaleManagerOpen(true)}>
+              <Pencil size={15} aria-hidden="true" />
+              <span>ECセール名を編集</span>
+              <small>{(payload?.saleOptions || []).filter((sale) => sale.is_active).length}件</small>
+            </button>
+            <ShiftEcSaleManager
+              open={saleManagerOpen}
+              onOpenChange={setSaleManagerOpen}
+              options={payload?.saleOptions || []}
+              disabled={!!savingKey}
+              disabledReason={savingKey ? "保存処理中です。" : ""}
+              onCreate={(label, color) => mutateSale(
+                { action: "create_sale", label, color },
+                "ECセール項目を追加しました",
+              )}
+              onUpdate={(sale, label, color) => mutateSale(
+                { action: "update_sale", sale_id: sale.id, label, color },
+                "ECセール項目を更新しました",
+              )}
+              onToggle={async (sale) => {
+                if (sale.is_active && !window.confirm(`「${sale.label}」を今後のECセール候補から削除しますか？\n保存済みシフトの表示は残ります。`)) return;
+                await mutateSale(
+                  { action: sale.is_active ? "delete_sale" : "restore_sale", sale_id: sale.id },
+                  sale.is_active ? "ECセール項目を削除しました" : "ECセール項目を再表示しました",
+                );
+              }}
+            />
+          </>
         )}
 
         <div className="shift-period-list-section">
@@ -2985,6 +3078,7 @@ export function ShiftAdminTab() {
                                 selected={requirement.ec_sale_tags || []}
                                 times={requirement.ec_sale_times || {}}
                                 disabled={shiftControlsDisabled}
+                                onManage={() => setSaleManagerOpen(true)}
                                 onChange={(next, nextTimes) => {
                                   updateRequirementLocal(date, { ec_sale_tags: next, ec_sale_times: nextTimes });
                                 }}
@@ -3098,6 +3192,7 @@ export function ShiftAdminTab() {
                               selected={requirement.ec_sale_tags || []}
                               times={requirement.ec_sale_times || {}}
                               disabled={shiftControlsDisabled}
+                              onManage={() => setSaleManagerOpen(true)}
                               onChange={(next, nextTimes) => {
                                 updateRequirementLocal(date, { ec_sale_tags: next, ec_sale_times: nextTimes });
                               }}
