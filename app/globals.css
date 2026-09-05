@@ -14584,6 +14584,22 @@ html[data-theme="light"] .board-footer .selected-file {
   text-align: left;
 }
 
+.shift-calendar-sync {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 16px;
+  font-size: 13px;
+}
+
+.shift-calendar-sync button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .shift-sale-manager-trigger:hover {
   border-color: rgba(96, 165, 250, 0.58);
   background: rgba(37, 99, 235, 0.08);

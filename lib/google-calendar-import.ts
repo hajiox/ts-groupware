@@ -1,4 +1,5 @@
 import { calendar_v3 } from 'googleapis'
+import { randomUUID } from 'node:crypto'
 import {
   getGoogleCalendarAuthInfo,
   getGoogleCalendarClient,
@@ -36,6 +37,8 @@ type GoogleColorContext = {
 type SyncStatusRow = {
   sync_key: string
   last_synced_at: string | null
+  last_attempted_at: string | null
+  last_error: string | null
 }
 
 export type GoogleCalendarImportResult = {
@@ -48,6 +51,7 @@ export type GoogleCalendarImportResult = {
   sync_skipped?: boolean
   sync_key?: string
   synced_at?: string
+  sync_in_progress?: boolean
 }
 
 export type GoogleCalendarImportErrorPayload = {
@@ -106,13 +110,13 @@ async function getGoogleColorContext(
   calendar: calendar_v3.Calendar,
   calendarId: string
 ): Promise<GoogleColorContext> {
-  const colorsResponse = await calendar.colors.get()
+  const colorsResponse = await calendar.colors.get({}, { timeout: 5000, retry: false })
   const eventColors = colorDefinitionsToMap(colorsResponse.data.event)
   const calendarColors = colorDefinitionsToMap(colorsResponse.data.calendar)
   let defaultColor = GOOGLE_EVENT_COLOR
 
   try {
-    const calendarListEntry = await calendar.calendarList.get({ calendarId })
+    const calendarListEntry = await calendar.calendarList.get({ calendarId }, { timeout: 5000, retry: false })
     defaultColor = cleanHexColor(calendarListEntry.data.backgroundColor)
       || (calendarListEntry.data.colorId ? calendarColors[calendarListEntry.data.colorId] : null)
       || GOOGLE_EVENT_COLOR
@@ -220,7 +224,7 @@ function isSyncStatusTableMissing(message: string) {
 async function getRecentSync(syncKey: string) {
   const { data, error } = await adminClient
     .from('gw_calendar_sync_status')
-    .select('sync_key, last_synced_at')
+    .select('sync_key, last_synced_at, last_attempted_at, last_error')
     .eq('sync_key', syncKey)
     .maybeSingle()
 
@@ -379,7 +383,10 @@ export async function syncGoogleCalendarRange(options: {
   if (!force) {
     const recentSync = await getRecentSync(syncKey)
     const lastSyncedAt = recentSync?.last_synced_at ? new Date(recentSync.last_synced_at).getTime() : 0
-    if (lastSyncedAt && now.getTime() - lastSyncedAt < getAutoSyncIntervalMs()) {
+    if (recentSync?.last_error && now.getTime() - Date.parse(recentSync.last_attempted_at || '') < 60_000) {
+      throw new GoogleCalendarImportFailure({ status: 503, error: recentSync.last_error })
+    }
+    if (!recentSync?.last_error && lastSyncedAt && now.getTime() - lastSyncedAt < getAutoSyncIntervalMs()) {
       return {
         success: true,
         calendar_id: calendarId,
@@ -394,35 +401,45 @@ export async function syncGoogleCalendarRange(options: {
     }
   }
 
-  await writeSyncStatus({
-    syncKey,
-    calendarId,
-    rangeStart,
-    rangeEnd,
-    lastAttemptedAt: nowIso,
-    lastSyncedAt: null,
-    lastError: null,
-  })
+  const leaseToken = randomUUID()
+  const lease = await adminClient.rpc('gw_claim_calendar_sync', { p_calendar_id: calendarId, p_token: leaseToken })
+  if (lease.error) throw new GoogleCalendarImportFailure({ status: 503, error: 'カレンダー同期の準備が完了していません' })
+  if (!lease.data) return { success: true, calendar_id: calendarId, imported: 0, deleted: 0, colored: 0, skipped: 0, sync_in_progress: true }
 
   let authInfo: GoogleCalendarAuthInfo | null = null
-
   try {
+    await writeSyncStatus({
+      syncKey,
+      calendarId,
+      rangeStart,
+      rangeEnd,
+      lastAttemptedAt: nowIso,
+      lastError: null,
+    })
     authInfo = getGoogleCalendarAuthInfo()
     const calendar = getGoogleCalendarClient()
-    const colorContext = await getGoogleColorContext(calendar, calendarId)
+    const colorContext = await getGoogleColorContext(calendar, calendarId).catch(() => ({ eventColors: {}, defaultColor: GOOGLE_EVENT_COLOR } as GoogleColorContext))
     const importerUserId = await getCalendarImportUserId(requestedBy)
-    const response = await calendar.events.list({
-      calendarId,
-      timeMin: new Date(rangeStart).toISOString(),
-      timeMax: new Date(rangeEnd).toISOString(),
-      maxResults: 2500,
-      singleEvents: true,
-      orderBy: 'startTime',
-      showDeleted: true,
-      timeZone: DEFAULT_TIME_ZONE,
-    })
+    const googleEvents: calendar_v3.Schema$Event[] = []
+    let pageToken: string | undefined
+    const fetchStarted = Date.now()
+    do {
+      if (Date.now() - fetchStarted > 45_000 || googleEvents.length > 25_000) throw new Error('カレンダーの取得に時間がかかっています。保存済みの予定を保持して次回再試行します')
+      const response = await calendar.events.list({
+        calendarId,
+        timeMin: new Date(rangeStart).toISOString(),
+        timeMax: new Date(rangeEnd).toISOString(),
+        maxResults: 2500,
+        singleEvents: true,
+        orderBy: 'startTime',
+        showDeleted: true,
+        timeZone: DEFAULT_TIME_ZONE,
+        pageToken,
+      }, { timeout: 8000, retry: true, retryConfig: { retry: 2, noResponseRetries: 1, retryDelay: 500, statusCodesToRetry: [[429, 429], [500, 599]] } })
+      googleEvents.push(...(response.data.items || []))
+      pageToken = response.data.nextPageToken || undefined
+    } while (pageToken)
 
-    const googleEvents = response.data.items || []
     const cancelledExternalIds = googleEvents
       .filter(event => event.status === 'cancelled' && event.id)
       .map(event => `${calendarId}:${event.id}`)
@@ -430,29 +447,14 @@ export async function syncGoogleCalendarRange(options: {
       .map(event => normalizeGoogleEvent(event, calendarId, importerUserId, colorContext))
       .filter((event): event is ImportedCalendarEvent => Boolean(event))
     const colored = googleEvents.filter(event => event.colorId && colorContext.eventColors[event.colorId]).length
-
-    let deleted = 0
-    if (cancelledExternalIds.length > 0) {
-      const { error: deleteError, count } = await adminClient
-        .from('gw_calendar_events')
-        .delete({ count: 'exact' })
-        .eq('source', GOOGLE_CALENDAR_SOURCE)
-        .in('external_id', cancelledExternalIds)
-
-      if (deleteError) throw deleteError
-      deleted = count || 0
-    }
-
-    let imported = 0
-    if (rows.length > 0) {
-      const { data, error } = await adminClient
-        .from('gw_calendar_events')
-        .upsert(rows, { onConflict: 'source,external_id' })
-        .select('id')
-
-      if (error) throw error
-      imported = data?.length || rows.length
-    }
+    if (rows.length + cancelledExternalIds.length !== googleEvents.length) throw new Error('カレンダー予定の日時を確認できないため、保存済みの予定を保持しました')
+    const snapshot = await adminClient.rpc('gw_replace_google_calendar_range', {
+      p_calendar_id: calendarId, p_token: leaseToken,
+      p_start: rangeStart, p_end: rangeEnd, p_events: rows,
+    })
+    if (snapshot.error) throw snapshot.error
+    const deleted = Number(snapshot.data || 0)
+    const imported = rows.length
 
     const result: GoogleCalendarImportResult = {
       success: true,
@@ -487,9 +489,10 @@ export async function syncGoogleCalendarRange(options: {
       rangeStart,
       rangeEnd,
       lastAttemptedAt: nowIso,
-      lastSyncedAt: null,
       lastError: payload.error,
     }).catch(() => undefined)
     throw new GoogleCalendarImportFailure(payload)
+  } finally {
+    await adminClient.from('gw_calendar_sync_leases').delete().eq('calendar_id', calendarId).eq('token', leaseToken)
   }
 }

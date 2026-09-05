@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { USER_DEPARTMENTS, isUserDepartment, normalizeUserDepartment, type UserDepartment } from '@/lib/departments'
 import { isAutoGoogleCalendarSyncEnabled, syncGoogleCalendarRange } from '@/lib/google-calendar-import'
+import { syncFloorShiftSales } from '@/lib/shift-calendar-sales-sync'
 import { getManagementPermissions } from '@/lib/management-permissions'
 import { syncShiftPaidLeaveRequests } from '@/lib/paid-leave-data'
 import { getUserSession } from '@/lib/session'
@@ -1480,6 +1481,9 @@ export async function GET(request: NextRequest) {
   try {
     const selectedPeriod = await loadPeriod(periodId, department)
     if (selectedPeriod) await ensureRequirementRows(selectedPeriod)
+    const calendarSales = selectedPeriod ? await syncFloorShiftSales(selectedPeriod, auth.user!.id, request.nextUrl.searchParams.get('calendar_refresh') === '1').catch(() => ({
+      warning: 'セールの自動入力に失敗しました。入力済みの内容を保持しています。再読込で再試行してください',
+    })) : null
     const periods = await loadPeriods(selectedPeriod?.department || department)
     const [details, saleOptions] = await Promise.all([
       loadPeriodDetails(selectedPeriod, selectedPeriod?.department || department || 'フロア'),
@@ -1491,6 +1495,7 @@ export async function GET(request: NextRequest) {
       selectedPeriod,
       department: selectedPeriod?.department || department || 'フロア',
       saleOptions,
+      calendar_sales: calendarSales,
       ...details,
     })
   } catch (err) {
@@ -1539,6 +1544,8 @@ export async function POST(request: NextRequest) {
   try {
     calendarWarning = await refreshFloorCalendar(data as ShiftPeriod, auth.user!.id)
     await ensureRequirementRows(data as ShiftPeriod)
+    const sales = await syncFloorShiftSales(data as ShiftPeriod, auth.user!.id)
+    calendarWarning = sales?.warning || calendarWarning
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : '必要人数行の作成に失敗しました' }, { status: 500 })
   }

@@ -139,6 +139,7 @@ type ShiftCellStyle = {
 };
 
 type ShiftPayload = {
+  calendar_sales?: { calendar_id?: string; synced_at?: string | null; warning?: string | null; changed_days?: number } | null;
   periods: ShiftPeriod[];
   selectedPeriod: ShiftPeriod | null;
   department: UserDepartment;
@@ -1394,7 +1395,7 @@ export function ShiftAdminTab() {
     return [...labels];
   }, [payload?.patterns]);
 
-  async function load(nextPeriodId = periodId, nextDepartment = department) {
+  async function load(nextPeriodId = periodId, nextDepartment = department, refreshCalendar = false) {
     const loadSeq = loadSeqRef.current + 1;
     loadSeqRef.current = loadSeq;
     setIsLoading(true);
@@ -1402,6 +1403,7 @@ export function ShiftAdminTab() {
     const params = new URLSearchParams();
     params.set("department", nextDepartment);
     if (nextPeriodId) params.set("period_id", nextPeriodId);
+    if (refreshCalendar) params.set("calendar_refresh", "1");
     const response = await fetch(`/api/admin/shifts?${params.toString()}`, { cache: "no-store" });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
@@ -1412,6 +1414,7 @@ export function ShiftAdminTab() {
     }
     if (loadSeq !== loadSeqRef.current) return false;
     setPayload(data);
+    if (data.calendar_sales?.warning) setMessage(data.calendar_sales.warning);
     savedPayloadRef.current = cloneShiftPayload(data);
     setOpenTimeEditorKeys(new Set());
     setHasUnsavedChanges(false);
@@ -2452,6 +2455,19 @@ export function ShiftAdminTab() {
               <span>ECセール名を編集</span>
               <small>{(payload?.saleOptions || []).filter((sale) => sale.is_active).length}件</small>
             </button>
+            {payload?.calendar_sales && (
+              <div className="shift-calendar-sync" role="status">
+                <span>{payload.calendar_sales.synced_at
+                  ? `カレンダー同期 ${new Date(payload.calendar_sales.synced_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
+                  : "カレンダー同期を確認してください"}</span>
+                <button type="button" className="admin-btn-outline"
+                  title={hasUnsavedChanges ? "シフトを保存してから同期" : "カレンダーから最新のセールを取得"}
+                  disabled={isLoading || !!savingKey || hasUnsavedChanges}
+                  onClick={() => { void load(periodId, department, true).catch(() => { setMessage("カレンダー同期に失敗しました"); setIsLoading(false); }); }}>
+                  <RotateCcw size={14} aria-hidden="true" /> 再同期
+                </button>
+              </div>
+            )}
             <ShiftEcSaleManager
               open={saleManagerOpen}
               onOpenChange={setSaleManagerOpen}
