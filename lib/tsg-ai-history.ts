@@ -17,5 +17,8 @@ export function boundConversationHistory(messages: ConversationMessage[], maxCha
     selected.unshift(message)
     chars += size
   }
+  // A truncated assistant reply lacks its user question. Keep the latest input,
+  // but do not begin retained conversation context with an orphaned model turn.
+  while (selected.length > 1 && selected[0].role === 'model') selected.shift()
   return { messages: selected, omitted: selected.length < nonempty.length }
 }

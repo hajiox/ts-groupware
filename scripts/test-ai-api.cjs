@@ -17,8 +17,10 @@ async function main() {
   const { boundConversationHistory } = load('lib/tsg-ai-history.ts')
   const msg = (text, role = 'user') => ({ role, parts: [{ text }] })
   const history = [msg('old'), msg('reply', 'model'), msg('latest')]
-  assert.deepEqual(boundConversationHistory(history, 11), { messages: history.slice(1), omitted: true })
+  assert.deepEqual(boundConversationHistory(history, 11), { messages: history.slice(2), omitted: true })
   assert.deepEqual(boundConversationHistory(history, 14), { messages: history, omitted: false })
+  assert.deepEqual(boundConversationHistory([msg('x'.repeat(20)), msg('reply', 'model'), msg('latest')], 11),
+    { messages: [msg('latest')], omitted: true })
   assert.deepEqual(boundConversationHistory([msg('  '), msg('latest')], 6), { messages: [msg('latest')], omitted: false })
   assert.deepEqual(boundConversationHistory([], 6), { messages: [], omitted: false })
   assert.throws(() => boundConversationHistory([msg('最新の入力')], 3), /CHAT_INPUT_TOO_LONG/)

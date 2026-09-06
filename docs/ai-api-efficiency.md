@@ -6,7 +6,7 @@ TSG君DMと履歴書OCRの既存Gemini REST APIを共通化した。モデル、
 
 - `lib/gemini-api.ts`: APIキーをURLから`x-goog-api-key`へ移した。DMは25秒、OCRは45秒で通信を中止する。エラー本文や通信例外の詳細はログ・利用者へ返さない。
 - `[AI usage]`は共通v1形式（version/system/provider/task/model/status/httpStatus/durationMs/inputTokens/outputTokens/cachedInputTokens/thinkingTokens/totalTokens）。statusはsuccess/error、HTTP状態はhttpStatusへ分離。欠損トークン値はnull。通信成功は業務上のOCR成功を意味しない。本文、識別子、資格情報は含めない。記録処理が失敗しても業務結果・元の通信エラーを変更しない。
-- `lib/tsg-ai-history.ts`: 直近20件の会話に16,000文字の追加上限。新しい完全メッセージを優先して順序と原文を保持し、古い会話を除外した場合はシステム指示に明記する。最新メッセージ単独が超過した場合はAI APIを実行せず、利用者へ分割依頼を返信する。保存済みチャット本文は変更しない。
+- `lib/tsg-ai-history.ts`: 直近20件の会話に16,000文字の追加上限。新しい完全メッセージを優先して順序と原文を保持し、切り出し先頭に孤立したmodel応答が残る場合は除外する。古い会話を除外した場合はシステム指示に明記する。最新メッセージ単独が超過した場合はAI APIを実行せず、利用者へ分割依頼を返信する。保存済みチャット本文は変更しない。
 - 16,000文字は運用上の文字数予算であり、トークン数の実測値ではない。削減率・料金削減は未測定。実トークン比較には同種の本番処理に対する上記メタデータを使用する。
 
 検証: `node scripts/test-ai-api.cjs`、変更ファイルESLint、`pnpm lint`（既存23警告・エラーなし）、`pnpm exec tsc --noEmit`、`pnpm build`成功。モックで認証ヘッダー、履歴順序・入力超過、エラー情報非公開、通信時間切れ、usage、DM/OCR生成契約を確認。実AI呼出・実投稿はしていない。
