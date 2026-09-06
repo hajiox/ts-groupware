@@ -1,4 +1,6 @@
 import { adminClient } from '@/lib/supabase/admin'
+import { generateGeminiContent } from '@/lib/gemini-api'
+import { boundConversationHistory } from '@/lib/tsg-ai-history'
 
 /**
  * TSG君 AI応答モジュール
@@ -133,29 +135,22 @@ async function buildConversationHistory(groupId: string, tsgId: string) {
  * Gemini APIを呼び出してAI応答を生成
  */
 async function callGemini(conversationHistory: { role: string; parts: { text: string }[] }[]): Promise<string> {
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const bounded = boundConversationHistory(conversationHistory)
+  const data = await generateGeminiContent({
+    apiKey: GEMINI_API_KEY!,
+    model: GEMINI_MODEL,
+    task: 'chat',
+    timeoutMs: 25_000,
+    body: {
       system_instruction: {
-        parts: [{ text: SYSTEM_PROMPT }],
+        parts: [{ text: SYSTEM_PROMPT + (bounded.omitted
+          ? '\n古い会話の一部は入力上限のため省略されています。参照できない過去の内容を推測せず、必要な場合は再提示を依頼してください。'
+          : '') }],
       },
-      contents: conversationHistory,
-      generationConfig: {
-        maxOutputTokens: 1024,
-        temperature: 0.7,
-      },
-    }),
+      contents: bounded.messages,
+      generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
+    },
   })
-
-  if (!response.ok) {
-    const err = await response.text()
-    console.error('[TSG AI] Gemini API error:', response.status, err)
-    throw new Error('AI応答の生成に失敗しました')
-  }
-
-  const data = await response.json()
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text
   if (!text) {
     throw new Error('AI応答が空でした')
@@ -226,7 +221,9 @@ export async function handleTsgAiResponse(groupId: string, senderUserId: string)
     // 応答を投稿
     await postAsTsg(groupId, aiResponse)
   } catch (err) {
-    console.error('[TSG AI] Error:', err)
-    await postAsTsg(groupId, '申し訳ありません、エラーが発生しました 🙇 もう一度お試しください。')
+    console.error('[TSG AI] Response failed')
+    await postAsTsg(groupId, err instanceof Error && err.message === 'CHAT_INPUT_TOO_LONG'
+      ? 'メッセージが長いためAIで処理できませんでした。16,000文字以内に分けて送信してください。'
+      : '申し訳ありません、エラーが発生しました 🙇 もう一度お試しください。')
   }
 }

@@ -1,3 +1,4 @@
+import { generateGeminiContent } from '@/lib/gemini-api'
 import { extractTextFromPdfWithDriveOcr } from '@/lib/drive'
 
 export type ResumeOcrResult = {
@@ -232,43 +233,27 @@ async function extractResumeWithGemini(pdf: Buffer): Promise<ResumeOcrResult> {
   const apiKey = process.env.GEMINI_API_KEY?.trim()
   if (!apiKey) throw new Error('AI OCR設定がありません（GEMINI_API_KEY）')
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(RESUME_OCR_MODEL)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          role: 'user',
-          parts: [
-            { text: EXTRACTION_PROMPT },
-            {
-              inline_data: {
-                mime_type: 'application/pdf',
-                data: pdf.toString('base64'),
-              },
-            },
-          ],
-        }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: RESPONSE_SCHEMA,
-          temperature: 0,
-          maxOutputTokens: 4096,
-        },
-      }),
+  const data = await generateGeminiContent({
+    apiKey,
+    model: RESUME_OCR_MODEL,
+    task: 'resume-ocr',
+    timeoutMs: 45_000,
+    body: {
+      contents: [{
+        role: 'user',
+        parts: [
+          { text: EXTRACTION_PROMPT },
+          { inline_data: { mime_type: 'application/pdf', data: pdf.toString('base64') } },
+        ],
+      }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: RESPONSE_SCHEMA,
+        temperature: 0,
+        maxOutputTokens: 4096,
+      },
     },
-  )
-
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 500)
-    console.error('[Resume OCR] Gemini API error:', response.status, detail)
-    throw new Error(`AI OCRに失敗しました（Gemini ${response.status}）`)
-  }
-
-  const data = await response.json() as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-  }
+  })
   const text = data.candidates?.[0]?.content?.parts
     ?.map((part) => part.text || '')
     .join('')
@@ -291,8 +276,8 @@ export async function extractResumeFromPdf(pdf: Buffer): Promise<ResumeOcrExtrac
         provider: RESUME_OCR_PROVIDER,
         model: RESUME_OCR_MODEL,
       }
-    } catch (error) {
-      console.warn('[Resume OCR] Gemini unavailable; falling back to Google Drive OCR:', error instanceof Error ? error.message : error)
+    } catch {
+      console.warn('[Resume OCR] Gemini unavailable; falling back to Google Drive OCR')
     }
   }
 
