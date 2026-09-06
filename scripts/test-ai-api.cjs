@@ -43,9 +43,13 @@ async function main() {
     const result = await generateGeminiContent(input)
     assert.equal(result.candidates[0].content.parts[0].text, 'private-test-result')
     const metric = JSON.parse(logs[0].slice('[AI usage] '.length))
-    assert.equal(metric.totalTokenCount, 58)
-    assert.equal(metric.cachedContentTokenCount, null)
-    assert.equal(metric.succeeded, true)
+    assert.equal(metric.version, 1)
+    assert.equal(metric.system, 'tsg')
+    assert.equal(metric.provider, 'gemini')
+    assert.equal(metric.totalTokens, 58)
+    assert.equal(metric.cachedInputTokens, null)
+    assert.equal(metric.status, 'success')
+    assert.equal(metric.httpStatus, 200)
 
     global.fetch = async () => new Response('secret-test-key private-test-body', { status: 429 })
     await assert.rejects(generateGeminiContent(input), /HTTP 429/)
@@ -60,6 +64,11 @@ async function main() {
     finally { clearTimeout(keepAlive) }
     assert.equal(logs.length, 4)
     assert(!logs.join('').match(/secret-test-key|private-test-body|private-test-result|private-extra/))
+    console.info = () => { throw new Error('logger failed') }
+    global.fetch = async () => new Response(JSON.stringify({ candidates: [] }), { status: 200 })
+    assert.deepEqual(await generateGeminiContent(input), { candidates: [] })
+    global.fetch = async () => new Response('', { status: 503 })
+    await assert.rejects(generateGeminiContent(input), /HTTP 503/)
   } finally {
     global.fetch = originalFetch
     console.info = originalInfo

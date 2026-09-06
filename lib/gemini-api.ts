@@ -39,11 +39,17 @@ export async function generateGeminiContent(input: {
       : 'AI APIの通信に失敗しました（時間切れまたは不正な応答）')
   } finally {
     const tokens: Record<string, number | null> = {}
-    for (const key of ['promptTokenCount', 'candidatesTokenCount', 'cachedContentTokenCount', 'thoughtsTokenCount', 'totalTokenCount']) {
+    for (const [key, field] of Object.entries({ promptTokenCount: 'inputTokens', candidatesTokenCount: 'outputTokens',
+      cachedContentTokenCount: 'cachedInputTokens', thoughtsTokenCount: 'thinkingTokens', totalTokenCount: 'totalTokens' })) {
       const value = usage[key]
-      tokens[key] = typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+      tokens[field] = typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
     }
-    console.info('[AI usage]', JSON.stringify({ task: input.task, model: input.model,
-      status, succeeded, durationMs: Date.now() - started, ...tokens }))
+    try {
+      console.info('[AI usage]', JSON.stringify({ version: 1, system: 'tsg', provider: 'gemini',
+        task: input.task, model: input.model, status: succeeded ? 'success' : 'error',
+        httpStatus: status, durationMs: Date.now() - started, ...tokens }))
+    } catch {
+      // Observability failure must never change the business result or original error.
+    }
   }
 }
