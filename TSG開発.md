@@ -1314,3 +1314,11 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - `POST /api/integrations/meeting-transcriber/self-dm` も追加した。認証は同じMeetingTranscriber専用Secretを使い、既存の汎用DM APIと共有 `TSG_INTEGRATION_SECRET` は変更・参照しない。宛先名はリクエストで受け取らず、TSG本番環境の `MEETING_TRANSCRIBER_DM_RECIPIENT_NAME` で1名に固定する。
 - TSGのログイン判定では `summary` と `self-dm` の2パスだけを完全一致で公開連携APIとして許可し、それ以外のMeetingTranscriber配下や既存認証範囲は変更しない。専用DM、既存汎用DM、DocScanner FAX、TSAレシピ通知、型検査、対象Lint、全体Lint（エラー0件・既存警告23件）、全83ルートのローカル本番ビルドに成功した。実DMは送信していない。
 - 本番 `dpl_9SwxnT3SqzXzpULWaM2REZQteQhB` を `https://v0-line-blush.vercel.app` へ反映した。固定URLで専用2APIが未認証401・認証済み空本文400、既存の汎用DMとDocScanner FAXが未認証401を維持することを、投稿を作らない空リクエストだけで確認した。
+
+## 2026-09-07 出荷CSV取込の管理職アラート
+- TSAローカル出荷データ管理向け POST `/api/integrations/tsa/carrier-import-alert` を追加。既存 `TSG_INTEGRATION_SECRET` で認証し、TS（管理職）掲示板へTSG君として投稿する。任意の宛先・本文・URLは受け付けない。
+- 入力: `sourceKey`（ASCII英数字/コロン/ハイフン/下線、1～200字）、`period`（YYYY-MM）、`carriers`（yamato/sagawa、重複不可）、`reason`（browser_access/login_required/share_unavailable/csv_missing/import_failed/execution_failed）、`status`（needs_operator/failed/recovered）。4KB上限。GETは同認証による読取専用の宛先疎通確認。
+- 同一sourceKey・同一内容は200 duplicateで再通知しない。初回201、違う内容で同一キーを使うと409。並行作成も同じ投稿IDに収束。復旧は別の安定キーで通知する。新規投稿のみ既存グループpushを使用。
+- 掲示板に対象月、原因区分、Chromeログイン/ブラウザ操作権限/共有フォルダ/ローカルアプリの確認手順、社内限定の `http://192.168.110.200:3003/?carrierImport=YYYY-MM#carrier-import` を掲載。リンク表示のみでは処理せず、ローカル画面の「手動実行」で開始する。
+- 投稿処理はAIを使わず固定文面。ブラウザ未起動を根拠なく断定しない。呼出側が永続outboxと再送・実行履歴を管理する。
+- 検証: `node scripts/test-carrier-import-alert.cjs` で入力/認証/読取/新規/重複/競合/並行作成をmock確認。実データへのテスト投稿なし。TypeScriptチェック通過。
