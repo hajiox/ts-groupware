@@ -45,6 +45,7 @@ export function proxy(request: NextRequest) {
     '/placeholder',
   ]
   const publicExactPaths = [
+    '/api/integrations/board-post', // Uses integration-secret authentication in the route.
     '/api/integrations/meeting-transcriber/summary',
     '/api/integrations/meeting-transcriber/self-dm',
   ]
