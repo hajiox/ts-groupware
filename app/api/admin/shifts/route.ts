@@ -1,3 +1,4 @@
+import { canSelectAllShiftPatterns } from '@/lib/shift-pattern-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { USER_DEPARTMENTS, isUserDepartment, normalizeUserDepartment, type UserDepartment } from '@/lib/departments'
 import { isAutoGoogleCalendarSyncEnabled, syncGoogleCalendarRange } from '@/lib/google-calendar-import'
@@ -2190,7 +2191,7 @@ export async function PATCH(request: NextRequest) {
         if (blockingKeys.has(key) && isCompanyOff) continue
         const patternId = cleanText(assignment.pattern_id, 80)
         const pattern = patternById.get(patternId) || patternByLabel.get(shiftLabel) || null
-        if (pattern && isBasicShiftPattern(pattern) && !isRegularEmployee(employee)) {
+        if (pattern && isBasicShiftPattern(pattern) && !canSelectAllShiftPatterns(employee)) {
           return NextResponse.json({ error: `${displayName(employee)}は基本勤務を選択できません` }, { status: 400 })
         }
         assignmentKeys.add(key)
@@ -2763,7 +2764,7 @@ export async function PATCH(request: NextRequest) {
       if (employee.hire_date && workDate < employee.hire_date) {
         return NextResponse.json({ error: `${displayName(employee)}は${employee.hire_date}入社予定のため、入社日前へ勤務を保存できません` }, { status: 400 })
       }
-      if (pattern && isBasicShiftPattern(pattern) && !isRegularEmployee(employee)) {
+      if (pattern && isBasicShiftPattern(pattern) && !canSelectAllShiftPatterns(employee)) {
         return NextResponse.json({ error: '基本勤務は正社員用です。パート/フルタイムパートは時間帯の勤務パターンを選んでください。' }, { status: 400 })
       }
 

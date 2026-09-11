@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEven
 import { Building2, CheckCircle2, ChevronDown, ChevronUp, Clock3, Factory, GripVertical, LockKeyhole, MapPin, Paintbrush, Pencil, Plus, Printer, RotateCcw, Save, Trash2, Undo2, UserMinus, X } from "lucide-react";
 import { USER_DEPARTMENTS, type UserDepartment } from "@/lib/departments";
 import { SHIFT_COMPANY_OFF_NOTE, isCompanyOffAssignment } from "@/lib/shift-assignments";
+import { canSelectAllShiftPatterns } from "@/lib/shift-pattern-access";
 import { resolveShiftConstraints } from "@/lib/shift-constraints";
 import { shiftEcSaleDisplayLabel, type ShiftEcSaleColor, type ShiftEcSaleOption, type ShiftEcSaleTimes } from "@/lib/shift-sales";
 import { buildShiftTimeeRange, parseShiftTimeeRange } from "@/lib/shift-timee";
@@ -184,7 +185,6 @@ const REQUEST_LABELS: Record<ShiftRequest["request_type"], string> = {
   note: "メモ",
 };
 
-const REGULAR_WORK_STYLES = new Set(["regular_5d_8h", "regular_6d_6_5h"]);
 
 const DEPARTMENT_SHIFT_META: Record<UserDepartment, {
   description: string;
@@ -208,9 +208,7 @@ const DEPARTMENT_SHIFT_META: Record<UserDepartment, {
   },
 };
 
-function isRegularEmployee(employee: Pick<ShiftEmployee, "work_style">) {
-  return REGULAR_WORK_STYLES.has(employee.work_style || "");
-}
+
 
 function isBeforeHireDate(employee: Pick<ShiftEmployee, "hire_date">, workDate: string) {
   return Boolean(employee.hire_date && workDate < employee.hire_date);
@@ -257,7 +255,7 @@ function shiftTimingForEmployee(employee: ShiftEmployee, pattern: ShiftPattern |
 }
 
 function patternOptionsForEmployee(employee: ShiftEmployee, patterns: ShiftPattern[]) {
-  if (isRegularEmployee(employee)) return patterns;
+  if (canSelectAllShiftPatterns(employee)) return patterns;
   return patterns.filter((pattern) => {
     if (isBasicShiftPattern(pattern)) return false;
     return !!pattern.start_time || !!pattern.end_time || /\d/.test(pattern.label);
@@ -2734,7 +2732,7 @@ export function ShiftAdminTab() {
             <div className="shift-table-heading">
               <div>
                 <h3>シフト表</h3>
-                <p>正社員は基本勤務系、パートは時間帯候補を表示します。候補以外の文字も保存できます。</p>
+                <p>{selectedPeriod.department === "フロア" ? "社員・パートともすべての勤務候補を表示します。" : "正社員は基本勤務系、パートは時間帯候補を表示します。"}候補以外の文字も保存できます。</p>
               </div>
               {employeePages.length > 1 && (
                 <div className="shift-page-switch" aria-label="表示スタッフ切替">
