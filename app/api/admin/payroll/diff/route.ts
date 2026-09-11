@@ -14,7 +14,7 @@ import {
 } from '@/lib/payroll-calculation'
 import { adminClient } from '@/lib/supabase/admin'
 import { isEmployeePayrollEligibleForRange } from '@/lib/workforce-employment'
-import { payrollAmountDelta } from '@/lib/payroll-comparison'
+import { comparisonPaidLeave, payrollAmountDelta } from '@/lib/payroll-comparison'
 
 type PeriodRow = {
   id: string
@@ -1059,7 +1059,7 @@ export async function GET(request: NextRequest) {
             sundayOvertimeMinutes: 0,
             daily: [],
           },
-          paidLeave.summary,
+          comparisonPaidLeave(attendanceSource, paidLeave.summary),
         )
         : null
       const punchCalculated = profile && punchAttendance && !paidLeaveConflictReason && attendanceSource !== 'punch'
