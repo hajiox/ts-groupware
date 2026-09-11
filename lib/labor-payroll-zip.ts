@@ -515,29 +515,37 @@ function payrollAliases(employee: EmployeeRow) {
     : []
 }
 
-function matchEmployees(results: ParsedPayrollResult[], employees: EmployeeRow[]) {
+export function matchLaborPayrollEmployees(results: ParsedPayrollResult[], employees: EmployeeRow[]) {
   const byId = new Map(employees.map((employee) => [employee.id, employee]))
   const activeEmployees = employees.filter((employee) => employee.payroll_status === 'active' || employee.user_id)
+  const hasName = (employee: EmployeeRow, name: string) => (
+    normalizedName(employee.real_name || employee.display_name) === name
+    || normalizedName(employee.display_name) === name
+  )
   const matches = results.map((result) => {
-    const byCode = employees.find((employee) => employee.employee_code === result.employeeCode)
-    const canonicalAliasName = KNOWN_EMPLOYEE_NAME_ALIASES.get(normalizedName(result.employeeName))
-    const byKnownName = canonicalAliasName
-      ? activeEmployees.find((employee) => (
-        normalizedName(employee.real_name || employee.display_name) === canonicalAliasName
-        || normalizedName(employee.display_name) === canonicalAliasName
-      ))
-      : null
-    const byRegisteredAlias = activeEmployees.find((employee) => payrollAliases(employee).some((alias) => (
-      String(alias.employee_code || '') === result.employeeCode
-      || normalizedName(alias.name) === normalizedName(result.employeeName)
-    )))
-    const byName = activeEmployees.find((employee) => (
-      normalizedName(employee.real_name || employee.display_name) === normalizedName(result.employeeName)
-      || normalizedName(employee.display_name) === normalizedName(result.employeeName)
+    const name = normalizedName(result.employeeName)
+    const canonicalAliasName = KNOWN_EMPLOYEE_NAME_ALIASES.get(name)
+    // Payroll-provider codes can differ from TSG codes. A number alone must
+    // never attach a differently named employee's wages to this employee.
+    const byCodeAndName = employees.filter((employee) => (
+      employee.employee_code === result.employeeCode && hasName(employee, name)
     ))
-    const source = byRegisteredAlias || byKnownName || byCode || byName || null
-    const targetId = source ? aliasTargetId(source) || source.id : null
-    return { result, employee: targetId ? byId.get(targetId) || source : null }
+    const byKnownName = canonicalAliasName
+      ? activeEmployees.filter((employee) => hasName(employee, canonicalAliasName))
+      : []
+    const byRegisteredAlias = activeEmployees.filter((employee) => payrollAliases(employee).some((alias) => (
+      normalizedName(alias.name) === name
+    )))
+    const byName = activeEmployees.filter((employee) => hasName(employee, name))
+    const candidates = byRegisteredAlias.length ? byRegisteredAlias
+      : byKnownName.length ? byKnownName
+        : byCodeAndName.length ? byCodeAndName : byName
+    const targets = new Map(candidates.map((employee) => {
+      const targetId = aliasTargetId(employee) || employee.id
+      return [targetId, byId.get(targetId) || null] as const
+    }))
+    if (targets.size > 1) throw new Error('社員氏名に複数の対応候補があります。人事マスタの対応を確認してください')
+    return { result, employee: targets.values().next().value || null }
   })
   const missing = matches.filter((match) => !match.employee)
   if (missing.length) {
@@ -576,7 +584,7 @@ export async function analyzeLaborImportBatch(batchId: string, zipBuffer?: Buffe
     .from('gw_payroll_employees')
     .select('id, user_id, employee_code, display_name, real_name, payroll_status, raw_payload')
   if (employeesError) throw new Error(employeesError.message)
-  const matches = matchEmployees(analysis.results, (employeesData || []) as EmployeeRow[])
+  const matches = matchLaborPayrollEmployees(analysis.results, (employeesData || []) as EmployeeRow[])
 
   const payrollMonth = batch.target_payroll_month
   if (!payrollMonth) throw new Error('支給月が設定されていません')

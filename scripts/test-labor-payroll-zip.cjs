@@ -14,7 +14,7 @@ function load(file) {
   })
   return mod.exports
 }
-const { parseLaborPayrollZip } = load('lib/labor-payroll-zip.ts')
+const { parseLaborPayrollZip, matchLaborPayrollEmployees } = load('lib/labor-payroll-zip.ts')
 const { payrollAmountDelta } = load('lib/payroll-comparison.ts')
 function workbook(rows, name) {
   const book = XLSX.utils.book_new()
@@ -36,6 +36,19 @@ async function fixture(revision = '', options = {}) {
   return zip.generateAsync({ type: 'nodebuffer' })
 }
 async function main() {
+  const employee = (id, code, name, raw = {}) => ({ id, employee_code: code, display_name: name, real_name: name, user_id: id, payroll_status: 'active', raw_payload: raw })
+  const employees = [
+    employee('a', '146', '既存社員', { hr_profile: { payroll_name_aliases: [{ employee_code: '141', name: '旧姓社員' }] } }),
+    employee('b', '149', '新規社員'),
+  ]
+  const sources = [{ employeeCode: '141', employeeName: '旧姓社員' }, { employeeCode: '146', employeeName: '新規社員' }]
+  assert.deepEqual(matchLaborPayrollEmployees(sources, employees).map(m => m.employee.id), ['a', 'b'])
+  // A historical alias code must not override a different, exact employee name.
+  assert.equal(matchLaborPayrollEmployees([{ employeeCode: '141', employeeName: '新規社員' }], employees)[0].employee.id, 'b')
+  assert.throws(() => matchLaborPayrollEmployees([{ employeeCode: '146', employeeName: '不明社員' }], employees), /紐付かない社員/)
+  assert.throws(() => matchLaborPayrollEmployees([{ employeeCode: '999', employeeName: '新規社員' }], [...employees, employee('c', '150', '新規社員')]), /複数の対応候補/)
+  assert.equal(matchLaborPayrollEmployees([{ employeeCode: '149', employeeName: '新規社員' }], [...employees, employee('c', '150', '新規社員')])[0].employee.id, 'b')
+  assert.throws(() => matchLaborPayrollEmployees([sources[1], sources[1]], employees), /重複紐付け/)
   for (const revision of ['', '_rev1', '_REV12']) {
     const result = await parseLaborPayrollZip(await fixture(revision))
     assert.equal(result.results.length, 1)
