@@ -14,6 +14,7 @@ import {
 } from '@/lib/payroll-calculation'
 import { adminClient } from '@/lib/supabase/admin'
 import { isEmployeePayrollEligibleForRange } from '@/lib/workforce-employment'
+import { payrollAmountDelta } from '@/lib/payroll-comparison'
 
 type PeriodRow = {
   id: string
@@ -1072,10 +1073,10 @@ export async function GET(request: NextRequest) {
       const laborNetPayment = amount(labor?.net_payment)
       const calculatedPaymentTotal = calculated?.paymentTotal ?? 0
       const calculatedNetPayment = calculated?.netPayment ?? 0
-      const paymentDelta = calculated ? calculatedPaymentTotal - laborPaymentTotal : null
-      const netDelta = calculated ? calculatedNetPayment - laborNetPayment : null
-      const operationalPaymentDelta = punchCalculated ? punchCalculated.paymentTotal - laborPaymentTotal : null
-      const operationalNetDelta = punchCalculated ? punchCalculated.netPayment - laborNetPayment : null
+      const paymentDelta = payrollAmountDelta(calculated?.paymentTotal, labor ? laborPaymentTotal : null)
+      const netDelta = payrollAmountDelta(calculated?.netPayment, labor ? laborNetPayment : null)
+      const operationalPaymentDelta = payrollAmountDelta(punchCalculated?.paymentTotal, labor ? laborPaymentTotal : null)
+      const operationalNetDelta = payrollAmountDelta(punchCalculated?.netPayment, labor ? laborNetPayment : null)
       const hasOperationalAttendanceDifference = Boolean(
         punchAttendance
         && laborAttendance

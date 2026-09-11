@@ -318,9 +318,19 @@ function workbookFromBuffer(buffer: Buffer) {
 }
 
 async function findWorkbook(zip: JSZip, predicate: (name: string) => boolean) {
-  const entry = Object.values(zip.files).find((file) => !file.dir && predicate(fileBaseName(file.name)))
+  const matches = Object.values(zip.files).filter((file) => !file.dir && predicate(fileBaseName(file.name)))
+  if (matches.length > 1) throw new Error('ZIP内に同じ種類の給与Excelが複数あります。対象版を一つにしてください')
+  const entry = matches[0]
   if (!entry) return null
   return { name: entry.name, buffer: Buffer.from(await entry.async('uint8array')) }
+}
+
+function isPayrollStatement(name: string) {
+  return /支給控除一覧表(?:_rev\d+)?\.xlsx$/i.test(name)
+}
+
+function isEmployeeWageLedger(name: string) {
+  return /賃金台帳(?:_rev\d+)?\.xlsx$/i.test(name) && !name.includes('全社計')
 }
 
 function employeeCodesFromWageLedger(workbook: XLSX.WorkBook) {
@@ -396,8 +406,8 @@ export async function parseLaborPayrollZip(buffer: Buffer): Promise<LaborPayroll
       return new TextDecoder('shift_jis').decode(encoded)
     },
   })
-  const payrollWorkbookFile = await findWorkbook(zip, (name) => /支給控除一覧表\.xlsx$/i.test(name))
-  const wageLedgerFile = await findWorkbook(zip, (name) => /賃金台帳\.xlsx$/i.test(name) && !name.includes('全社計'))
+  const payrollWorkbookFile = await findWorkbook(zip, isPayrollStatement)
+  const wageLedgerFile = await findWorkbook(zip, isEmployeeWageLedger)
   if (!payrollWorkbookFile) throw new Error('ZIP内に支給控除一覧表.xlsxが見つかりません')
   if (!wageLedgerFile) throw new Error('ZIP内に社員別の賃金台帳.xlsxが見つかりません')
 
@@ -586,7 +596,7 @@ export async function analyzeLaborImportBatch(batchId: string, zipBuffer?: Buffe
     .select('id, file_name')
     .eq('import_batch_id', batch.id)
   if (documentsError) throw new Error(documentsError.message)
-  const sourceDocumentId = (sourceDocuments || []).find((document) => /支給控除一覧表\.xlsx$/i.test(document.file_name))?.id || null
+  const sourceDocumentId = (sourceDocuments || []).find((document) => fileBaseName(analysis.sourceWorkbook) === document.file_name)?.id || null
 
   const itemDefinitions = Array.from(new Map(
     analysis.results.flatMap((result) => result.items).map((item) => [item.code, item]),
@@ -724,7 +734,7 @@ export async function analyzeLaborImportBatch(batchId: string, zipBuffer?: Buffe
     .eq('import_batch_id', batch.id)
   if (sourceUpdateError) throw new Error(sourceUpdateError.message)
   const parsedDocumentIds = (sourceDocuments || [])
-    .filter((document) => /支給控除一覧表\.xlsx$/i.test(document.file_name) || /賃金台帳\.xlsx$/i.test(document.file_name))
+    .filter((document) => [fileBaseName(analysis.sourceWorkbook), fileBaseName(analysis.wageLedgerWorkbook)].includes(document.file_name))
     .map((document) => document.id)
   if (parsedDocumentIds.length) {
     const { error: parsedDocumentsError } = await adminClient

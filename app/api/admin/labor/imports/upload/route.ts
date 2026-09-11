@@ -293,6 +293,10 @@ export async function POST(request: Request) {
     analysis = await analyzeLaborImportBatch(batch.id, buffer)
   } catch (error) {
     analysisError = error instanceof Error ? error.message : '労務ZIPの解析に失敗しました'
+    const { error: statusError } = await adminClient.from('gw_labor_source_documents')
+      .update({ extraction_status: 'failed', extraction_notes: analysisError })
+      .eq('import_batch_id', batch.id)
+    if (statusError) console.error('[labor ZIP analysis status update failed]')
   }
 
   return NextResponse.json({
@@ -301,7 +305,7 @@ export async function POST(request: Request) {
     driveUploaded: !driveUploadError,
     driveUploadError,
     payrollPeriodId,
-    analysisStage: 'source_registered',
+    analysisStage: analysis ? 'completed' : 'failed',
     requiresExtraction: !analysis,
     analysis,
     analysisError,
