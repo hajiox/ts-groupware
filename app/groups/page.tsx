@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from "react";
 import { Check, X } from "lucide-react";
 import { CalendarShortcut } from "@/components/calendar-shortcut";
 import { HomeCompanyMessages } from "@/components/home-company-messages";
+import { HomeEcSales } from "@/components/home-ec-sales";
 import { NotificationShortcut } from "@/components/notification-shortcut";
 import { ShiftShortcut } from "@/components/shift-shortcut";
 import { shiftDeadlineInfo } from "@/lib/shift-deadline";
@@ -688,6 +689,7 @@ export default function GroupsPage() {
         className="groups-list page-content"
         aria-label="グループ一覧"
       >
+        <HomeEcSales />
         {permissions?.canApprovePaidLeave && pendingLeaveApprovals.length > 0 && (
           <section className="leave-approval-home" aria-label="有給申請の承認待ち">
             <div className="leave-approval-home__header">
