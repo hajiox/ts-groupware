@@ -1,0 +1,188 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { APPRAISAL_ITEMS, APPRAISAL_LABELS, emptyAppraisalRatings, type AppraisalRatings, type AppraisalRecord } from "@/lib/appraisals";
+
+type Person = { id: string; name: string; department: string };
+type Payload = { employees: Person[]; assignableEmployees: Person[]; records: AppraisalRecord[]; reviewer: Person; reviewers: Person[]; executive: boolean; assignments: { reviewer_id: string; employee_id: string }[] };
+const today = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
+
+export function AppraisalAdminTab() {
+  const [month, setMonth] = useState(() => today().slice(0, 7));
+  const [payload, setPayload] = useState<Payload | null>(null);
+  const [employeeId, setEmployeeId] = useState("");
+  const [ratings, setRatings] = useState<AppraisalRatings>(emptyAppraisalRatings);
+  const [assessedOn, setAssessedOn] = useState(today);
+  const [version, setVersion] = useState(0);
+  const [status, setStatus] = useState("未着手");
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [assignmentReviewer, setAssignmentReviewer] = useState("");
+  const sectionRef = useRef<HTMLElement>(null);
+  const sequence = useRef(0);
+  const formRef = useRef<HTMLDivElement>(null);
+  const selected = payload?.employees.find(e => e.id === employeeId);
+  const count = APPRAISAL_ITEMS.filter(item => ratings[item.id]?.score !== null).length;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setPayload(null); setEmployeeId(""); setError(""); setMessage("");
+    fetch(`/api/admin/appraisals?month=${month}`, { cache: "no-store", signal: controller.signal })
+      .then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error || "取得できませんでした"); return data as Payload; })
+      .then(setPayload)
+      .catch(e => { if (e.name !== "AbortError") setError(e.message); });
+    return () => controller.abort();
+  }, [month]);
+
+  useEffect(() => {
+    if (!dirty && !busy) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    const guard = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target.closest('a,button') : null;
+      if (!target || sectionRef.current?.contains(target)) return;
+      if (busy || !window.confirm("未保存の変更を破棄して画面を移動しますか？")) { event.preventDefault(); event.stopPropagation(); }
+    };
+    window.addEventListener("beforeunload", warn);
+    document.addEventListener("click", guard, true);
+    return () => { window.removeEventListener("beforeunload", warn); document.removeEventListener("click", guard, true); };
+  }, [dirty, busy]);
+
+  async function assign(targetId: string, enabled: boolean) {
+    if (!assignmentReviewer || busy) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch('/api/admin/appraisals', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:enabled?'assign':'unassign',reviewerId:assignmentReviewer,employeeId:targetId}) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '担当を保存できませんでした');
+      setPayload(p => p ? {...p,assignments:[...p.assignments.filter(a => !(a.reviewer_id === assignmentReviewer && a.employee_id === targetId)), ...(enabled ? [{reviewer_id:assignmentReviewer,employee_id:targetId}] : [])]} : p);
+    } catch(e) { setError(e instanceof Error ? e.message : '担当を保存できませんでした'); }
+    finally { setBusy(false); }
+  }
+
+  function open(employee: Person) {
+    if (busy || (dirty && !window.confirm("未保存の変更を破棄して対象者を切り替えますか？"))) return;
+    sequence.current++;
+    const record = payload?.records.find(r => r.employee_id === employee.id && r.reviewer_id === payload.reviewer.id);
+    setEmployeeId(employee.id); setRatings(record?.ratings || emptyAppraisalRatings());
+    setAssessedOn(record?.assessed_on || today()); setVersion(record?.version || 0);
+    setStatus(record?.status === "completed" ? "完了" : record ? "下書き" : "未着手");
+    setDirty(false); setMessage(""); setError("");
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+
+  function change(id: string, changes: Partial<AppraisalRatings[string]>) {
+    setRatings(previous => ({ ...previous, [id]: { ...previous[id], ...changes } }));
+    setDirty(true); setMessage("");
+  }
+
+  async function save(nextStatus: 'draft' | 'completed') {
+    if (!selected || busy) return;
+    setBusy(true); setError(""); setMessage("");
+    const requestSequence = sequence.current;
+    try {
+      const response = await fetch("/api/admin/appraisals", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employeeId, month, assessedOn, ratings, version, status: nextStatus }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "保存できませんでした");
+      if (requestSequence !== sequence.current) return;
+      const record = data.record as AppraisalRecord;
+      setPayload(previous => previous ? { ...previous, records: [...previous.records.filter(r => r.id !== record.id), record] } : previous);
+      setRatings(record.ratings); setVersion(record.version); setDirty(false);
+      setStatus(record.status === "completed" ? "完了" : "下書き");
+      setMessage(record.status === "completed" ? "査定を完了しました。" : "下書きを保存しました。");
+    } catch (e) { setError(e instanceof Error ? e.message : "保存できませんでした"); }
+    finally { setBusy(false); }
+  }
+
+  return <section ref={sectionRef} className="appraisals" aria-label="社員査定">
+    <header className="appraisal-header">
+      <div><h2>査定表 <span className="appraisal-private">非公開</span></h2>
+        <p>各項目を5段階で評価し、備考に具体的な内容を記入してください。</p>
+        <p>プライオリティーは参考値です。評価点への加重は行いません。</p></div>
+      <label>対象月<input type="month" value={month} min="2000-01" max="2099-12" disabled={busy} onChange={e => {
+        if (!e.target.value || (dirty && !window.confirm("未保存の変更を破棄して対象月を切り替えますか？"))) return;
+        setDirty(false); setMonth(e.target.value);
+      }} /></label>
+    </header>
+    {error && !selected && <p role="alert" className="appraisal-error">{error}</p>}
+    {!payload && !error && <p>査定対象を読み込み中…</p>}
+    {payload && <>
+      {payload.executive && <details className="appraisal-overview"><summary>査定の担当設定（役員のみ）</summary>
+        <p>管理者に担当する部下を設定してください。管理者は担当者の自分の査定だけを閲覧・編集できます。役員は全査定を閲覧できます。</p>
+        <label>査定者<select value={assignmentReviewer} disabled={busy} onChange={e => setAssignmentReviewer(e.target.value)}><option value="">管理者を選択</option>{payload.reviewers.filter(r => r.id !== payload.reviewer.id).map(r => <option key={r.id} value={r.id}>{r.name}（{r.department}）</option>)}</select></label>
+        {assignmentReviewer && <div className="appraisal-people">{payload.assignableEmployees.map(e => <label key={e.id}><input type="checkbox" disabled={busy} checked={payload.assignments.some(a => a.reviewer_id === assignmentReviewer && a.employee_id === e.id)} onChange={event => assign(e.id,event.target.checked)} /> {e.name}（{e.department}）</label>)}</div>}
+      </details>}
+      <p>査定者：<strong>{payload.reviewer.name}</strong> ／ 自分の完了：{payload.records.filter(r => r.reviewer_id === payload.reviewer.id && r.status === "completed" && payload.employees.some(e => e.id === r.employee_id)).length} / {payload.employees.length}名</p>
+      <div className="appraisal-people">
+        {payload.employees.map(employee => {
+          const record = payload.records.find(r => r.employee_id === employee.id && r.reviewer_id === payload.reviewer.id);
+          return <button type="button" key={employee.id} disabled={busy} aria-pressed={employeeId === employee.id} onClick={() => open(employee)}>
+            <strong>{employee.name}</strong><small>{employee.department}</small><span>{record?.status === "completed" ? "完了" : record ? "下書き" : "未着手"}</span>
+          </button>;
+        })}
+      </div>
+      {payload.employees.length === 0 && <p>査定対象の部下が登録されていません。</p>}
+      {selected && <div ref={formRef} className="appraisal-form">
+        <div className="appraisal-form-heading"><h3>{selected.name}さんの査定</h3><span>{status}{dirty ? "・未保存" : ""} ／ {count}/10項目</span>
+          <label>査定日<input type="date" value={assessedOn} disabled={busy} onChange={e => { setAssessedOn(e.target.value); setDirty(true); }} /></label></div>
+        <fieldset disabled={busy}>
+          <legend className="sr-only">査定項目</legend>
+          {APPRAISAL_ITEMS.map(item => {
+            const rating = ratings[item.id];
+            return <article className="appraisal-item" key={item.id}>
+              <div className="appraisal-item-heading"><h4 id={`appraisal-${item.id}`}>{item.label}</h4><span>プライオリティー {item.priority}</span></div>
+              <div className="appraisal-score"><output htmlFor={`score-${item.id}`}>{rating.score === null ? "未評価" : `${rating.score} / 5　${APPRAISAL_LABELS[rating.score]}`}</output>
+                {rating.score === null ? <button type="button" onClick={() => change(item.id, { score: 3 })}>「普通」で評価</button> : <button type="button" onClick={() => change(item.id, { score: null })}>未評価に戻す</button>}</div>
+              <input id={`score-${item.id}`} type="range" min="1" max="5" step="1" value={rating.score ?? 3} aria-labelledby={`appraisal-${item.id}`} aria-valuetext={rating.score === null ? "未評価。スライダーを動かすか、普通で評価を押してください" : APPRAISAL_LABELS[rating.score]} onChange={e => change(item.id, { score: Number(e.target.value) })} />
+              <div className="appraisal-scale" aria-hidden="true">{APPRAISAL_LABELS.slice(1).map((label, index) => <span key={label}>{index + 1}<br />{label}</span>)}</div>
+              <label htmlFor={`comment-${item.id}`}>備考<textarea id={`comment-${item.id}`} maxLength={2000} rows={2} value={rating.comment} placeholder="具体的な行動、良い点や改善点など" onChange={e => change(item.id, { comment: e.target.value })} /></label>
+            </article>;
+          })}
+        </fieldset>
+        <div className="appraisal-actions">
+          {error && <p role="alert" className="appraisal-feedback appraisal-error">{error}</p>}
+          {message && <p role="status" className="appraisal-feedback appraisal-success">{message}</p>}
+          <span>{count}/10項目評価済み{dirty ? "・未保存の変更があります" : ""}</span><button type="button" disabled={busy} onClick={() => save('draft')}>{busy ? "保存中…" : "下書き保存"}</button><button type="button" className="appraisal-complete" disabled={busy || count !== 10} onClick={() => save('completed')}>査定を完了</button></div>
+        <p className="appraisal-hint">全10項目を評価すると完了できます。保存済みの査定は再度開いて修正できます。本人には公開・通知されません。</p>
+      </div>}
+      {payload.executive && <details className="appraisal-overview"><summary>管理者の査定結果（役員のみ）</summary>
+        {payload.records.filter(r => r.reviewer_id !== payload.reviewer.id).length === 0 && <p>この月の管理者による査定はまだありません。</p>}
+        {payload.records.filter(r => r.reviewer_id !== payload.reviewer.id).map(record => <details key={record.id}>
+          <summary>{payload.assignableEmployees.find(e => e.id === record.employee_id)?.name || "対象者"} ／ 査定者：{payload.reviewers.find(r => r.id === record.reviewer_id)?.name || "管理者"} ／ {record.status === 'completed' ? '完了' : '下書き'} ／ {record.assessed_on}</summary>
+          {APPRAISAL_ITEMS.map(item => <p key={item.id}><strong>{item.label}：{APPRAISAL_LABELS[record.ratings[item.id].score ?? 0]}</strong><br /><span style={{ whiteSpace: "pre-wrap" }}>{record.ratings[item.id].comment || "備考なし"}</span></p>)}
+        </details>)}
+      </details>}
+    </>}
+    <style jsx>{`
+      .appraisals { max-width: 1100px; margin: 0 auto; color: var(--text); }
+      .appraisal-header,.appraisal-form-heading,.appraisal-item-heading,.appraisal-score,.appraisal-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+      h2 { font-size:22px; } h3 { font-size:19px; } h4 { margin:0; font-size:16px; }
+      p { font-size:14px; line-height:1.7; } label { display:block; font-size:13px; }
+      .appraisal-private { font-size:12px; border:1px solid var(--border); border-radius:5px; padding:3px 7px; margin-left:8px; }
+      input[type=month],input[type=date],textarea,select { display:block; border:1px solid var(--border); border-radius:8px; padding:9px; color:inherit; background:var(--card, #1e293b); max-width:100%; }
+      textarea { width:100%; margin-top:6px; resize:vertical; }
+      button { border:1px solid var(--border); border-radius:8px; padding:9px 13px; background:var(--card, #1e293b); color:inherit; cursor:pointer; }
+      button:disabled { opacity:.5; cursor:default; } button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px solid #60a5fa; outline-offset:3px; }
+      .appraisal-people { display:grid; grid-template-columns:repeat(auto-fill,minmax(155px,1fr)); gap:10px; margin:20px 0; }
+      .appraisal-people button { display:flex; flex-direction:column; gap:6px; text-align:left; }
+      .appraisal-people button[aria-pressed=true] { border-color:#60a5fa; background:rgba(59,130,246,.14); }
+      small,.appraisal-item-heading span,.appraisal-hint { color:var(--text-sub); font-size:12px; }
+      .appraisal-form { scroll-margin-top:80px; } fieldset { margin:16px 0; padding:0; border:0; min-width:0; }
+      .appraisal-item { padding:20px; margin-bottom:14px; border:1px solid var(--border); border-radius:12px; background:var(--card, #1e293b); }
+      .appraisal-score { margin:18px 0 10px; } output { font-weight:700; color:#60a5fa; } .appraisal-score button { font-size:12px; }
+      input[type=range] { width:100%; accent-color:#60a5fa; height:32px; cursor:pointer; }
+      .appraisal-scale { display:flex; justify-content:space-between; font-size:12px; text-align:center; margin:0 0 20px; color:var(--text-sub); }
+      .appraisal-scale span { width:20%; } .appraisal-actions { position:sticky; bottom:calc(76px + env(safe-area-inset-bottom)); padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--card,#1e293b); box-shadow:0 3px 20px #0003; }
+      .appraisal-feedback { flex-basis:100%; }
+      .appraisal-actions span { flex:1; font-size:13px; } .appraisal-complete { background:#2563eb; color:white; }
+      .appraisal-error { color:#f87171; } .appraisal-success { color:#4ade80; }
+      .appraisal-overview { margin:24px 0; padding:16px; border:1px solid var(--border); border-radius:10px; }
+      .appraisal-overview details { margin:12px 0; padding:12px; border-top:1px solid var(--border); } summary { cursor:pointer; }
+      @media(max-width:600px) { .appraisal-item { padding:14px; } .appraisal-header { align-items:flex-start; } .appraisal-actions span { flex-basis:100%; } }
+    `}</style>
+  </section>;
+}

@@ -34,6 +34,7 @@ import { PaidLeaveOperationManual } from "@/components/paid-leave-operation-manu
 import { PaidLeaveAdminTab } from "@/components/paid-leave-admin-tab";
 import { SafeLineAvatar } from "@/components/safe-line-avatar";
 import { ShiftAdminTab } from "@/components/shift-admin-tab";
+import { AppraisalAdminTab } from "@/components/appraisal-admin-tab";
 import { PledgeAdminTab } from "@/components/pledge-admin-tab";
 import {
   RoleAccessIcons,
@@ -659,7 +660,7 @@ type PayrollDiffPayload = {
   rows: PayrollDiffRow[];
 };
 
-type Tab = "users" | "groups" | "attendance" | "leave" | "shifts" | "pledges" | "payroll" | "hr" | "manual";
+type Tab = "users" | "groups" | "attendance" | "leave" | "shifts" | "appraisals" | "pledges" | "payroll" | "hr" | "manual";
 type WorkStyle = "regular_5d_8h" | "regular_6d_6_5h" | "part_time_under_29_5h" | "full_time_part" | "officer";
 
 const WORK_STYLE_OPTIONS: { value: WorkStyle; label: string; detail: string }[] = [
@@ -5206,6 +5207,7 @@ export default function AdminPage() {
         }
         setCurrentUser(data.user);
         setPermissions(nextPermissions);
+        if (nextPermissions.canManageUsers && new URLSearchParams(window.location.search).get("tab") === "appraisals") setTab("appraisals");
         if (!nextPermissions.canManageUsers) {
           if (nextPermissions.canViewPayroll) setTab("payroll");
           else if (nextPermissions.canManageAttendance) setTab("attendance");
@@ -5252,6 +5254,7 @@ export default function AdminPage() {
       Icon: Sprout,
     },
     { id: "shifts", label: "シフト", visible: !!permissions?.canManageAttendance, roles: managementRoles, Icon: CalendarDays },
+    { id: "appraisals", label: "査定", visible: !!permissions?.canManageUsers, roles: managementRoles, Icon: FileText },
     { id: "pledges", label: "誓約", visible: !!permissions?.canManageUsers, roles: managementRoles, Icon: FileSignature },
     { id: "payroll", label: "給与・労務", visible: !!permissions?.canViewPayroll, roles: executiveRoles, Icon: Banknote },
     { id: "hr", label: "人事管理", visible: !!permissions?.canViewPayroll, roles: executiveRoles, Icon: ContactRound },
@@ -5310,6 +5313,7 @@ export default function AdminPage() {
         {tab === "attendance" && permissions?.canManageAttendance && <AttendanceAdminTab currentUser={currentUser} />}
         {tab === "leave" && permissions && <LeaveManagementHub permissions={permissions} />}
         {tab === "shifts" && permissions?.canManageAttendance && <ShiftAdminTab />}
+        {tab === "appraisals" && permissions?.canManageUsers && <AppraisalAdminTab />}
         {tab === "pledges" && permissions?.canManageUsers && <PledgeAdminTab />}
         {tab === "payroll" && permissions?.canViewPayroll && <PayrollLaborAdminTab />}
         {tab === "hr" && permissions?.canViewPayroll && <HRAdminTab currentUser={currentUser} />}
