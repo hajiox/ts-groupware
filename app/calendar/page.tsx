@@ -13,6 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { calendarEventTextColor, normalizeCalendarEventColor } from "@/lib/calendar-event-color";
 import styles from "./calendar.module.css";
 
 type CalendarUser = {
@@ -209,23 +210,10 @@ function formFromEvent(event: CalendarEvent): EventForm {
     startTime: timeValue(start),
     endTime: event.all_day ? "18:00" : timeValue(end),
     allDay: event.all_day,
-    color: isHexColor(event.color) ? event.color : EVENT_COLORS[0],
+    color: normalizeCalendarEventColor(event.color, EVENT_COLORS[0]),
     location: event.location || "",
     description: event.description || "",
   };
-}
-
-function isHexColor(value: string) {
-  return /^#[0-9a-f]{6}$/i.test(value);
-}
-
-function textColorForHex(color: string) {
-  const normalized = isHexColor(color) ? color.slice(1) : "1a73e8";
-  const red = Number.parseInt(normalized.slice(0, 2), 16);
-  const green = Number.parseInt(normalized.slice(2, 4), 16);
-  const blue = Number.parseInt(normalized.slice(4, 6), 16);
-  const brightness = (red * 299 + green * 587 + blue * 114) / 1000;
-  return brightness > 150 ? "#202124" : "#fff";
 }
 
 function isMidnight(date: Date) {
@@ -303,9 +291,10 @@ function buildCalendarWeeks(days: Date[], events: CalendarEvent[]): CalendarWeek
 }
 
 function eventStyle(color: string): React.CSSProperties {
+  const eventColor = normalizeCalendarEventColor(color, EVENT_COLORS[0]);
   return {
-    "--event-color": color,
-    "--event-text-color": textColorForHex(color),
+    "--event-color": eventColor,
+    "--event-text-color": calendarEventTextColor(eventColor),
   } as React.CSSProperties;
 }
 

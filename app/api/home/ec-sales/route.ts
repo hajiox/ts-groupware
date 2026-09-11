@@ -5,6 +5,7 @@ import { getGoogleCalendarId } from '@/lib/google-calendar'
 import { isAutoGoogleCalendarSyncEnabled, syncGoogleCalendarRange } from '@/lib/google-calendar-import'
 import { calendarSalesByDay, resolveCalendarSale, type CalendarSaleEvent } from '@/lib/shift-calendar-sales'
 import { shiftEcSaleDisplayLabel, type ShiftEcSaleOption } from '@/lib/shift-sales'
+import { normalizeCalendarEventColor } from '@/lib/calendar-event-color'
 
 export const maxDuration = 60
 
@@ -31,10 +32,10 @@ export async function GET() {
       warning = 'カレンダー自動同期が停止中です。保存済みの情報を表示しています。'
     }
 
-    const events: CalendarSaleEvent[] = []
+    const events: Array<CalendarSaleEvent & { color: string | null }> = []
     for (let offset = 0; ; offset += 1000) {
       const page = await adminClient.from('gw_calendar_events')
-        .select('title,starts_at,ends_at,all_day').eq('source', 'google_calendar')
+        .select('title,starts_at,ends_at,all_day,color').eq('source', 'google_calendar')
         .like('external_id', `${getGoogleCalendarId()}:%`)
         .lt('starts_at', rangeEnd).gt('ends_at', rangeStart).order('id').range(offset, offset + 999)
       if (page.error) throw page.error
@@ -47,12 +48,17 @@ export async function GET() {
     const options = (master.data || []) as ShiftEcSaleOption[]
     const resolved = new Map(events.flatMap(event => {
       const sale = resolveCalendarSale(event.title, options)
-      return sale ? [[sale.id, sale] as const] : []
+      return sale ? [[sale.id, { sale, eventColor: event.color }] as const] : []
     }))
     const daily = calendarSalesByDay(events, options, date, date)[date] || {}
-    const sales = [...resolved.values()].filter(sale => daily[sale.id])
-      .sort((a, b) => a.sort_order - b.sort_order || a.label.localeCompare(b.label, 'ja'))
-      .map(sale => ({ id: sale.id, color: sale.color, label: shiftEcSaleDisplayLabel({ ...sale, ...daily[sale.id] }) }))
+    const fallbackColors = { red: '#dc2127', green: '#0b8043', orange: '#f4511e' } as const
+    const sales = [...resolved.values()].filter(({ sale }) => daily[sale.id])
+      .sort((a, b) => a.sale.sort_order - b.sale.sort_order || a.sale.label.localeCompare(b.sale.label, 'ja'))
+      .map(({ sale, eventColor }) => ({
+        id: sale.id,
+        color: normalizeCalendarEventColor(eventColor, fallbackColors[sale.color]),
+        label: shiftEcSaleDisplayLabel({ ...sale, ...daily[sale.id] }),
+      }))
 
     return NextResponse.json({ date, sales, warning, syncedAt }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch {

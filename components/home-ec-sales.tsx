@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Tag } from "lucide-react";
+import { calendarEventTextColor, normalizeCalendarEventColor } from "@/lib/calendar-event-color";
 import styles from "./home-ec-sales.module.css";
 
 type SalesResponse = {
   date: string;
-  sales: { id: string; label: string; color: "red" | "green" | "orange" }[];
+  sales: { id: string; label: string; color: string }[];
   warning: string | null;
 };
 
@@ -58,7 +59,10 @@ export function HomeEcSales() {
         {error ? <p className={styles.note}>{error}</p> : !data ? <p className={styles.note}>読み込み中…</p> : (
           <>
             {data.sales.length ? <ul className={styles.sales}>
-              {data.sales.map(sale => <li key={sale.id} className={styles[sale.color]}>{sale.label}</li>)}
+              {data.sales.map(sale => {
+                const color = normalizeCalendarEventColor(sale.color);
+                return <li key={sale.id} style={{ backgroundColor: color, color: calendarEventTextColor(color) }}>{sale.label}</li>;
+              })}
             </ul> : <p className={styles.note}>{data.warning ? "保存済みのセール情報はありません。" : "本日のECセール予定はありません。"}</p>}
             {data.warning && <p className={styles.note}>{data.warning}</p>}
           </>

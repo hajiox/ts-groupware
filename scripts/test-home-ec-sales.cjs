@@ -9,8 +9,8 @@ require.extensions['.ts'] = (mod, filename) => mod._compile(ts.transpileModule(f
 let user = { id: 'test-user' }, fail = false, databaseFail = false, syncCalls = 0
 const date = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)
 const events = [
-  { title: '楽天スーパーSALE（設定済み）', starts_at: `${date}T00:00:00+09:00`, ends_at: `${date}T01:59:00+09:00`, all_day: false },
-  { title: '社内打ち合わせ', starts_at: `${date}T09:00:00+09:00`, ends_at: `${date}T10:00:00+09:00`, all_day: false },
+  { title: '楽天スーパーSALE（設定済み）', starts_at: `${date}T00:00:00+09:00`, ends_at: `${date}T01:59:00+09:00`, all_day: false, color: '#dc2127' },
+  { title: '社内打ち合わせ', starts_at: `${date}T09:00:00+09:00`, ends_at: `${date}T10:00:00+09:00`, all_day: false, color: '#5484ed' },
 ]
 const originalLoad = Module._load
 Module._load = function(id, parent, isMain) {
@@ -46,6 +46,7 @@ async function main() {
   assert.equal(result.body.date, date)
   assert.equal(result.body.sales.length, 1)
   assert.match(result.body.sales[0].label, /01:59/)
+  assert.equal(result.body.sales[0].color, '#dc2127')
   assert.equal(result.body.warning, null)
   fail = true
   const fallback = await GET()

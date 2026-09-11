@@ -5,7 +5,4 @@
 .date { margin: 10px 0 8px; font-size: 12px; color: var(--text-sub); }
 .sales { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 0; padding: 0; }
 .sales li { padding: 7px 10px; border-radius: 8px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; max-width: 100%; }
-.red { color: #b91c1c; background: #fef2f2; }
-.green { color: #166534; background: #f0fdf4; }
-.orange { color: #9a3412; background: #fff7ed; }
 .note { font-size: 12px; color: var(--text-sub); margin: 10px 0 0; }
