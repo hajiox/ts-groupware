@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserSession } from "@/lib/session";
 import { adminClient } from "@/lib/supabase/admin";
 import { hasFeatureRole } from "@/lib/management-permissions";
+import { isWaitingForNewHireMessage, japanToday } from "@/lib/new-hire-company-message-schedule";
 import { normalizeUserName } from "@/lib/user-roles";
 
 type MessageAttachment = {
@@ -19,6 +20,7 @@ type CompanyMessageRow = {
   title: string | null;
   body: string;
   attachment: unknown;
+  new_hire_auto_send: boolean;
   created_at: string;
 };
 
@@ -85,7 +87,7 @@ export async function GET(request: NextRequest) {
     if (request.nextUrl.searchParams.get("view") === "history") {
       const { data: messages, error: messageError } = await adminClient
         .from("gw_home_company_messages")
-        .select("id, author_user_id, title, body, attachment, created_at")
+        .select("id, author_user_id, title, body, attachment, new_hire_auto_send, created_at")
         .order("created_at", { ascending: false });
 
       if (messageError) throw messageError;
@@ -94,6 +96,9 @@ export async function GET(request: NextRequest) {
         canCreate,
       });
     }
+
+    const { error: dispatchError } = await adminClient.rpc("gw_dispatch_new_hire_company_messages");
+    if (dispatchError) console.error("new hire company message dispatch on inbox load failed", dispatchError);
 
     const { data: recipients, error: recipientError } = await adminClient
       .from("gw_home_company_message_recipients")
@@ -111,7 +116,7 @@ export async function GET(request: NextRequest) {
 
     const { data: messages, error: messageError } = await adminClient
       .from("gw_home_company_messages")
-      .select("id, author_user_id, title, body, attachment, created_at")
+      .select("id, author_user_id, title, body, attachment, new_hire_auto_send, created_at")
       .in("id", messageIds);
 
     if (messageError) throw messageError;
@@ -142,6 +147,7 @@ export async function POST(request: NextRequest) {
   const rawTitle = typeof input.title === "string" ? input.title.trim() : "";
   const body = typeof input.body === "string" ? input.body.trim() : "";
   const attachment = cleanAttachment(input.attachment);
+  const newHireAutoSend = input.new_hire_auto_send === true;
   if (!rawTitle) return NextResponse.json({ error: "タイトルを入力してください" }, { status: 400 });
   if (rawTitle.length > 80) return NextResponse.json({ error: "タイトルは80文字以内にしてください" }, { status: 400 });
   if (!body) return NextResponse.json({ error: "メッセージを入力してください" }, { status: 400 });
@@ -154,12 +160,15 @@ export async function POST(request: NextRequest) {
   try {
     const { data: employees, error: employeeError } = await adminClient
       .from("gw_payroll_employees")
-      .select("user_id")
+      .select("user_id, hire_date")
       .eq("payroll_status", "active")
       .not("user_id", "is", null);
 
     if (employeeError) throw employeeError;
     const candidateIds = [...new Set((employees || []).map((item) => item.user_id).filter(Boolean))] as string[];
+    const hireDateByUserId = new Map((employees || []).flatMap((item) => (
+      item.user_id ? [[item.user_id, item.hire_date as string | null] as const] : []
+    )));
     if (candidateIds.length === 0) {
       return NextResponse.json({ error: "送信対象の在籍社員がいません" }, { status: 409 });
     }
@@ -173,6 +182,7 @@ export async function POST(request: NextRequest) {
     if (userError) throw userError;
     const recipientIds = (approvedUsers || [])
       .filter((item) => normalizeUserName(item.real_name || item.display_name) !== "TSG君")
+      .filter((item) => !newHireAutoSend || !isWaitingForNewHireMessage(hireDateByUserId.get(item.id), japanToday()))
       .map((item) => item.id);
     if (!recipientIds.includes(user.id)) recipientIds.push(user.id);
 
@@ -183,8 +193,9 @@ export async function POST(request: NextRequest) {
         title: rawTitle,
         body,
         attachment,
+        new_hire_auto_send: newHireAutoSend,
       })
-      .select("id, author_user_id, title, body, attachment, created_at")
+      .select("id, author_user_id, title, body, attachment, new_hire_auto_send, created_at")
       .single();
 
     if (messageError) throw messageError;
@@ -206,6 +217,37 @@ export async function POST(request: NextRequest) {
     }
     console.error("home company message POST failed", error);
     return NextResponse.json({ error: "全社員メッセージを送信できませんでした" }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  const user = await getUserSession();
+  if (!user) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!(await canCreateCompanyMessage(user))) {
+    return NextResponse.json({ error: "新入社員への自動送信を変更できるのは佐藤正彦さんだけです" }, { status: 403 });
+  }
+
+  const input = await request.json().catch(() => ({}));
+  const messageId = cleanId(input.message_id);
+  if (!messageId) return NextResponse.json({ error: "メッセージを確認してください" }, { status: 400 });
+  if (typeof input.new_hire_auto_send !== "boolean") {
+    return NextResponse.json({ error: "自動送信の設定を確認してください" }, { status: 400 });
+  }
+
+  try {
+    const { data, error } = await adminClient
+      .from("gw_home_company_messages")
+      .update({ new_hire_auto_send: input.new_hire_auto_send })
+      .eq("id", messageId)
+      .select("id, new_hire_auto_send")
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return NextResponse.json({ error: "メッセージが見つかりません" }, { status: 404 });
+    return NextResponse.json({ success: true, message: data });
+  } catch (error) {
+    console.error("home company message PATCH failed", error);
+    return NextResponse.json({ error: "自動送信の設定を変更できませんでした" }, { status: 500 });
   }
 }
 

@@ -19,6 +19,7 @@ type CompanyMessage = {
   title: string;
   body: string;
   attachment: MessageAttachment | null;
+  new_hire_auto_send: boolean;
   created_at: string;
 };
 
@@ -64,6 +65,7 @@ function CompanyMessageComposer({
   const [body, setBody] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
+  const [newHireAutoSend, setNewHireAutoSend] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
 
@@ -82,6 +84,7 @@ function CompanyMessageComposer({
     setTitle("");
     setBody("");
     setImageFile(null);
+    setNewHireAutoSend(false);
     setError("");
   }, [open]);
 
@@ -128,7 +131,12 @@ function CompanyMessageComposer({
       const response = await fetch("/api/home-company-messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), body: body.trim(), attachment }),
+        body: JSON.stringify({
+          title: title.trim(),
+          body: body.trim(),
+          attachment,
+          new_hire_auto_send: newHireAutoSend,
+        }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "全社員メッセージを送信できませんでした");
@@ -202,6 +210,19 @@ function CompanyMessageComposer({
             onChange={(event) => selectImage(event.target.files?.[0] || null)}
           />
 
+          <label className="company-message-modal__new-hire">
+            <input
+              type="checkbox"
+              checked={newHireAutoSend}
+              onChange={(event) => setNewHireAutoSend(event.target.checked)}
+              disabled={sending}
+            />
+            <span>
+              <strong>新入社員へ自動送信</strong>
+              <small>入社7日後から送信します。複数ある場合は登録が古い順に1日1通です。</small>
+            </span>
+          </label>
+
           {error && <p className="company-message-modal__error">{error}</p>}
 
           <div className="company-message-modal__actions">
@@ -230,6 +251,7 @@ export function HomeCompanyMessages({ mode }: { mode: "composer" | "inbox" | "hi
   const [composerOpen, setComposerOpen] = useState(false);
   const [expandedMessageId, setExpandedMessageId] = useState("");
   const [dismissingId, setDismissingId] = useState("");
+  const [updatingNewHireId, setUpdatingNewHireId] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
 
   const loadMessages = useCallback(() => {
@@ -273,6 +295,27 @@ export function HomeCompanyMessages({ mode }: { mode: "composer" | "inbox" | "hi
       window.alert(error instanceof Error ? error.message : "メッセージを非表示にできませんでした");
     } finally {
       setDismissingId("");
+    }
+  }
+
+  async function updateNewHireAutoSend(messageId: string, enabled: boolean) {
+    if (updatingNewHireId) return;
+    setUpdatingNewHireId(messageId);
+    try {
+      const response = await fetch("/api/home-company-messages", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message_id: messageId, new_hire_auto_send: enabled }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "自動送信の設定を変更できませんでした");
+      setMessages((current) => current.map((message) => (
+        message.id === messageId ? { ...message, new_hire_auto_send: enabled } : message
+      )));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "自動送信の設定を変更できませんでした");
+    } finally {
+      setUpdatingNewHireId("");
     }
   }
 
@@ -334,6 +377,17 @@ export function HomeCompanyMessages({ mode }: { mode: "composer" | "inbox" | "hi
                     {expanded && (
                       <div className="company-message-history__body">
                         <small>{message.author_name} / {formatSentAt(message.created_at)}</small>
+                        {canCreate && (
+                          <label className="company-message-history__new-hire">
+                            <input
+                              type="checkbox"
+                              checked={message.new_hire_auto_send}
+                              onChange={(event) => void updateNewHireAutoSend(message.id, event.target.checked)}
+                              disabled={Boolean(updatingNewHireId)}
+                            />
+                            <span>{updatingNewHireId === message.id ? "保存中..." : "新入社員へ入社7日後から自動送信"}</span>
+                          </label>
+                        )}
                         <p>{message.body}</p>
                         {attachment && imageUrl && (
                           <a href={openUrl} target="_blank" rel="noreferrer" className="company-message-card__image">
@@ -389,8 +443,8 @@ export function HomeCompanyMessages({ mode }: { mode: "composer" | "inbox" | "hi
         <CompanyMessageComposer
           open={composerOpen}
           onClose={() => setComposerOpen(false)}
-          onSent={(_message, recipientCount) => {
-            setStatusMessage(`${recipientCount}名（本人を含む）へ送信しました`);
+          onSent={(message, recipientCount) => {
+            setStatusMessage(`${recipientCount}名（本人を含む）へ送信しました${message.new_hire_auto_send ? "。新入社員への自動送信も有効です" : ""}`);
             window.setTimeout(() => setStatusMessage(""), 2500);
           }}
         />

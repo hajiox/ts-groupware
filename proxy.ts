@@ -15,9 +15,10 @@ import {
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
+  const isNewHireMessageCron = pathname === '/api/cron/new-hire-company-messages'
 
   const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim()
-  if (process.env.VERCEL_ENV === 'production' && configuredSiteUrl) {
+  if (process.env.VERCEL_ENV === 'production' && configuredSiteUrl && !isNewHireMessageCron) {
     const canonicalOrigin = new URL(configuredSiteUrl).origin
     const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
     const requestHost = forwardedHost || request.headers.get('host') || request.nextUrl.host
@@ -45,6 +46,7 @@ export function proxy(request: NextRequest) {
     '/placeholder',
   ]
   const publicExactPaths = [
+    '/api/cron/new-hire-company-messages', // Uses Vercel CRON_SECRET authentication in the route.
     '/api/integrations/board-post', // Uses integration-secret authentication in the route.
     '/api/integrations/meeting-transcriber/summary',
     '/api/integrations/meeting-transcriber/self-dm',

@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/new-hire-company-messages",
+      "schedule": "5 0 * * *"
+    }
+  ]
+}

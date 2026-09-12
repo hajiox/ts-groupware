@@ -604,6 +604,57 @@
   font-size: 10px;
 }
 
+.company-message-history__new-hire,
+.company-message-modal__new-hire {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--text);
+}
+
+.company-message-history__new-hire {
+  margin-bottom: 10px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.1);
+  padding: 8px 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.company-message-modal__new-hire {
+  margin-top: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.36);
+  border-radius: 7px;
+  background: rgba(120, 53, 15, 0.14);
+  padding: 10px;
+}
+
+.company-message-history__new-hire input,
+.company-message-modal__new-hire input {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  accent-color: #d97706;
+}
+
+.company-message-modal__new-hire span,
+.company-message-modal__new-hire strong,
+.company-message-modal__new-hire small {
+  display: block;
+}
+
+.company-message-modal__new-hire strong {
+  font-size: 13px;
+}
+
+.company-message-modal__new-hire small {
+  margin-top: 3px;
+  color: var(--text-sub);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .company-message-history__body > p {
   color: var(--text);
   font-size: 13px;
