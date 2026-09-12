@@ -15,6 +15,7 @@
     "test:account-read-status": "node scripts/test-account-read-status.cjs",
     "test:attendance-deviations": "node --experimental-strip-types scripts/test-attendance-deviations.mjs",
     "test:new-hire-company-messages": "node --experimental-strip-types scripts/test-new-hire-company-messages.mjs",
+    "test:confirmed-shift-roster": "node --experimental-strip-types scripts/test-confirmed-shift-roster.mjs",
     "test:shift-request-exclusions": "node --experimental-strip-types scripts/test-shift-request-exclusions.mjs",
     "test:task-assignee-mentions": "node --experimental-strip-types scripts/test-task-assignee-mentions.mjs",
     "test:doc-scanner-fax-post": "node --experimental-strip-types scripts/test-doc-scanner-fax-post.mjs"

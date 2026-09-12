@@ -31,6 +31,10 @@ type ConfirmedAssignment = {
   sort_order: number;
 };
 
+type ConfirmedStaff = Pick<ConfirmedAssignment,
+  "period_id" | "user_id" | "employee_id" | "employee_name" | "employee_code" | "sort_order"
+>;
+
 type ConfirmedRequirement = {
   id: string;
   period_id: string;
@@ -71,6 +75,7 @@ export type ConfirmedShiftPayload = {
   userId: string;
   homeDepartment: string;
   periods: ConfirmedPeriod[];
+  staff?: ConfirmedStaff[];
   assignments: ConfirmedAssignment[];
   requirements: ConfirmedRequirement[];
   requests: ConfirmedRequest[];
@@ -184,7 +189,10 @@ export function ConfirmedShiftView({
   for (const assignment of payload?.assignments || []) {
     if (assignment.period_id === selectedPeriod?.id && assignment.assignment_type !== "timee") periodAssignments.push(assignment);
   }
-  const staffByKey = new Map<string, ConfirmedAssignment>();
+  const staffByKey = new Map<string, ConfirmedStaff>();
+  for (const employee of payload?.staff || []) {
+    if (employee.period_id === selectedPeriod?.id) staffByKey.set(staffKey(employee), employee);
+  }
   for (const assignment of periodAssignments) {
     const key = staffKey(assignment);
     const current = staffByKey.get(key);

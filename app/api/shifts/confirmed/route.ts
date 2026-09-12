@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { USER_DEPARTMENTS, normalizeUserDepartment, type UserDepartment } from '@/lib/departments'
 import { getUserSession } from '@/lib/session'
+import { isConfirmedShiftRosterMember } from '@/lib/confirmed-shift-roster'
+import { isShiftRosterExcluded } from '@/lib/shift-request-exclusions'
 import { adminClient } from '@/lib/supabase/admin'
 
 type EmployeeRow = {
@@ -12,6 +14,7 @@ type EmployeeRow = {
   hire_date: string | null
   department: string | null
   work_style: string | null
+  payroll_status: string
   raw_payload: Record<string, unknown> | null
 }
 
@@ -147,6 +150,8 @@ export async function GET() {
       { data: cellStyleRows, error: cellStylesError },
       { data: holidayRows, error: holidaysError },
       { data: saleRows, error: salesError },
+      { data: exclusionRows, error: exclusionsError },
+      { data: rosterRows, error: rosterError },
     ] = await Promise.all([
       adminClient
         .from('gw_shift_assignments')
@@ -178,9 +183,18 @@ export async function GET() {
       adminClient
         .from('gw_shift_ec_sales')
         .select('id, label'),
+      adminClient
+        .from('gw_shift_period_exclusions')
+        .select('period_id, user_id')
+        .in('period_id', periodIds),
+      adminClient
+        .from('gw_payroll_employees')
+        .select('id, user_id, employee_code, display_name, real_name, hire_date, department, work_style, payroll_status, raw_payload')
+        .in('payroll_status', ['active', 'inactive'])
+        .not('user_id', 'is', null),
     ])
-    if (assignmentsError || requirementsError || requestsError || cellStylesError || holidaysError || salesError) {
-      throw assignmentsError || requirementsError || requestsError || cellStylesError || holidaysError || salesError
+    if (assignmentsError || requirementsError || requestsError || cellStylesError || holidaysError || salesError || exclusionsError || rosterError) {
+      throw assignmentsError || requirementsError || requestsError || cellStylesError || holidaysError || salesError || exclusionsError || rosterError
     }
 
     const employeeIds = [...new Set((assignmentRows || []).map((row) => row.employee_id).filter(Boolean))]
@@ -189,20 +203,20 @@ export async function GET() {
       employeeIds.length
         ? adminClient
           .from('gw_payroll_employees')
-          .select('id, user_id, employee_code, display_name, real_name, hire_date, department, work_style, raw_payload')
+          .select('id, user_id, employee_code, display_name, real_name, hire_date, department, work_style, payroll_status, raw_payload')
           .in('id', employeeIds)
         : Promise.resolve({ data: [], error: null }),
       userIds.length
         ? adminClient
           .from('gw_payroll_employees')
-          .select('id, user_id, employee_code, display_name, real_name, hire_date, department, work_style, raw_payload')
+          .select('id, user_id, employee_code, display_name, real_name, hire_date, department, work_style, payroll_status, raw_payload')
           .in('user_id', userIds)
         : Promise.resolve({ data: [], error: null }),
     ])
     if (employeesByIdError || employeesByUserError) throw employeesByIdError || employeesByUserError
 
     const allEmployees = new Map<string, EmployeeRow>()
-    for (const row of [...(employeesById || []), ...(employeesByUser || [])] as EmployeeRow[]) allEmployees.set(row.id, row)
+    for (const row of [...(employeesById || []), ...(employeesByUser || []), ...(rosterRows || [])] as EmployeeRow[]) allEmployees.set(row.id, row)
     const employeeById = new Map([...allEmployees.values()].map((employee) => [employee.id, employee]))
     const employeeByUser = new Map(
       [...allEmployees.values()]
@@ -246,11 +260,43 @@ export async function GET() {
         .filter(Boolean),
     }))
 
+    const excludedUsersByPeriod = new Map<string, Set<string>>()
+    for (const exclusion of exclusionRows || []) {
+      const users = excludedUsersByPeriod.get(exclusion.period_id) || new Set<string>()
+      users.add(exclusion.user_id)
+      excludedUsersByPeriod.set(exclusion.period_id, users)
+    }
+    const rosterEmployees = (rosterRows || []) as EmployeeRow[]
+    const staff = periodRows.flatMap((period) => {
+      const department = normalizedDepartment(period.department)
+      const excludedUserIds = excludedUsersByPeriod.get(period.id) || new Set<string>()
+      if (!department) return []
+      return rosterEmployees
+        .filter((employee) => isConfirmedShiftRosterMember({
+          employee,
+          periodDepartment: department,
+          periodEndDate: period.end_date,
+          employeeDepartment: normalizedDepartment(employee.department),
+          excludedUserIds,
+          rosterExcluded: isShiftRosterExcluded(employee),
+        }))
+        .sort(employeeComparator(department))
+        .map((employee) => ({
+          period_id: period.id,
+          user_id: employee.user_id,
+          employee_id: employee.id,
+          employee_name: employeeName(employee),
+          employee_code: employee.employee_code,
+          sort_order: sortIndexByDepartment.get(department)?.get(employee.id) ?? 9999,
+        }))
+    })
+
     return NextResponse.json({
       today,
       userId: user.id,
       homeDepartment,
       periods: periodRows,
+      staff,
       assignments,
       requirements,
       requests: requestRows || [],
