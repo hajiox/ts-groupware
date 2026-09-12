@@ -14152,6 +14152,17 @@ html[data-theme="light"] .board-footer .selected-file {
   color: #86efac;
 }
 
+.shift-collection-user--excluded:disabled {
+  cursor: default;
+  opacity: 1;
+  border-style: dashed;
+  background: rgba(100, 116, 139, 0.12);
+}
+
+.shift-collection-user--excluded em {
+  color: #fbbf24;
+}
+
 .shift-request-badge {
   margin-bottom: 4px;
 }

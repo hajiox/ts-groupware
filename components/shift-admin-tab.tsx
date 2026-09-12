@@ -2682,7 +2682,7 @@ export function ShiftAdminTab() {
             <div className="shift-table-heading">
               <div>
                 <h3>希望回収対象・状況</h3>
-                <p>対象者を選んで希望回収を開始します。提出済み、希望件数、未提出がここで分かります。</p>
+                <p>シフト対象スタッフを全員表示します。希望回収対象外のスタッフは選択できません。</p>
               </div>
               <div className="shift-page-switch">
                 <button type="button" className="admin-btn-outline" onClick={() => setCollectionTargetIds(new Set(collectionEmployees.map((employee) => employee.user_id)))}>
@@ -2694,7 +2694,8 @@ export function ShiftAdminTab() {
               </div>
             </div>
             <div className="shift-collection-grid">
-              {collectionEmployees.map((employee) => {
+              {(payload?.employees || []).map((employee) => {
+                const isCollectionExcluded = employee.request_collection_excluded;
                 const isTarget = collectionTargetIds.has(employee.user_id);
                 const isStoredTarget = effectiveTargetUserIds.has(employee.user_id);
                 const isSubmitted = submittedUserIds.has(employee.user_id);
@@ -2710,12 +2711,13 @@ export function ShiftAdminTab() {
                   <button
                     key={employee.user_id}
                     type="button"
-                    className={`shift-collection-user${isTarget ? " shift-collection-user--selected" : ""}${isSubmitted ? " shift-collection-user--submitted" : ""}`}
+                    className={`shift-collection-user${isTarget ? " shift-collection-user--selected" : ""}${isSubmitted ? " shift-collection-user--submitted" : ""}${isCollectionExcluded ? " shift-collection-user--excluded" : ""}`}
                     onClick={() => toggleCollectionTarget(employee.user_id)}
+                    disabled={isCollectionExcluded}
                   >
                     <strong>{displayName(employee)}</strong>
                     <span>{employee.employee_code || "NO未設定"} / {workStyleLabel(employee.work_style)}</span>
-                    <em>{submission?.is_test ? "テスト希望" : isSubmitted ? "希望回収済み" : isStoredTarget ? "未提出" : "未送信"}</em>
+                    <em>{isCollectionExcluded ? "希望回収対象外（シフト対象）" : submission?.is_test ? "テスト希望" : isSubmitted ? "希望回収済み" : isStoredTarget ? "未提出" : "未送信"}</em>
                     {requestCount > 0 && <small>希望 {requestCount}件</small>}
                     {submission && (
                       <small className="shift-collection-user__constraints">
