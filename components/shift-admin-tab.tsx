@@ -2065,11 +2065,18 @@ export function ShiftAdminTab() {
       const nextAssignments = current
         ? currentPayload.assignments.map((item) => item.user_id === employee.user_id && item.work_date === date ? companyOff : item)
         : [...currentPayload.assignments, companyOff];
+      const nextRequests = (currentPayload.requests || []).filter((request) => !(
+        request.user_id === employee.user_id
+        && request.work_date === date
+        && (request.request_type === "day_off" || request.request_type === "unavailable")
+      ));
       return {
         ...currentPayload,
+        requests: nextRequests,
         assignments: nextAssignments,
         summary: {
           ...currentPayload.summary,
+          requests: nextRequests.length,
           assignments: nextAssignments.filter((assignment) => !!assignment.shift_label).length,
         },
       };
@@ -2080,6 +2087,34 @@ export function ShiftAdminTab() {
       return next;
     });
     setHasUnsavedChanges(true);
+    setMessage(`${displayName(employee)} ${formatDateShort(date)} を会社休に変更しました（未保存）`);
+  }
+
+  async function setCompanyOff(employee: ShiftEmployee, date: string, requestedOff: boolean) {
+    if (!selectedPeriod || !payload) return;
+    if (!isShiftLocked) {
+      setCompanyOffLocal(employee, date);
+      return;
+    }
+    if (selectedPeriod.status !== "confirmed" || !requestedOff || savingKey) return;
+    const ok = window.confirm(`${displayName(employee)} ${formatDateShort(date)} の希望休を会社指定の休みに変更します。よろしいですか？`);
+    if (!ok) return;
+    setSavingKey(`company-off:${employee.user_id}:${date}`);
+    setMessage("");
+    try {
+      await patch({
+        action: "convert_confirmed_request_to_company_off",
+        user_id: employee.user_id,
+        work_date: date,
+      });
+      const reloaded = await load(selectedPeriod.id, selectedPeriod.department);
+      if (!reloaded) throw new Error("会社休へ変更しましたが、再読込に失敗しました");
+      setMessage(`${displayName(employee)} ${formatDateShort(date)} を会社休へ変更しました`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "会社休へ変更できませんでした");
+    } finally {
+      setSavingKey("");
+    }
   }
 
   function updateRequestLocal(employee: ShiftEmployee, date: string, blocked: boolean) {
@@ -3017,11 +3052,11 @@ export function ShiftAdminTab() {
                                 <button
                                   type="button"
                                   className={`shift-company-off-toggle${isCompanyOff ? " shift-company-off-toggle--active" : ""}`}
-                                  onClick={() => setCompanyOffLocal(employee, date)}
-                                  disabled={isBlocked || isCompanyOff || shiftControlsDisabled}
-                                  title={isCompanyOff ? "会社休です。勤務を選ぶと解除されます" : "会社指定の休みにする"}
+                                  onClick={() => void setCompanyOff(employee, date, requestedOff)}
+                                  disabled={beforeHire || paidLeaveFull || isCompanyOff || Boolean(savingKey) || (isShiftLocked && !(selectedPeriod.status === "confirmed" && requestedOff))}
+                                  title={requestedOff ? "希望休を解除して会社指定の休みにする" : isCompanyOff ? "会社休です。勤務を選ぶと解除されます" : "会社指定の休みにする"}
                                 >
-                                  会社休
+                                  {requestedOff ? "会社休へ変更" : "会社休"}
                                 </button>
                                 {selectedPeriod.department !== "製造" && (
                                   <button
@@ -3325,10 +3360,11 @@ export function ShiftAdminTab() {
                               <button
                                 type="button"
                                 className={`shift-company-off-toggle${isCompanyOff ? " shift-company-off-toggle--active" : ""}`}
-                                onClick={() => setCompanyOffLocal(employee, date)}
-                                disabled={isBlocked || isCompanyOff || shiftControlsDisabled}
+                                onClick={() => void setCompanyOff(employee, date, requestedOff)}
+                                disabled={beforeHire || paidLeaveFull || isCompanyOff || Boolean(savingKey) || (isShiftLocked && !(selectedPeriod.status === "confirmed" && requestedOff))}
+                                title={requestedOff ? "希望休を解除して会社指定の休みにする" : "会社指定の休みにする"}
                               >
-                                会社休
+                                {requestedOff ? "会社休へ変更" : "会社休"}
                               </button>
                               {selectedPeriod.department !== "製造" && (
                                 <button

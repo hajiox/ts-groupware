@@ -1966,6 +1966,29 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: true, updated: updatedRows?.length || 0 })
     }
 
+    if (action === 'convert_confirmed_request_to_company_off') {
+      if (period.status !== 'confirmed') {
+        return NextResponse.json({ error: '確定済みシフトの希望休だけを会社休へ変更できます' }, { status: 409 })
+      }
+      const userId = cleanText(body.user_id, 80)
+      const workDate = cleanDate(body.work_date)
+      if (!userId || !workDate || workDate < period.start_date || workDate > period.end_date) {
+        return NextResponse.json({ error: '会社休へ変更する社員と日付を確認してください' }, { status: 400 })
+      }
+      const { data, error } = await adminClient.rpc('gw_convert_confirmed_shift_request_to_company_off', {
+        p_period_id: period.id,
+        p_user_id: userId,
+        p_work_date: workDate,
+        p_actor_user_id: auth.user!.id,
+      })
+      if (error) throw error
+      const result = Array.isArray(data) ? data[0] : data
+      if (!result?.assignment_id) {
+        return NextResponse.json({ error: '希望休を会社休へ変更できませんでした' }, { status: 409 })
+      }
+      return NextResponse.json({ success: true, assignmentId: result.assignment_id })
+    }
+
     if (action === 'delete_period') {
       const { data: deletedPeriods, error } = await adminClient
         .from('gw_shift_periods')
