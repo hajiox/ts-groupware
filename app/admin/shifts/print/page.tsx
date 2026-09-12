@@ -182,7 +182,10 @@ export default function ShiftPrintPage() {
     const period = payload?.selectedPeriod;
     if (!period) return [];
     const datePages = chunks(eachDate(period.start_date, period.end_date), 16);
-    const employeePages = balancedChunks(payload?.employees || [], 7);
+    const employees = payload?.employees || [];
+    const employeePages = period.department === "フロア"
+      ? [employees]
+      : balancedChunks(employees, 7);
     return datePages.flatMap((dates, datePageIndex) => employeePages.map((employees, employeePageIndex) => ({
       dates,
       employees,
@@ -269,7 +272,7 @@ export default function ShiftPrintPage() {
           return (
             <section
               key={`${page.datePageIndex}:${page.employeePageIndex}`}
-              className={`shift-print-sheet${period.department === "製造" ? " shift-print-sheet--manufacturing" : ""}`}
+              className={`shift-print-sheet${period.department === "フロア" ? " shift-print-sheet--floor" : ""}${period.department === "製造" ? " shift-print-sheet--manufacturing" : ""}`}
             >
               <div className="shift-print-sheet__heading">
                 <div>

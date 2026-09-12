@@ -11503,6 +11503,16 @@ body,
   width: 8.5%;
 }
 
+.shift-print-sheet--floor .shift-print-note-head,
+.shift-print-sheet--floor .shift-print-notes {
+  width: 16%;
+}
+
+.shift-print-sheet--floor .shift-print-note2-head,
+.shift-print-sheet--floor .shift-print-notes2 {
+  width: 7%;
+}
+
 .shift-print-sheet--manufacturing .shift-print-note-head,
 .shift-print-sheet--manufacturing .shift-print-notes,
 .shift-print-sheet--manufacturing .shift-print-note2-head,
