@@ -3,6 +3,7 @@ import { USER_DEPARTMENTS, normalizeUserDepartment, type UserDepartment } from '
 import { getUserSession } from '@/lib/session'
 import { isConfirmedShiftRosterMember } from '@/lib/confirmed-shift-roster'
 import { isShiftRosterExcluded } from '@/lib/shift-request-exclusions'
+import { loadAllRows } from '@/lib/supabase-pagination'
 import { adminClient } from '@/lib/supabase/admin'
 
 type EmployeeRow = {
@@ -144,36 +145,46 @@ export async function GET() {
     }
 
     const [
-      { data: assignmentRows, error: assignmentsError },
-      { data: requirementRows, error: requirementsError },
-      { data: requestRows, error: requestsError },
-      { data: cellStyleRows, error: cellStylesError },
+      assignmentRows,
+      requirementRows,
+      requestRows,
+      cellStyleRows,
       { data: holidayRows, error: holidaysError },
       { data: saleRows, error: salesError },
       { data: exclusionRows, error: exclusionsError },
       { data: rosterRows, error: rosterError },
     ] = await Promise.all([
-      adminClient
-        .from('gw_shift_assignments')
-        .select('id, period_id, user_id, employee_id, work_date, shift_label, start_time, end_time, assignment_type, note')
-        .in('period_id', periodIds)
-        .order('work_date', { ascending: true }),
-      adminClient
-        .from('gw_shift_requirements')
-        .select('id, period_id, work_date, required_count, workplace_label, notes, notes2, notes3, production_plan, timee_count, ec_sale_tags')
-        .in('period_id', periodIds)
-        .order('work_date', { ascending: true }),
-      adminClient
-        .from('gw_shift_requests')
-        .select('period_id, user_id, employee_id, work_date, request_type')
-        .in('period_id', periodIds)
-        .in('request_type', ['day_off', 'unavailable', 'paid_leave_full', 'paid_leave_half'])
-        .order('work_date', { ascending: true }),
-      adminClient
-        .from('gw_shift_cell_styles')
-        .select('period_id, work_date, cell_key, background_color')
-        .in('period_id', periodIds)
-        .order('work_date', { ascending: true }),
+      loadAllRows((from, to) => adminClient
+          .from('gw_shift_assignments')
+          .select('id, period_id, user_id, employee_id, work_date, shift_label, start_time, end_time, assignment_type, note')
+          .in('period_id', periodIds)
+          .order('work_date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)),
+      loadAllRows((from, to) => adminClient
+          .from('gw_shift_requirements')
+          .select('id, period_id, work_date, required_count, workplace_label, notes, notes2, notes3, production_plan, timee_count, ec_sale_tags')
+          .in('period_id', periodIds)
+          .order('work_date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)),
+      loadAllRows((from, to) => adminClient
+          .from('gw_shift_requests')
+          .select('period_id, user_id, employee_id, work_date, request_type')
+          .in('period_id', periodIds)
+          .in('request_type', ['day_off', 'unavailable', 'paid_leave_full', 'paid_leave_half'])
+          .order('work_date', { ascending: true })
+          .order('period_id', { ascending: true })
+          .order('user_id', { ascending: true })
+          .range(from, to)),
+      loadAllRows((from, to) => adminClient
+          .from('gw_shift_cell_styles')
+          .select('period_id, work_date, cell_key, background_color')
+          .in('period_id', periodIds)
+          .order('work_date', { ascending: true })
+          .order('period_id', { ascending: true })
+          .order('cell_key', { ascending: true })
+          .range(from, to)),
       adminClient
         .from('gw_holidays')
         .select('holiday_date, name, holiday_type')
@@ -193,12 +204,12 @@ export async function GET() {
         .in('payroll_status', ['active', 'inactive'])
         .not('user_id', 'is', null),
     ])
-    if (assignmentsError || requirementsError || requestsError || cellStylesError || holidaysError || salesError || exclusionsError || rosterError) {
-      throw assignmentsError || requirementsError || requestsError || cellStylesError || holidaysError || salesError || exclusionsError || rosterError
+    if (holidaysError || salesError || exclusionsError || rosterError) {
+      throw holidaysError || salesError || exclusionsError || rosterError
     }
 
-    const employeeIds = [...new Set((assignmentRows || []).map((row) => row.employee_id).filter(Boolean))]
-    const userIds = [...new Set((assignmentRows || []).map((row) => row.user_id).filter(Boolean))]
+    const employeeIds = [...new Set(assignmentRows.map((row) => row.employee_id).filter(Boolean))]
+    const userIds = [...new Set(assignmentRows.map((row) => row.user_id).filter(Boolean))]
     const [{ data: employeesById, error: employeesByIdError }, { data: employeesByUser, error: employeesByUserError }] = await Promise.all([
       employeeIds.length
         ? adminClient
@@ -236,7 +247,7 @@ export async function GET() {
     }
 
     const salesById = new Map((saleRows || []).map((sale) => [sale.id, sale.label]))
-    const assignments = (assignmentRows || []).map((assignment) => {
+    const assignments = assignmentRows.map((assignment) => {
       const employee = (assignment.employee_id ? employeeById.get(assignment.employee_id) : undefined)
         || (assignment.user_id ? employeeByUser.get(assignment.user_id) : undefined)
       const period = periodById.get(assignment.period_id)
@@ -253,7 +264,7 @@ export async function GET() {
       }
     })
 
-    const requirements = (requirementRows || []).map((requirement) => ({
+    const requirements = requirementRows.map((requirement) => ({
       ...requirement,
       ec_sale_labels: (requirement.ec_sale_tags || [])
         .map((id: string) => salesById.get(id))
@@ -299,8 +310,8 @@ export async function GET() {
       staff,
       assignments,
       requirements,
-      requests: requestRows || [],
-      cellStyles: cellStyleRows || [],
+      requests: requestRows,
+      cellStyles: cellStyleRows,
       holidays: holidayRows || [],
     }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
