@@ -7,14 +7,13 @@ import { linkifyText, OgpPreviews } from "@/components/link-preview";
 import { ReadReceiptAvatars, type ReadReceiptUser } from "@/components/read-receipt-avatars";
 import { SafeLineAvatar } from "@/components/safe-line-avatar";
 import { getClipboardImageFile } from "@/lib/clipboard-image";
+import { uploadClientFile, type ClientImageUploadMode } from "@/lib/client-upload";
 import { getDeviceHeaders } from "@/lib/device-id";
 import { USER_DEPARTMENTS, type UserDepartment } from "@/lib/departments";
 import { appendMentionIfMissing, formatMentionName, mentionDisplayName } from "@/lib/mention-names";
 import { REACTION_EMOJIS } from "@/lib/reactions";
 import { getEffectiveUserRole, getUserRoleLabel, isManagementRole } from "@/lib/user-roles";
 
-const IMAGE_UPLOAD_MAX_SIZE = 1600;
-const IMAGE_UPLOAD_QUALITY = 0.82;
 const POSTS_PAGE_LIMIT = 50;
 const COMMENT_PREVIEW_LIMIT = 5;
 
@@ -170,75 +169,12 @@ function getAttachmentOpenUrl(attachment: Attachment) {
   return attachment.webViewLink || attachment.url || attachment.viewUrl || "#";
 }
 
-function getCompressedImageName(name: string) {
-  const baseName = name.replace(/\.[^.]+$/, "");
-  return `${baseName || "image"}.jpg`;
-}
-
 function hasDraggedFiles(dataTransfer: DataTransfer) {
   return Array.from(dataTransfer.types || []).includes("Files");
 }
 
 function getFirstDroppedFile(dataTransfer: DataTransfer) {
   return Array.from(dataTransfer.files || [])[0] || null;
-}
-
-async function loadImageSource(file: File) {
-  if ("createImageBitmap" in window) {
-    const bitmap = await createImageBitmap(file);
-    return {
-      source: bitmap,
-      width: bitmap.width,
-      height: bitmap.height,
-      close: () => bitmap.close(),
-    };
-  }
-
-  const objectUrl = URL.createObjectURL(file);
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = objectUrl;
-  });
-
-  return {
-    source: image,
-    width: image.naturalWidth || image.width,
-    height: image.naturalHeight || image.height,
-    close: () => URL.revokeObjectURL(objectUrl),
-  };
-}
-
-async function prepareUploadFile(file: File, uploadOriginal: boolean) {
-  if (uploadOriginal || !file.type.startsWith("image/")) return file;
-
-  const image = await loadImageSource(file);
-  try {
-    const scale = Math.min(1, IMAGE_UPLOAD_MAX_SIZE / Math.max(image.width, image.height));
-    const width = Math.max(1, Math.round(image.width * scale));
-    const height = Math.max(1, Math.round(image.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return file;
-
-    ctx.drawImage(image.source, 0, 0, width, height);
-    const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(resolve, "image/jpeg", IMAGE_UPLOAD_QUALITY);
-    });
-    if (!blob) return file;
-    if (scale === 1 && blob.size >= file.size) return file;
-
-    return new File([blob], getCompressedImageName(file.name), {
-      type: "image/jpeg",
-      lastModified: Date.now(),
-    });
-  } finally {
-    image.close();
-  }
 }
 
 export default function BoardPage() {
@@ -425,25 +361,16 @@ export default function BoardPage() {
     }
   }
 
-  async function uploadFile(file: File, uploadOriginalFile: boolean): Promise<Attachment[]> {
-    const formData = new FormData();
-    const preparedFile = await prepareUploadFile(file, uploadOriginalFile);
-    formData.append("file", preparedFile);
-
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
+  async function uploadFile(file: File, imageMode: ClientImageUploadMode): Promise<Attachment[]> {
+    const { data, preparedFile } = await uploadClientFile(file, {
+      imageMode,
+      fallbackError: "ファイルのアップロードに失敗しました",
     });
 
-    const data = await res.json().catch(() => null);
-    if (!res.ok) {
-      throw new Error(data?.error || "ファイルのアップロードに失敗しました");
-    }
-
     return [{
-      type: data.type,
+      type: data.type || preparedFile.type,
       url: data.viewUrl || data.url,
-      name: data.name,
+      name: data.name || preparedFile.name,
       driveId: data.driveId,
       viewUrl: data.viewUrl,
       webViewLink: data.webViewLink,
@@ -464,7 +391,9 @@ export default function BoardPage() {
     setIsPosting(true);
     setIsUploading(Boolean(selectedFile));
     try {
-      const attachments = selectedFile ? await uploadFile(selectedFile, uploadOriginal) : [];
+      const attachments = selectedFile
+        ? await uploadFile(selectedFile, uploadOriginal ? "original" : "compress")
+        : [];
       const res = await fetch("/api/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -567,7 +496,7 @@ export default function BoardPage() {
     setCommentSubmittingByPost((current) => ({ ...current, [postId]: true }));
     try {
       const attachments = selectedCommentFile
-        ? await uploadFile(selectedCommentFile, uploadOriginalComment)
+        ? await uploadFile(selectedCommentFile, uploadOriginalComment ? "original" : "compress")
         : [];
 
       const res = await fetch("/api/posts", {
@@ -996,7 +925,7 @@ export default function BoardPage() {
     const target = annotatingImage;
     setAnnotationSaving(true);
     try {
-      const [uploadedAttachment] = await uploadFile(file, true);
+      const [uploadedAttachment] = await uploadFile(file, "compress-if-needed");
       const nextAttachments = target.post.attachments.map((attachment, index) => (
         index === target.attachmentIndex ? uploadedAttachment : attachment
       ));

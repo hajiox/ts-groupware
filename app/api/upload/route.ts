@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getUserSession } from '@/lib/session'
 import { uploadFileToDrive } from '@/lib/drive'
 
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024
+
 /**
  * POST /api/upload — ファイルアップロード（Google Drive）
  *
@@ -23,9 +25,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'ファイルが必要です' }, { status: 400 })
     }
 
-    // ファイルサイズ制限 (100MB)
-    if (file.size > 100 * 1024 * 1024) {
-      return NextResponse.json({ error: 'ファイルサイズは100MB以内にしてください' }, { status: 400 })
+    if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json({ error: 'ファイルサイズは4MB以内にしてください' }, { status: 400 })
     }
 
     const arrayBuffer = await file.arrayBuffer()

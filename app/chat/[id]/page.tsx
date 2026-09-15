@@ -7,15 +7,12 @@ import { linkifyText } from "@/components/link-preview";
 import { ReadReceiptAvatars, type ReadReceiptUser } from "@/components/read-receipt-avatars";
 import { SafeLineAvatar } from "@/components/safe-line-avatar";
 import { getClipboardImageFile } from "@/lib/clipboard-image";
+import { uploadClientFile } from "@/lib/client-upload";
 import { getDeviceHeaders } from "@/lib/device-id";
 import { USER_DEPARTMENTS, type UserDepartment } from "@/lib/departments";
 import { formatMentionName, mentionDisplayName } from "@/lib/mention-names";
 import { REACTION_EMOJIS } from "@/lib/reactions";
 import { getEffectiveUserRole, getUserRoleLabel, isManagementRole } from "@/lib/user-roles";
-
-const IMAGE_UPLOAD_MAX_SIZE = 1600;
-const IMAGE_UPLOAD_QUALITY = 0.82;
-const CHAT_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 
 type ChatUser = {
   id: string;
@@ -84,81 +81,6 @@ function hasDraggedFiles(dataTransfer: DataTransfer) {
 
 function getFirstDroppedFile(dataTransfer: DataTransfer) {
   return Array.from(dataTransfer.files || [])[0] || null;
-}
-
-function getCompressedImageName(name: string) {
-  const baseName = name.replace(/\.[^.]+$/, "");
-  return `${baseName || "image"}.jpg`;
-}
-
-async function loadImageSource(file: File) {
-  if ("createImageBitmap" in window) {
-    const bitmap = await createImageBitmap(file);
-    return {
-      source: bitmap,
-      width: bitmap.width,
-      height: bitmap.height,
-      close: () => bitmap.close(),
-    };
-  }
-
-  const objectUrl = URL.createObjectURL(file);
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = objectUrl;
-  });
-
-  return {
-    source: image,
-    width: image.naturalWidth || image.width,
-    height: image.naturalHeight || image.height,
-    close: () => URL.revokeObjectURL(objectUrl),
-  };
-}
-
-async function prepareChatUploadFile(file: File) {
-  if (!file.type.startsWith("image/")) {
-    if (file.size > CHAT_UPLOAD_MAX_BYTES) {
-      throw new Error("ファイルサイズは4MB以内にしてください");
-    }
-    return file;
-  }
-
-  if (file.size <= CHAT_UPLOAD_MAX_BYTES) return file;
-
-  const image = await loadImageSource(file);
-  try {
-    const scale = Math.min(1, IMAGE_UPLOAD_MAX_SIZE / Math.max(image.width, image.height));
-    const width = Math.max(1, Math.round(image.width * scale));
-    const height = Math.max(1, Math.round(image.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("画像を送信用に変換できませんでした");
-
-    ctx.drawImage(image.source, 0, 0, width, height);
-    const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(resolve, "image/jpeg", IMAGE_UPLOAD_QUALITY);
-    });
-    if (!blob) throw new Error("画像を送信用に変換できませんでした");
-
-    const prepared = scale === 1 && blob.size >= file.size
-      ? file
-      : new File([blob], getCompressedImageName(file.name), {
-          type: "image/jpeg",
-          lastModified: Date.now(),
-        });
-    if (prepared.size > CHAT_UPLOAD_MAX_BYTES) {
-      throw new Error("画像を4MB以内に縮小できませんでした");
-    }
-    return prepared;
-  } finally {
-    image.close();
-  }
 }
 
 const CHAT_BOTTOM_FOLLOW_DISTANCE = 180;
@@ -369,20 +291,10 @@ export default function ChatPage() {
 
   async function uploadSelectedFile() {
     if (!selectedFile) return [];
-
-    const formData = new FormData();
-    const preparedFile = await prepareChatUploadFile(selectedFile);
-    formData.append("file", preparedFile);
-
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
+    const { data, preparedFile } = await uploadClientFile(selectedFile, {
+      imageMode: "compress-if-needed",
+      fallbackError: "ファイルのアップロードに失敗しました",
     });
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      throw new Error(data.error || "ファイルのアップロードに失敗しました");
-    }
 
     return [{
       url: data.viewUrl || data.url,
@@ -395,24 +307,16 @@ export default function ChatPage() {
   }
 
   async function uploadAnnotationFile(file: File): Promise<Attachment> {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
+    const { data, preparedFile } = await uploadClientFile(file, {
+      imageMode: "compress-if-needed",
+      fallbackError: "画像の保存に失敗しました",
     });
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      throw new Error(data.error || "画像の保存に失敗しました");
-    }
 
     return {
       url: data.viewUrl || data.url,
       viewUrl: data.viewUrl,
-      name: data.name || file.name,
-      type: data.type || file.type,
+      name: data.name || preparedFile.name,
+      type: data.type || preparedFile.type,
       driveId: data.driveId,
       webViewLink: data.webViewLink,
     };

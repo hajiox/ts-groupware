@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, History, ImagePlus, Megaphone, Send, X } from "lucide-react";
+import { uploadClientFile } from "@/lib/client-upload";
 
 type MessageAttachment = {
   url: string;
@@ -113,17 +114,16 @@ function CompanyMessageComposer({
     try {
       let attachment: MessageAttachment | null = null;
       if (imageFile) {
-        const formData = new FormData();
-        formData.append("file", imageFile);
-        const uploadResponse = await fetch("/api/upload", { method: "POST", body: formData });
-        const uploadData = await uploadResponse.json().catch(() => ({}));
-        if (!uploadResponse.ok) throw new Error(uploadData.error || "画像をアップロードできませんでした");
+        const { data: uploadData, preparedFile } = await uploadClientFile(imageFile, {
+          imageMode: "compress-if-needed",
+          fallbackError: "画像をアップロードできませんでした",
+        });
         attachment = {
           url: uploadData.url,
           viewUrl: uploadData.viewUrl,
           webViewLink: uploadData.webViewLink,
-          name: uploadData.name || imageFile.name,
-          type: uploadData.type || imageFile.type,
+          name: uploadData.name || preparedFile.name,
+          type: uploadData.type || preparedFile.type,
           driveId: uploadData.driveId,
         };
       }
