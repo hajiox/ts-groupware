@@ -24,7 +24,7 @@ export async function GET() {
   const [templatesResult, usersResult, deliveriesResult] = await Promise.all([
     adminClient
       .from('gw_pledge_templates')
-      .select('id, title, body, check_items, agreement_label, company_name, is_active, updated_at')
+      .select('id, title, body, check_items, agreement_label, company_name, is_active, new_hire_auto_send, updated_at')
       .order('updated_at', { ascending: false }),
     adminClient
       .from('gw_users')

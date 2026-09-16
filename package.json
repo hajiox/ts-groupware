@@ -15,6 +15,7 @@
     "test:account-read-status": "node scripts/test-account-read-status.cjs",
     "test:attendance-deviations": "node --experimental-strip-types scripts/test-attendance-deviations.mjs",
     "test:new-hire-company-messages": "node --experimental-strip-types scripts/test-new-hire-company-messages.mjs",
+    "test:new-hire-pledges": "node scripts/test-new-hire-pledge-cron.cjs",
     "test:confirmed-shift-roster": "node --experimental-strip-types scripts/test-confirmed-shift-roster.mjs",
     "test:client-upload": "node --experimental-strip-types scripts/test-client-upload-policy.mjs",
     "test:supabase-pagination": "node --experimental-strip-types scripts/test-supabase-pagination.mjs",

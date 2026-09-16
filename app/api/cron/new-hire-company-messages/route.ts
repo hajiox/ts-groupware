@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
+import { sendPushNotificationToUser } from '@/lib/web-push'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,11 +18,36 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { data, error } = await adminClient.rpc('gw_dispatch_new_hire_company_messages')
-  if (error) {
-    console.error('new hire company message cron failed', error)
+  const [messagesResult, pledgesResult] = await Promise.all([
+    adminClient.rpc('gw_dispatch_new_hire_company_messages'),
+    adminClient.rpc('gw_dispatch_new_hire_pledges'),
+  ])
+  const pledgeRows = (pledgesResult.error ? [] : pledgesResult.data || []) as Array<{
+    assignment_id: string
+    user_id: string
+    pledge_title: string
+  }>
+  const pushResults = await Promise.allSettled(pledgeRows.map((pledge) => sendPushNotificationToUser(pledge.user_id, {
+    title: '誓約書が届いています',
+    body: pledge.pledge_title,
+    url: '/groups',
+    tag: `tsg-new-hire-pledge-${pledge.assignment_id}`,
+  })))
+  const pushFailures = pushResults.filter((result) => result.status === 'rejected').length
+  if (pushFailures > 0) {
+    console.error(`new hire pledge push failed for ${pushFailures} recipient(s)`)
+  }
+
+  if (messagesResult.error || pledgesResult.error) {
+    if (messagesResult.error) console.error('new hire company message cron failed', messagesResult.error)
+    if (pledgesResult.error) console.error('new hire pledge cron failed', pledgesResult.error)
     return NextResponse.json({ error: 'Dispatch failed' }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true, delivered: data?.length || 0 })
+  return NextResponse.json({
+    success: true,
+    delivered: messagesResult.data?.length || 0,
+    pledges: pledgeRows.length,
+    pledgePushFailures: pushFailures,
+  })
 }

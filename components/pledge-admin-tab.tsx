@@ -13,6 +13,7 @@ type Template = {
   agreement_label: string;
   company_name: string;
   is_active: boolean;
+  new_hire_auto_send: boolean;
   updated_at?: string;
 };
 type User = {
@@ -349,7 +350,7 @@ export function PledgeAdminTab() {
               {!templateId && <option value="">新しい誓約書（未保存）</option>}
               {payload.templates.map((template) => (
                 <option key={template.id} value={template.id}>
-                  {template.title}{template.is_active ? "" : "（保管済み）"}
+                  {template.title}{template.new_hire_auto_send ? "（新入社員へ自動送信）" : template.is_active ? "" : "（保管済み）"}
                 </option>
               ))}
             </select>
@@ -372,6 +373,7 @@ export function PledgeAdminTab() {
           </div>
         </div>
         <p>誓約書ごとに本文・確認項目・配信履歴を分けて管理します。保管しても過去の提出記録は削除されません。</p>
+        {currentTemplate?.new_hire_auto_send && <p><strong>新入社員へ自動送信：</strong>入社手続き完了と入社日の両方から7日後、未配信の人へ1回だけ送信します。</p>}
       </section>
 
       <section className="pledge-editor">
