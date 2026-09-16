@@ -1,7 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { APPRAISAL_ITEMS, APPRAISAL_LABELS, emptyAppraisalRatings, type AppraisalRatings, type AppraisalRecord } from "@/lib/appraisals";
+import {
+  APPRAISAL_HARASSMENT_CONTACTS,
+  APPRAISAL_ITEMS,
+  APPRAISAL_LABELS,
+  APPRAISAL_TALK_ITEMS,
+  emptyAppraisalRatings,
+  emptyAppraisalTalkChecklist,
+  type AppraisalRatings,
+  type AppraisalRecord,
+  type AppraisalTalkChecklist,
+  type AppraisalTalkItemId,
+} from "@/lib/appraisals";
 
 type Person = { id: string; name: string; department: string };
 type Payload = { employees: Person[]; assignableEmployees: Person[]; records: AppraisalRecord[]; reviewer: Person; reviewers: Person[]; executive: boolean; assignments: { reviewer_id: string; employee_id: string }[] };
@@ -12,6 +23,7 @@ export function AppraisalAdminTab() {
   const [payload, setPayload] = useState<Payload | null>(null);
   const [employeeId, setEmployeeId] = useState("");
   const [ratings, setRatings] = useState<AppraisalRatings>(emptyAppraisalRatings);
+  const [talkChecklist, setTalkChecklist] = useState<AppraisalTalkChecklist>(emptyAppraisalTalkChecklist);
   const [assessedOn, setAssessedOn] = useState(today);
   const [version, setVersion] = useState(0);
   const [status, setStatus] = useState("未着手");
@@ -25,6 +37,7 @@ export function AppraisalAdminTab() {
   const formRef = useRef<HTMLDivElement>(null);
   const selected = payload?.employees.find(e => e.id === employeeId);
   const count = APPRAISAL_ITEMS.filter(item => ratings[item.id]?.score !== null).length;
+  const talkCount = APPRAISAL_TALK_ITEMS.filter(item => talkChecklist[item.id]).length;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -66,6 +79,7 @@ export function AppraisalAdminTab() {
     sequence.current++;
     const record = payload?.records.find(r => r.employee_id === employee.id && r.reviewer_id === payload.reviewer.id);
     setEmployeeId(employee.id); setRatings(record?.ratings || emptyAppraisalRatings());
+    setTalkChecklist(record?.talk_checklist || emptyAppraisalTalkChecklist());
     setAssessedOn(record?.assessed_on || today()); setVersion(record?.version || 0);
     setStatus(record?.status === "completed" ? "完了" : record ? "下書き" : "未着手");
     setDirty(false); setMessage(""); setError("");
@@ -77,6 +91,11 @@ export function AppraisalAdminTab() {
     setDirty(true); setMessage("");
   }
 
+  function changeTalkItem(id: AppraisalTalkItemId, value: boolean) {
+    setTalkChecklist(previous => ({ ...previous, [id]: value }));
+    setDirty(true); setMessage("");
+  }
+
   async function save(nextStatus: 'draft' | 'completed') {
     if (!selected || busy) return;
     setBusy(true); setError(""); setMessage("");
@@ -84,14 +103,14 @@ export function AppraisalAdminTab() {
     try {
       const response = await fetch("/api/admin/appraisals", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employeeId, month, assessedOn, ratings, version, status: nextStatus }),
+        body: JSON.stringify({ employeeId, month, assessedOn, ratings, talkChecklist, version, status: nextStatus }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "保存できませんでした");
       if (requestSequence !== sequence.current) return;
       const record = data.record as AppraisalRecord;
       setPayload(previous => previous ? { ...previous, records: [...previous.records.filter(r => r.id !== record.id), record] } : previous);
-      setRatings(record.ratings); setVersion(record.version); setDirty(false);
+      setRatings(record.ratings); setTalkChecklist(record.talk_checklist); setVersion(record.version); setDirty(false);
       setStatus(record.status === "completed" ? "完了" : "下書き");
       setMessage(record.status === "completed" ? "査定を完了しました。" : "下書きを保存しました。");
     } catch (e) { setError(e instanceof Error ? e.message : "保存できませんでした"); }
@@ -127,7 +146,7 @@ export function AppraisalAdminTab() {
       </div>
       {payload.employees.length === 0 && <p>査定対象の部下が登録されていません。</p>}
       {selected && <div ref={formRef} className="appraisal-form">
-        <div className="appraisal-form-heading"><h3>{selected.name}さんの査定</h3><span>{status}{dirty ? "・未保存" : ""} ／ {count}/10項目</span>
+        <div className="appraisal-form-heading"><h3>{selected.name}さんの査定</h3><span>{status}{dirty ? "・未保存" : ""} ／ 評価 {count}/10・面談確認 {talkCount}/5</span>
           <label>査定日<input type="date" value={assessedOn} disabled={busy} onChange={e => { setAssessedOn(e.target.value); setDirty(true); }} /></label></div>
         <fieldset disabled={busy}>
           <legend className="sr-only">査定項目</legend>
@@ -143,10 +162,31 @@ export function AppraisalAdminTab() {
             </article>;
           })}
         </fieldset>
+        <section className="appraisal-talk" aria-labelledby="appraisal-talk-heading">
+          <div className="appraisal-talk-heading">
+            <div><h3 id="appraisal-talk-heading">面談で伝える内容</h3><p>査定対象者へ説明した項目を管理者がチェックしてください。チェック状態は査定と一緒に保存されます。</p></div>
+            <strong>{talkCount} / {APPRAISAL_TALK_ITEMS.length}項目 説明済み</strong>
+          </div>
+          <fieldset disabled={busy}>
+            <legend className="sr-only">面談確認項目</legend>
+            {APPRAISAL_TALK_ITEMS.map(item => <article className={`appraisal-talk-item${talkChecklist[item.id] ? " is-checked" : ""}`} key={item.id}>
+              <div className="appraisal-talk-item-heading"><h4>{item.label}</h4><label><input type="checkbox" checked={talkChecklist[item.id]} onChange={event => changeTalkItem(item.id, event.target.checked)} /> 説明済み</label></div>
+              {item.details.length > 0 && <ul>{item.details.map(detail => <li key={detail} className={detail.includes("ネガティブワード") ? "appraisal-important" : undefined}>{detail}</li>)}</ul>}
+              {item.id === "harassment" && <div className="appraisal-harassment">
+                <p><strong>ハラスメントとは、人に対する「嫌がらせ」や「いじめ」などの迷惑行為の全てを指します。</strong></p>
+                <p>何をハラスメントと感じるかどうかは個人差がありますが、基本的には受けた者が不快である（つらい、意に反する）と感じたら、それは<strong>受けた者にとってのハラスメント</strong>とまずは考えましょう。</p>
+                <p>2022年4月より労働施策総合推進法（別名パワハラ防止法）施行</p>
+                <p>会社内又は上司・同僚より上記を少しでも感じた場合は必ず相談して下さい。<br />（電話・メッセンジャー・LINE等でも構いません）</p>
+                <h5>相談窓口</h5>
+                <ul className="appraisal-contacts">{APPRAISAL_HARASSMENT_CONTACTS.map(contact => <li key={contact.phone}><span>{contact.name}</span><a href={`tel:${contact.phone}`}>{contact.phone}</a></li>)}</ul>
+              </div>}
+            </article>)}
+          </fieldset>
+        </section>
         <div className="appraisal-actions">
           {error && <p role="alert" className="appraisal-feedback appraisal-error">{error}</p>}
           {message && <p role="status" className="appraisal-feedback appraisal-success">{message}</p>}
-          <span>{count}/10項目評価済み{dirty ? "・未保存の変更があります" : ""}</span><button type="button" disabled={busy} onClick={() => save('draft')}>{busy ? "保存中…" : "下書き保存"}</button><button type="button" className="appraisal-complete" disabled={busy || count !== 10} onClick={() => save('completed')}>査定を完了</button></div>
+          <span>評価 {count}/10・面談確認 {talkCount}/5{dirty ? "・未保存の変更があります" : ""}</span><button type="button" disabled={busy} onClick={() => save('draft')}>{busy ? "保存中…" : "下書き保存"}</button><button type="button" className="appraisal-complete" disabled={busy || count !== 10} onClick={() => save('completed')}>査定を完了</button></div>
         <p className="appraisal-hint">全10項目を評価すると完了できます。保存済みの査定は再度開いて修正できます。本人には公開・通知されません。</p>
       </div>}
       {payload.executive && <details className="appraisal-overview"><summary>管理者の査定結果（役員のみ）</summary>
@@ -154,6 +194,7 @@ export function AppraisalAdminTab() {
         {payload.records.filter(r => r.reviewer_id !== payload.reviewer.id).map(record => <details key={record.id}>
           <summary>{payload.assignableEmployees.find(e => e.id === record.employee_id)?.name || "対象者"} ／ 査定者：{payload.reviewers.find(r => r.id === record.reviewer_id)?.name || "管理者"} ／ {record.status === 'completed' ? '完了' : '下書き'} ／ {record.assessed_on}</summary>
           {APPRAISAL_ITEMS.map(item => <p key={item.id}><strong>{item.label}：{APPRAISAL_LABELS[record.ratings[item.id].score ?? 0]}</strong><br /><span style={{ whiteSpace: "pre-wrap" }}>{record.ratings[item.id].comment || "備考なし"}</span></p>)}
+          <p><strong>面談確認：{APPRAISAL_TALK_ITEMS.filter(item => record.talk_checklist?.[item.id]).length} / {APPRAISAL_TALK_ITEMS.length}項目</strong><br />{APPRAISAL_TALK_ITEMS.map(item => `${record.talk_checklist?.[item.id] ? "☑" : "☐"} ${item.label}`).join(" ／ ")}</p>
         </details>)}
       </details>}
     </>}
@@ -178,11 +219,26 @@ export function AppraisalAdminTab() {
       .appraisal-scale { display:flex; justify-content:space-between; font-size:12px; text-align:center; margin:0 0 20px; color:var(--text-sub); }
       .appraisal-scale span { width:20%; } .appraisal-actions { position:sticky; bottom:calc(76px + env(safe-area-inset-bottom)); padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--card,#1e293b); box-shadow:0 3px 20px #0003; }
       .appraisal-feedback { flex-basis:100%; }
+      .appraisal-talk { margin:28px 0 20px; }
+      .appraisal-talk-heading,.appraisal-talk-item-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
+      .appraisal-talk-heading p { margin-top:5px; color:var(--text-sub); }
+      .appraisal-talk-heading > strong { color:#60a5fa; font-size:13px; }
+      .appraisal-talk-item { padding:18px 20px; margin-bottom:12px; border:1px solid var(--border); border-radius:12px; background:var(--card,#1e293b); }
+      .appraisal-talk-item.is-checked { border-color:#22c55e; background:rgba(34,197,94,.07); }
+      .appraisal-talk-item-heading label { display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer; }
+      .appraisal-talk-item input[type=checkbox] { width:20px; height:20px; accent-color:#22c55e; }
+      .appraisal-talk-item ul { margin:14px 0 0; padding-left:22px; font-size:14px; line-height:1.8; }
+      .appraisal-important { color:#f87171; font-weight:700; }
+      .appraisal-harassment { margin-top:14px; padding-top:4px; border-top:1px solid var(--border); }
+      .appraisal-harassment h5 { margin:16px 0 6px; font-size:14px; }
+      .appraisal-contacts { list-style:none; padding:0!important; display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:6px 18px; }
+      .appraisal-contacts li { display:flex; justify-content:space-between; gap:10px; }
+      .appraisal-contacts a { color:#60a5fa; }
       .appraisal-actions span { flex:1; font-size:13px; } .appraisal-complete { background:#2563eb; color:white; }
       .appraisal-error { color:#f87171; } .appraisal-success { color:#4ade80; }
       .appraisal-overview { margin:24px 0; padding:16px; border:1px solid var(--border); border-radius:10px; }
       .appraisal-overview details { margin:12px 0; padding:12px; border-top:1px solid var(--border); } summary { cursor:pointer; }
-      @media(max-width:600px) { .appraisal-item { padding:14px; } .appraisal-header { align-items:flex-start; } .appraisal-actions span { flex-basis:100%; } }
+      @media(max-width:600px) { .appraisal-item,.appraisal-talk-item { padding:14px; } .appraisal-header { align-items:flex-start; } .appraisal-actions span { flex-basis:100%; } }
     `}</style>
   </section>;
 }

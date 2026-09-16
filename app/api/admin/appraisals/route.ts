@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
   if (!validAppraisalMonth(month)) return reply({ error:'対象月を正しく指定してください' },400)
   try {
     const ctx = await context(user)
-    let query = adminClient.from('gw_employee_appraisals').select('id,reviewer_id,employee_id,period_month,assessed_on,ratings,status,version,updated_at,completed_at').eq('period_month',`${month}-01`)
+    let query = adminClient.from('gw_employee_appraisals').select('id,reviewer_id,employee_id,period_month,assessed_on,ratings,talk_checklist,status,version,updated_at,completed_at').eq('period_month',`${month}-01`)
     if (!ctx.executive) query = query.eq('reviewer_id',user.id)
     const { data, error } = await query
     if (error) throw new Error('APPRAISAL_DATA_ERROR')
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     catch(e) { return reply({error:e instanceof Error ? e.message : '入力が不正です'},400) }
     const {data,error} = await adminClient.rpc('gw_save_employee_appraisal',{
       p_reviewer:user.id,p_employee:body.employeeId,p_month:`${input.month}-01`,p_assessed_on:input.assessedOn,
-      p_ratings:input.ratings,p_status:input.status,p_version:input.version,
+      p_ratings:input.ratings,p_talk_checklist:input.talkChecklist,p_status:input.status,p_version:input.version,
     })
     if (error?.message?.includes('APPRAISAL_CONFLICT')) return reply({error:'他の画面で更新されています。入力内容を控えてから画面を再読み込みしてください。'},409)
     if (error) throw new Error('APPRAISAL_DATA_ERROR')

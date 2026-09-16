@@ -38,9 +38,9 @@ function load(file) {
   return cache[file]=mod.exports
 }
 const api=load('app/api/admin/appraisals/route.ts')
-const {emptyAppraisalRatings}=load('lib/appraisals.ts')
+const {emptyAppraisalRatings,emptyAppraisalTalkChecklist}=load('lib/appraisals.ts')
 const get=()=>api.GET({nextUrl:new URL('http://test/api/admin/appraisals?month=2026-09')})
-const input=()=>({employeeId:id(13),month:'2026-09',assessedOn:'2026-09-11',ratings:emptyAppraisalRatings(),version:0,status:'draft'})
+const input=()=>({employeeId:id(13),month:'2026-09',assessedOn:'2026-09-11',ratings:emptyAppraisalRatings(),talkChecklist:emptyAppraisalTalkChecklist(),version:0,status:'draft'})
 const post=body=>api.POST({text:async()=>JSON.stringify(body)})
 async function run() {
   assert.equal((await get()).status,401); assert.equal(dbCalls,0)
@@ -54,10 +54,12 @@ async function run() {
   assert.equal(rpcCalls.length,0)
   assert.equal((await post({...input(),reviewerId:id(2)})).status,200)
   assert.equal(rpcCalls[0].args.p_reviewer,id(1))
+  assert.equal(rpcCalls[0].args.p_talk_checklist.harassment,false)
+  assert.equal((await post({...input(),talkChecklist:{}})).status,400)
   assert.equal((await post({...input(),status:'completed'})).status,400)
   conflict=true; assert.equal((await post(input())).status,409);conflict=false
   current=users[4];const all=await (await get()).json();assert.equal(all.employees.length,0);assert.equal(all.assignableEmployees.length,2);assert.equal(all.records.length,2)
   current={...users[0],status:'pending'};assert.equal((await get()).status,403)
-  console.log('Appraisal API: authentication, member/bot denial, assigned scope, reviewer spoofing, private response, completion and conflict passed')
+  console.log('Appraisal API: authentication, scope, checklist RPC, malformed input, completion and conflict passed')
 }
 run().catch(e=>{console.error(e);process.exitCode=1})
