@@ -132,10 +132,13 @@ export function AppraisalAdminTab() {
       <div><h2>査定表 <span className="appraisal-private">非公開</span></h2>
         <p>各項目を5段階で評価し、備考に具体的な内容を記入してください。</p>
         <p>プライオリティーは参考値です。評価点への加重は行いません。</p></div>
-      <label>対象月<input type="month" value={month} min="2000-01" max="2099-12" disabled={busy} onChange={e => {
-        if (!e.target.value || (dirty && !window.confirm("未保存の変更を破棄して対象月を切り替えますか？"))) return;
-        setDirty(false); setMonth(e.target.value);
-      }} /></label>
+      <div className="appraisal-header-tools">
+        <label>対象月<input type="month" value={month} min="2000-01" max="2099-12" disabled={busy} onChange={e => {
+          if (!e.target.value || (dirty && !window.confirm("未保存の変更を破棄して対象月を切り替えますか？"))) return;
+          setDirty(false); setMonth(e.target.value);
+        }} /></label>
+        <button type="button" disabled={busy || !payload} onClick={() => setPrintOpen(true)}>面談内容を印刷</button>
+      </div>
     </header>
     {error && !selected && <p role="alert" className="appraisal-error">{error}</p>}
     {!payload && !error && <p>査定対象を読み込み中…</p>}
@@ -210,7 +213,7 @@ export function AppraisalAdminTab() {
           <p><strong>面談確認：{APPRAISAL_TALK_ITEMS.filter(item => record.talk_checklist?.[item.id]).length} / {APPRAISAL_TALK_ITEMS.length}項目</strong><br />{APPRAISAL_TALK_ITEMS.map(item => `${record.talk_checklist?.[item.id] ? "☑" : "☐"} ${item.label}`).join(" ／ ")}</p>
         </details>)}
       </details>}
-      {printOpen && selected && <div className="appraisal-print-root" role="presentation" onMouseDown={() => setPrintOpen(false)}>
+      {printOpen && payload && <div className="appraisal-print-root" role="presentation" onMouseDown={() => setPrintOpen(false)}>
         <section className="appraisal-print-dialog" role="dialog" aria-modal="true" aria-labelledby="appraisal-print-title" onMouseDown={event => event.stopPropagation()}>
           <div className="appraisal-print-controls">
             <div><strong>印刷プレビュー</strong><small>査定点と備考は印刷されません。</small></div>
@@ -222,8 +225,8 @@ export function AppraisalAdminTab() {
               <p>面談確認書</p>
               <h2 id="appraisal-print-title">査定面談で伝える内容</h2>
               <div className="appraisal-print-meta">
-                <span>対象者：<strong>{selected.name}</strong></span>
-                <span>所属：<strong>{selected.department || "未設定"}</strong></span>
+                <span>対象者：<strong>{selected?.name || "　　　　　　　　　"}</strong></span>
+                <span>所属：<strong>{selected?.department || "　　　　　　　　　"}</strong></span>
                 <span>査定者：<strong>{payload.reviewer.name}</strong></span>
                 <span>対象月：<strong>{Number(month.slice(0, 4))}年{Number(month.slice(5, 7))}月</strong></span>
                 <span>査定日：<strong>{assessedOn.replaceAll("-", "/")}</strong></span>
@@ -259,6 +262,7 @@ export function AppraisalAdminTab() {
     <style jsx>{`
       .appraisals { max-width: 1100px; margin: 0 auto; color: var(--text); }
       .appraisal-header,.appraisal-form-heading,.appraisal-item-heading,.appraisal-score,.appraisal-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+      .appraisal-header-tools { display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; }
       h2 { font-size:22px; } h3 { font-size:19px; } h4 { margin:0; font-size:16px; }
       p { font-size:14px; line-height:1.7; } label { display:block; font-size:13px; }
       .appraisal-private { font-size:12px; border:1px solid var(--border); border-radius:5px; padding:3px 7px; margin-left:8px; }
