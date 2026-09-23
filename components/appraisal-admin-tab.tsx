@@ -32,11 +32,18 @@ export function AppraisalAdminTab() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [assignmentReviewer, setAssignmentReviewer] = useState("");
+  const [viewReviewerId, setViewReviewerId] = useState("");
   const [printOpen, setPrintOpen] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
   const sequence = useRef(0);
   const formRef = useRef<HTMLDivElement>(null);
-  const selected = payload?.employees.find(e => e.id === employeeId);
+  const viewedReviewer = payload?.reviewers.find(reviewer => reviewer.id === viewReviewerId) || payload?.reviewer;
+  const viewingAnotherReviewer = Boolean(payload?.executive && viewedReviewer && viewedReviewer.id !== payload.reviewer.id);
+  const viewedEmployeeIds = new Set(payload?.assignments.filter(assignment => assignment.reviewer_id === viewedReviewer?.id).map(assignment => assignment.employee_id) || []);
+  const viewedEmployees = payload
+    ? viewingAnotherReviewer ? payload.assignableEmployees.filter(employee => viewedEmployeeIds.has(employee.id)) : payload.employees
+    : [];
+  const selected = viewedEmployees.find(e => e.id === employeeId);
   const count = APPRAISAL_ITEMS.filter(item => ratings[item.id]?.score !== null).length;
   const talkCount = APPRAISAL_TALK_ITEMS.filter(item => talkChecklist[item.id]).length;
 
@@ -45,7 +52,16 @@ export function AppraisalAdminTab() {
     setPayload(null); setEmployeeId(""); setError(""); setMessage("");
     fetch(`/api/admin/appraisals?month=${month}`, { cache: "no-store", signal: controller.signal })
       .then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error || "取得できませんでした"); return data as Payload; })
-      .then(setPayload)
+      .then(data => {
+        setPayload(data);
+        if (!data.executive) return;
+        setViewReviewerId(previous => {
+          if (data.reviewers.some(reviewer => reviewer.id === previous)) return previous;
+          return data.reviewers.find(reviewer => reviewer.id !== data.reviewer.id && data.assignments.some(assignment => assignment.reviewer_id === reviewer.id))?.id
+            || data.reviewers.find(reviewer => reviewer.id !== data.reviewer.id)?.id
+            || data.reviewer.id;
+        });
+      })
       .catch(e => { if (e.name !== "AbortError") setError(e.message); });
     return () => controller.abort();
   }, [month]);
@@ -87,13 +103,21 @@ export function AppraisalAdminTab() {
   function open(employee: Person) {
     if (busy || (dirty && !window.confirm("未保存の変更を破棄して対象者を切り替えますか？"))) return;
     sequence.current++;
-    const record = payload?.records.find(r => r.employee_id === employee.id && r.reviewer_id === payload.reviewer.id);
+    const record = payload?.records.find(r => r.employee_id === employee.id && r.reviewer_id === viewedReviewer?.id);
     setEmployeeId(employee.id); setRatings(record?.ratings || emptyAppraisalRatings());
     setTalkChecklist(record?.talk_checklist || emptyAppraisalTalkChecklist());
     setAssessedOn(record?.assessed_on || today()); setVersion(record?.version || 0);
     setStatus(record?.status === "completed" ? "完了" : record ? "下書き" : "未着手");
     setDirty(false); setMessage(""); setError(""); setPrintOpen(false);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+
+  function changeViewedReviewer(reviewerId: string) {
+    if (busy || (dirty && !window.confirm("未保存の変更を破棄して査定者を切り替えますか？"))) return;
+    sequence.current++;
+    setViewReviewerId(reviewerId); setEmployeeId(""); setRatings(emptyAppraisalRatings());
+    setTalkChecklist(emptyAppraisalTalkChecklist()); setAssessedOn(today()); setVersion(0);
+    setStatus("未着手"); setDirty(false); setMessage(""); setError(""); setPrintOpen(false);
   }
 
   function change(id: string, changes: Partial<AppraisalRatings[string]>) {
@@ -148,20 +172,28 @@ export function AppraisalAdminTab() {
         <label>査定者<select value={assignmentReviewer} disabled={busy} onChange={e => setAssignmentReviewer(e.target.value)}><option value="">管理者を選択</option>{payload.reviewers.filter(r => r.id !== payload.reviewer.id).map(r => <option key={r.id} value={r.id}>{r.name}（{r.department}）</option>)}</select></label>
         {assignmentReviewer && <div className="appraisal-people">{payload.assignableEmployees.map(e => <label key={e.id}><input type="checkbox" disabled={busy} checked={payload.assignments.some(a => a.reviewer_id === assignmentReviewer && a.employee_id === e.id)} onChange={event => assign(e.id,event.target.checked)} /> {e.name}（{e.department}）</label>)}</div>}
       </details>}
-      <p>査定者：<strong>{payload.reviewer.name}</strong> ／ 自分の完了：{payload.records.filter(r => r.reviewer_id === payload.reviewer.id && r.status === "completed" && payload.employees.some(e => e.id === r.employee_id)).length} / {payload.employees.length}名</p>
+      {payload.executive && <section className="appraisal-reviewer-view" aria-label="管理者の査定画面を確認">
+        <div><h3>管理者の査定画面を確認</h3><p>管理者を選ぶと、その管理者に見える担当メンバーと査定内容を同じ画面で確認できます。</p></div>
+        <label>表示する査定者<select value={viewedReviewer?.id || ""} disabled={busy} onChange={event => changeViewedReviewer(event.target.value)}>
+          {payload.reviewers.map(reviewer => <option key={reviewer.id} value={reviewer.id}>{reviewer.name}{reviewer.id === payload.reviewer.id ? "（自分）" : ""}（{reviewer.department}）</option>)}
+        </select></label>
+        {viewingAnotherReviewer && <strong className="appraisal-readonly">役員確認モード・閲覧のみ</strong>}
+      </section>}
+      <p>査定者：<strong>{viewedReviewer?.name || payload.reviewer.name}</strong> ／ {viewingAnotherReviewer ? "完了" : "自分の完了"}：{payload.records.filter(r => r.reviewer_id === viewedReviewer?.id && r.status === "completed" && viewedEmployees.some(e => e.id === r.employee_id)).length} / {viewedEmployees.length}名</p>
       <div className="appraisal-people">
-        {payload.employees.map(employee => {
-          const record = payload.records.find(r => r.employee_id === employee.id && r.reviewer_id === payload.reviewer.id);
+        {viewedEmployees.map(employee => {
+          const record = payload.records.find(r => r.employee_id === employee.id && r.reviewer_id === viewedReviewer?.id);
           return <button type="button" key={employee.id} disabled={busy} aria-pressed={employeeId === employee.id} onClick={() => open(employee)}>
             <strong>{employee.name}</strong><small>{employee.department}</small><span>{record?.status === "completed" ? "完了" : record ? "下書き" : "未着手"}</span>
           </button>;
         })}
       </div>
-      {payload.employees.length === 0 && <p>査定対象の部下が登録されていません。</p>}
+      {viewedEmployees.length === 0 && <p>{viewingAnotherReviewer ? "この管理者に査定対象の部下が割り当てられていません。上の「査定の担当設定」から割り当ててください。" : "査定対象の部下が登録されていません。"}</p>}
       {selected && <div ref={formRef} className="appraisal-form">
         <div className="appraisal-form-heading"><h3>{selected.name}さんの査定</h3><span>{status}{dirty ? "・未保存" : ""} ／ 評価 {count}/10・面談確認 {talkCount}/5</span>
-          <label>査定日<input type="date" value={assessedOn} disabled={busy} onChange={e => { setAssessedOn(e.target.value); setDirty(true); }} /></label></div>
-        <fieldset disabled={busy}>
+          <label>査定日<input type="date" value={assessedOn} disabled={busy || viewingAnotherReviewer} onChange={e => { setAssessedOn(e.target.value); setDirty(true); }} /></label></div>
+        {viewingAnotherReviewer && <p className="appraisal-readonly-note">{viewedReviewer?.name}さんが使用する査定画面を表示しています。役員側から査定内容の変更・保存はできません。</p>}
+        <fieldset disabled={busy || viewingAnotherReviewer}>
           <legend className="sr-only">査定項目</legend>
           {APPRAISAL_ITEMS.map(item => {
             const rating = ratings[item.id];
@@ -183,7 +215,7 @@ export function AppraisalAdminTab() {
               <button type="button" disabled={busy} onClick={() => setPrintOpen(true)}>印刷画面</button>
             </div>
           </div>
-          <fieldset disabled={busy}>
+          <fieldset disabled={busy || viewingAnotherReviewer}>
             <legend className="sr-only">面談確認項目</legend>
             {APPRAISAL_TALK_ITEMS.map(item => <article className={`appraisal-talk-item${talkChecklist[item.id] ? " is-checked" : ""}`} key={item.id}>
               <div className="appraisal-talk-item-heading"><h4>{item.label}</h4><label><input type="checkbox" checked={talkChecklist[item.id]} onChange={event => changeTalkItem(item.id, event.target.checked)} /> 説明済み</label></div>
@@ -199,10 +231,10 @@ export function AppraisalAdminTab() {
             </article>)}
           </fieldset>
         </section>
-        <div className="appraisal-actions">
+        {!viewingAnotherReviewer && <div className="appraisal-actions">
           {error && <p role="alert" className="appraisal-feedback appraisal-error">{error}</p>}
           {message && <p role="status" className="appraisal-feedback appraisal-success">{message}</p>}
-          <span>評価 {count}/10・面談確認 {talkCount}/5{dirty ? "・未保存の変更があります" : ""}</span><button type="button" disabled={busy} onClick={() => save('draft')}>{busy ? "保存中…" : "下書き保存"}</button><button type="button" className="appraisal-complete" disabled={busy || count !== 10} onClick={() => save('completed')}>査定を完了</button></div>
+          <span>評価 {count}/10・面談確認 {talkCount}/5{dirty ? "・未保存の変更があります" : ""}</span><button type="button" disabled={busy} onClick={() => save('draft')}>{busy ? "保存中…" : "下書き保存"}</button><button type="button" className="appraisal-complete" disabled={busy || count !== 10} onClick={() => save('completed')}>査定を完了</button></div>}
         <p className="appraisal-hint">全10項目を評価すると完了できます。保存済みの査定は再度開いて修正できます。本人には公開・通知されません。</p>
       </div>}
       {payload.executive && <details className="appraisal-overview"><summary>管理者の査定結果（役員のみ）</summary>
@@ -227,7 +259,7 @@ export function AppraisalAdminTab() {
               <div className="appraisal-print-meta">
                 <span>対象者：<strong>{selected?.name || "　　　　　　　　　"}</strong></span>
                 <span>所属：<strong>{selected?.department || "　　　　　　　　　"}</strong></span>
-                <span>査定者：<strong>{payload.reviewer.name}</strong></span>
+                <span>査定者：<strong>{viewedReviewer?.name || payload.reviewer.name}</strong></span>
                 <span>対象月：<strong>{Number(month.slice(0, 4))}年{Number(month.slice(5, 7))}月</strong></span>
                 <span>査定日：<strong>{assessedOn.replaceAll("-", "/")}</strong></span>
               </div>
@@ -301,6 +333,10 @@ export function AppraisalAdminTab() {
       .appraisal-error { color:#f87171; } .appraisal-success { color:#4ade80; }
       .appraisal-overview { margin:24px 0; padding:16px; border:1px solid var(--border); border-radius:10px; }
       .appraisal-overview details { margin:12px 0; padding:12px; border-top:1px solid var(--border); } summary { cursor:pointer; }
+      .appraisal-reviewer-view { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:22px 0 14px; padding:16px; border:1px solid #3b82f6; border-radius:12px; background:rgba(59,130,246,.08); }
+      .appraisal-reviewer-view > div { flex:1 1 360px; } .appraisal-reviewer-view h3,.appraisal-reviewer-view p { margin:0; } .appraisal-reviewer-view p { color:var(--text-sub); }
+      .appraisal-readonly { color:#93c5fd; font-size:13px; white-space:nowrap; }
+      .appraisal-readonly-note { padding:12px 14px; border:1px solid #3b82f6; border-radius:9px; color:#bfdbfe; background:rgba(59,130,246,.08); }
       .appraisal-print-root { position:fixed; inset:0; z-index:1000; overflow:auto; padding:24px; background:rgba(2,6,23,.82); }
       .appraisal-print-dialog { width:min(900px,100%); margin:0 auto; }
       .appraisal-print-controls { position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-bottom:12px; padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--card,#1e293b); box-shadow:0 8px 30px #0006; }
