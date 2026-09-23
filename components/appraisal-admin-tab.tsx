@@ -32,6 +32,7 @@ export function AppraisalAdminTab() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [assignmentReviewer, setAssignmentReviewer] = useState("");
+  const [printOpen, setPrintOpen] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
   const sequence = useRef(0);
   const formRef = useRef<HTMLDivElement>(null);
@@ -62,6 +63,15 @@ export function AppraisalAdminTab() {
     return () => { window.removeEventListener("beforeunload", warn); document.removeEventListener("click", guard, true); };
   }, [dirty, busy]);
 
+  useEffect(() => {
+    if (!printOpen) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPrintOpen(false);
+    };
+    document.addEventListener("keydown", close);
+    return () => document.removeEventListener("keydown", close);
+  }, [printOpen]);
+
   async function assign(targetId: string, enabled: boolean) {
     if (!assignmentReviewer || busy) return;
     setBusy(true); setError("");
@@ -82,7 +92,7 @@ export function AppraisalAdminTab() {
     setTalkChecklist(record?.talk_checklist || emptyAppraisalTalkChecklist());
     setAssessedOn(record?.assessed_on || today()); setVersion(record?.version || 0);
     setStatus(record?.status === "completed" ? "完了" : record ? "下書き" : "未着手");
-    setDirty(false); setMessage(""); setError("");
+    setDirty(false); setMessage(""); setError(""); setPrintOpen(false);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
@@ -165,7 +175,10 @@ export function AppraisalAdminTab() {
         <section className="appraisal-talk" aria-labelledby="appraisal-talk-heading">
           <div className="appraisal-talk-heading">
             <div><h3 id="appraisal-talk-heading">面談で伝える内容</h3><p>査定対象者へ説明した項目を管理者がチェックしてください。チェック状態は査定と一緒に保存されます。</p></div>
-            <strong>{talkCount} / {APPRAISAL_TALK_ITEMS.length}項目 説明済み</strong>
+            <div className="appraisal-talk-tools">
+              <strong>{talkCount} / {APPRAISAL_TALK_ITEMS.length}項目 説明済み</strong>
+              <button type="button" disabled={busy} onClick={() => setPrintOpen(true)}>印刷画面</button>
+            </div>
           </div>
           <fieldset disabled={busy}>
             <legend className="sr-only">面談確認項目</legend>
@@ -197,6 +210,51 @@ export function AppraisalAdminTab() {
           <p><strong>面談確認：{APPRAISAL_TALK_ITEMS.filter(item => record.talk_checklist?.[item.id]).length} / {APPRAISAL_TALK_ITEMS.length}項目</strong><br />{APPRAISAL_TALK_ITEMS.map(item => `${record.talk_checklist?.[item.id] ? "☑" : "☐"} ${item.label}`).join(" ／ ")}</p>
         </details>)}
       </details>}
+      {printOpen && selected && <div className="appraisal-print-root" role="presentation" onMouseDown={() => setPrintOpen(false)}>
+        <section className="appraisal-print-dialog" role="dialog" aria-modal="true" aria-labelledby="appraisal-print-title" onMouseDown={event => event.stopPropagation()}>
+          <div className="appraisal-print-controls">
+            <div><strong>印刷プレビュー</strong><small>査定点と備考は印刷されません。</small></div>
+            <button type="button" onClick={() => setPrintOpen(false)}>閉じる</button>
+            <button type="button" className="appraisal-print-button" onClick={() => window.print()}>印刷</button>
+          </div>
+          <article className="appraisal-print-sheet">
+            <header className="appraisal-print-header">
+              <p>面談確認書</p>
+              <h2 id="appraisal-print-title">査定面談で伝える内容</h2>
+              <div className="appraisal-print-meta">
+                <span>対象者：<strong>{selected.name}</strong></span>
+                <span>所属：<strong>{selected.department || "未設定"}</strong></span>
+                <span>査定者：<strong>{payload.reviewer.name}</strong></span>
+                <span>対象月：<strong>{Number(month.slice(0, 4))}年{Number(month.slice(5, 7))}月</strong></span>
+                <span>査定日：<strong>{assessedOn.replaceAll("-", "/")}</strong></span>
+              </div>
+            </header>
+            <p className="appraisal-print-intro">以下の内容を対象者へ説明し、理解を確認してください。</p>
+            <div className="appraisal-print-items">
+              {APPRAISAL_TALK_ITEMS.map((item, index) => <section className="appraisal-print-item" key={item.id}>
+                <div className="appraisal-print-item-heading">
+                  <span className="appraisal-print-number">{index + 1}</span>
+                  <h3>{item.label}</h3>
+                  <strong>{talkChecklist[item.id] ? "☑ 説明済み" : "□ 説明確認"}</strong>
+                </div>
+                {item.details.length > 0 && <ul>{item.details.map(detail => <li key={detail} className={detail.includes("ネガティブワード") ? "appraisal-print-important" : undefined}>{detail}</li>)}</ul>}
+                {item.id === "harassment" && <div className="appraisal-print-harassment">
+                  <p><strong>ハラスメントとは、人に対する「嫌がらせ」や「いじめ」などの迷惑行為の全てを指します。</strong></p>
+                  <p>何をハラスメントと感じるかどうかは個人差がありますが、基本的には受けた者が不快である（つらい、意に反する）と感じたら、それは<strong>受けた者にとってのハラスメント</strong>とまずは考えましょう。</p>
+                  <p>2022年4月より労働施策総合推進法（別名パワハラ防止法）施行</p>
+                  <p>会社内又は上司・同僚より上記を少しでも感じた場合は必ず相談して下さい。<br />（電話・メッセンジャー・LINE等でも構いません）</p>
+                  <h4>相談窓口</h4>
+                  <ul className="appraisal-print-contacts">{APPRAISAL_HARASSMENT_CONTACTS.map(contact => <li key={contact.phone}><span>{contact.name}</span><span>{contact.phone}</span></li>)}</ul>
+                </div>}
+              </section>)}
+            </div>
+            <footer className="appraisal-print-signature">
+              <p>以上の説明を受け、内容を確認しました。</p>
+              <div><span>確認日：　　　　年　　　月　　　日</span><span>本人署名：　　　　　　　　　　　　　　　</span></div>
+            </footer>
+          </article>
+        </section>
+      </div>}
     </>}
     <style jsx>{`
       .appraisals { max-width: 1100px; margin: 0 auto; color: var(--text); }
@@ -222,7 +280,8 @@ export function AppraisalAdminTab() {
       .appraisal-talk { margin:28px 0 20px; }
       .appraisal-talk-heading,.appraisal-talk-item-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
       .appraisal-talk-heading p { margin-top:5px; color:var(--text-sub); }
-      .appraisal-talk-heading > strong { color:#60a5fa; font-size:13px; }
+      .appraisal-talk-tools { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+      .appraisal-talk-tools > strong { color:#60a5fa; font-size:13px; }
       .appraisal-talk-item { padding:18px 20px; margin-bottom:12px; border:1px solid var(--border); border-radius:12px; background:var(--card,#1e293b); }
       .appraisal-talk-item.is-checked { border-color:#22c55e; background:rgba(34,197,94,.07); }
       .appraisal-talk-item-heading label { display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer; }
@@ -238,7 +297,47 @@ export function AppraisalAdminTab() {
       .appraisal-error { color:#f87171; } .appraisal-success { color:#4ade80; }
       .appraisal-overview { margin:24px 0; padding:16px; border:1px solid var(--border); border-radius:10px; }
       .appraisal-overview details { margin:12px 0; padding:12px; border-top:1px solid var(--border); } summary { cursor:pointer; }
-      @media(max-width:600px) { .appraisal-item,.appraisal-talk-item { padding:14px; } .appraisal-header { align-items:flex-start; } .appraisal-actions span { flex-basis:100%; } }
+      .appraisal-print-root { position:fixed; inset:0; z-index:1000; overflow:auto; padding:24px; background:rgba(2,6,23,.82); }
+      .appraisal-print-dialog { width:min(900px,100%); margin:0 auto; }
+      .appraisal-print-controls { position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-bottom:12px; padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--card,#1e293b); box-shadow:0 8px 30px #0006; }
+      .appraisal-print-controls > div { display:flex; flex-direction:column; margin-right:auto; }
+      .appraisal-print-controls small { margin-top:3px; }
+      .appraisal-print-button { border-color:#2563eb; background:#2563eb; color:#fff; font-weight:700; }
+      .appraisal-print-sheet { box-sizing:border-box; width:210mm; max-width:100%; min-height:297mm; margin:0 auto; padding:12mm; color:#111827; background:#fff; box-shadow:0 10px 35px #0008; font-family:"Yu Gothic","Meiryo",sans-serif; }
+      .appraisal-print-header { padding-bottom:6mm; border-bottom:2px solid #111827; }
+      .appraisal-print-header > p { margin:0 0 2mm; font-size:11px; letter-spacing:.18em; }
+      .appraisal-print-header h2 { margin:0 0 5mm; color:#111827; font-size:24px; text-align:center; }
+      .appraisal-print-meta { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:2mm 8mm; font-size:12px; }
+      .appraisal-print-intro { margin:5mm 0 3mm; font-size:12px; }
+      .appraisal-print-items { display:grid; gap:3mm; }
+      .appraisal-print-item { break-inside:avoid; padding:3mm 4mm; border:1px solid #374151; }
+      .appraisal-print-item-heading { display:grid; grid-template-columns:8mm 1fr auto; align-items:center; gap:3mm; }
+      .appraisal-print-number { display:grid; place-items:center; width:7mm; height:7mm; border:1px solid #111827; border-radius:50%; font-weight:700; font-size:11px; }
+      .appraisal-print-item h3 { margin:0; color:#111827; font-size:14px; }
+      .appraisal-print-item-heading > strong { font-size:11px; white-space:nowrap; }
+      .appraisal-print-item ul { margin:2mm 0 0; padding-left:7mm; font-size:11px; line-height:1.55; }
+      .appraisal-print-important { color:#b91c1c; font-weight:700; }
+      .appraisal-print-harassment { margin-top:2mm; padding-top:2mm; border-top:1px solid #9ca3af; }
+      .appraisal-print-harassment p { margin:1mm 0; color:#111827; font-size:10.5px; line-height:1.45; }
+      .appraisal-print-harassment h4 { margin:2mm 0 1mm; font-size:11px; }
+      .appraisal-print-contacts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1mm 8mm; margin:0!important; padding:0!important; list-style:none; }
+      .appraisal-print-contacts li { display:flex; justify-content:space-between; gap:3mm; }
+      .appraisal-print-signature { break-inside:avoid; margin-top:6mm; padding-top:4mm; border-top:1px solid #111827; }
+      .appraisal-print-signature p { margin:0 0 5mm; color:#111827; font-size:12px; }
+      .appraisal-print-signature div { display:flex; justify-content:space-between; gap:8mm; font-size:12px; }
+      @media(max-width:600px) { .appraisal-item,.appraisal-talk-item { padding:14px; } .appraisal-header { align-items:flex-start; } .appraisal-actions span { flex-basis:100%; } .appraisal-print-root { padding:8px; } .appraisal-print-controls { align-items:flex-end; } .appraisal-print-sheet { width:100%; min-height:auto; padding:18px; } .appraisal-print-meta { grid-template-columns:1fr; } .appraisal-print-signature div { flex-direction:column; } }
+    `}</style>
+    <style jsx global>{`
+      @page { size:A4 portrait; margin:10mm; }
+      @media print {
+        body { background:#fff!important; }
+        body * { visibility:hidden!important; }
+        .appraisal-print-root,.appraisal-print-root * { visibility:visible!important; }
+        .appraisal-print-root { position:absolute!important; inset:0!important; overflow:visible!important; padding:0!important; background:#fff!important; }
+        .appraisal-print-dialog { width:100%!important; margin:0!important; }
+        .appraisal-print-controls { display:none!important; }
+        .appraisal-print-sheet { width:auto!important; max-width:none!important; min-height:auto!important; margin:0!important; padding:0!important; box-shadow:none!important; }
+      }
     `}</style>
   </section>;
 }
