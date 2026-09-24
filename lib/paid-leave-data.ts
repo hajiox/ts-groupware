@@ -630,6 +630,46 @@ export async function syncPaidLeaveAccount(employee: EmployeeRow, actorUserId?: 
   if (updateError) throw updateError
 }
 
+export async function loadPaidLeaveAvailability(userId: string, actorUserId?: string | null) {
+  const employee = await loadEmployee(userId)
+  if (!employee) throw new Error('人事情報に連携されたスタッフが見つかりません')
+
+  const managed = isPaidLeaveManagedEmployee(employee)
+  if (!managed) {
+    await voidExcludedPaidLeaveData(employee)
+    return {
+      managed: false,
+      availableDays: 0,
+      nextGrantDate: null,
+      projectedGrantDays: 0,
+    }
+  }
+
+  await syncPaidLeaveAccount(employee, actorUserId)
+  const today = jstDate()
+  const [{ data: lots, error: lotsError }, { data: profile, error: profileError }] = await Promise.all([
+    adminClient
+      .from('gw_paid_leave_grant_balances')
+      .select('grant_date, expires_on, remaining_days')
+      .eq('employee_id', employee.id),
+    adminClient
+      .from('gw_paid_leave_profiles')
+      .select('next_grant_date, projected_grant_days')
+      .eq('employee_id', employee.id)
+      .maybeSingle(),
+  ])
+  if (lotsError || profileError) throw lotsError || profileError
+
+  return {
+    managed: true,
+    availableDays: (lots || [])
+      .filter((lot) => lot.grant_date <= today && lot.expires_on > today)
+      .reduce((sum, lot) => sum + toNumber(lot.remaining_days), 0),
+    nextGrantDate: profile?.next_grant_date || null,
+    projectedGrantDays: toNumber(profile?.projected_grant_days),
+  }
+}
+
 async function loadThreeMonthAverage(employee: EmployeeRow, asOf: ISODate) {
   const referenceStart = addMonths(asOf, -3)
   const isSalariedEmployee = ['regular_5d_8h', 'regular_6d_6_5h', 'officer'].includes(employee.work_style || '')

@@ -76,6 +76,12 @@ type ShiftPayload = {
   submissions: ShiftRequestSubmission[];
   assignments: ShiftAssignment[];
   requirements: ShiftRequirement[];
+  paidLeaveAvailability: {
+    managed: boolean;
+    availableDays: number;
+    nextGrantDate: string | null;
+    projectedGrantDays: number;
+  };
 };
 
 type ConstraintDraft = {
@@ -296,6 +302,22 @@ export default function ShiftsPage() {
       : canEditPaidLeaveRequest(selectedPeriod);
     if (!canEditSelectedMode) return;
     const selected = calendarRequestType(date) === calendarRequestMode;
+    if (!selected && (calendarRequestMode === "paid_leave_full" || calendarRequestMode === "paid_leave_half")) {
+      const selectedPaidLeaveDays = dates.reduce((sum, targetDate) => {
+        if (targetDate === date) return sum;
+        const requestType = calendarRequestType(targetDate);
+        return sum + (requestType === "paid_leave_full" ? 1 : requestType === "paid_leave_half" ? 0.5 : 0);
+      }, 0);
+      const requestedDays = calendarRequestMode === "paid_leave_full" ? 1 : 0.5;
+      const availableDays = payload?.paidLeaveAvailability.availableDays || 0;
+      if (selectedPaidLeaveDays + requestedDays > availableDays) {
+        const nextGrant = payload?.paidLeaveAvailability.nextGrantDate
+          ? ` 次回付与予定は${payload.paidLeaveAvailability.nextGrantDate}です。`
+          : "";
+        setMessage(`有給残日数が不足しています（残${availableDays}日）。${nextGrant}`);
+        return;
+      }
+    }
     updateDraft(date, selected
       ? { request_type: "", priority: "must", start_time: "", end_time: "", memo: "" }
       : { request_type: calendarRequestMode, priority: "must", start_time: "", end_time: "", memo: "" });
@@ -382,6 +404,9 @@ export default function ShiftsPage() {
   const calendarWeekdays = ["日", "月", "火", "水", "木", "金", "土"];
   const deadline = shiftDeadlineInfo(selectedPeriod?.request_deadline);
   const automaticConstraints = resolveShiftConstraints(payload?.employee?.work_style, Math.max(1, dates.length));
+  const paidLeaveAvailability = payload?.paidLeaveAvailability;
+  const hasFullPaidLeaveDraft = dates.some((date) => calendarRequestType(date) === "paid_leave_full");
+  const hasHalfPaidLeaveDraft = dates.some((date) => calendarRequestType(date) === "paid_leave_half");
 
   return (
     <>
@@ -528,6 +553,7 @@ export default function ShiftsPage() {
                   type="button"
                   className={calendarRequestMode === "paid_leave_full" ? "active" : ""}
                   onClick={() => setCalendarRequestMode("paid_leave_full")}
+                  disabled={!paidLeaveAvailability?.managed || ((paidLeaveAvailability?.availableDays || 0) < 1 && !hasFullPaidLeaveDraft)}
                 >
                   有給（全休）
                 </button>
@@ -535,10 +561,20 @@ export default function ShiftsPage() {
                   type="button"
                   className={calendarRequestMode === "paid_leave_half" ? "active" : ""}
                   onClick={() => setCalendarRequestMode("paid_leave_half")}
+                  disabled={!paidLeaveAvailability?.managed || ((paidLeaveAvailability?.availableDays || 0) < 0.5 && !hasHalfPaidLeaveDraft)}
                 >
                   有給（半休）
                 </button>
               </div>
+
+              {paidLeaveAvailability && (
+                <div className="admin-message">
+                  有給残 {paidLeaveAvailability.availableDays}日
+                  {paidLeaveAvailability.nextGrantDate
+                    ? ` / 次回付与予定 ${paidLeaveAvailability.nextGrantDate}（${paidLeaveAvailability.projectedGrantDays}日）`
+                    : ""}
+                </div>
+              )}
 
               <div className="shift-unavailable-calendar" aria-label="出られない日のカレンダー">
                 {calendarWeekdays.map((day) => (

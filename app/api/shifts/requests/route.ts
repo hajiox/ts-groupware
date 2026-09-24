@@ -4,6 +4,7 @@ import { getUserSession } from '@/lib/session'
 import { resolveShiftConstraints } from '@/lib/shift-constraints'
 import { isShiftRequestDeadlineOpen } from '@/lib/shift-deadline'
 import { isShiftRequestCollectionExcluded } from '@/lib/shift-request-exclusions'
+import { loadPaidLeaveAvailability } from '@/lib/paid-leave-data'
 import { adminClient } from '@/lib/supabase/admin'
 
 type ShiftRequestType = 'day_off' | 'unavailable' | 'paid_leave_full' | 'paid_leave_half' | 'available' | 'time_preference' | 'note'
@@ -104,6 +105,9 @@ async function loadPayload(user: Awaited<ReturnType<typeof getUserSession>>) {
     tsgDepartmentFromText(employee?.department) ||
     normalizeUserDepartment(user.department)
   const today = getJstDate()
+  const paidLeaveAvailability = employee
+    ? await loadPaidLeaveAvailability(user.id, user.id)
+    : { managed: false, availableDays: 0, nextGrantDate: null, projectedGrantDays: 0 }
 
   const { data: rawPeriods, error: periodsError } = await adminClient
     .from('gw_shift_periods')
@@ -198,6 +202,7 @@ async function loadPayload(user: Awaited<ReturnType<typeof getUserSession>>) {
     assignments: assignmentsResult.data || [],
     requirements: requirementsResult.data || [],
     requestCollectionExcluded,
+    paidLeaveAvailability,
   }
 }
 
@@ -345,6 +350,58 @@ export async function PATCH(request: NextRequest) {
         is_test: Boolean(period.is_test_mode),
         updated_at: new Date().toISOString(),
       })
+    }
+
+    const requestedPaidLeaveDays = upserts.reduce((sum, row) => {
+      if (row.request_type === 'paid_leave_full') return sum + 1
+      if (row.request_type === 'paid_leave_half') return sum + 0.5
+      return sum
+    }, 0)
+    if (requestedPaidLeaveDays > 0) {
+      const availability = await loadPaidLeaveAvailability(user.id, user.id)
+      if (!availability.managed) {
+        return NextResponse.json({ error: 'このアカウントは有給管理の対象外です' }, { status: 403 })
+      }
+
+      const [{ data: pendingPaidLeave, error: pendingPaidLeaveError }, { data: activePeriods, error: activePeriodsError }] = await Promise.all([
+        adminClient
+          .from('gw_paid_leave_requests')
+          .select('requested_days')
+          .eq('employee_id', employee?.id || '')
+          .eq('request_status', 'submitted'),
+        adminClient
+          .from('gw_shift_periods')
+          .select('id')
+          .in('status', ['collecting', 'generated', 'editing'])
+          .neq('id', periodId)
+          .eq('is_test_mode', false),
+      ])
+      if (pendingPaidLeaveError || activePeriodsError) throw pendingPaidLeaveError || activePeriodsError
+
+      const otherPeriodIds = (activePeriods || []).map((row) => row.id)
+      const { data: otherShiftRequests, error: otherShiftRequestsError } = otherPeriodIds.length
+        ? await adminClient
+          .from('gw_shift_requests')
+          .select('request_type')
+          .eq('user_id', user.id)
+          .eq('is_test', false)
+          .in('period_id', otherPeriodIds)
+          .in('request_type', ['paid_leave_full', 'paid_leave_half'])
+        : { data: [], error: null }
+      if (otherShiftRequestsError) throw otherShiftRequestsError
+
+      const pendingDays = (pendingPaidLeave || []).reduce((sum, row) => sum + Number(row.requested_days || 0), 0)
+      const otherShiftDays = (otherShiftRequests || []).reduce(
+        (sum, row) => sum + (row.request_type === 'paid_leave_full' ? 1 : 0.5),
+        0,
+      )
+      const requestableDays = Math.max(0, availability.availableDays - pendingDays - otherShiftDays)
+      if (requestedPaidLeaveDays > requestableDays) {
+        const nextGrant = availability.nextGrantDate ? `。次回付与予定は${availability.nextGrantDate}です` : ''
+        return NextResponse.json({
+          error: `有給残日数が不足しています（申請可能 ${requestableDays}日）${nextGrant}`,
+        }, { status: 400 })
+      }
     }
 
     if (deleteDates.length > 0) {
