@@ -2979,7 +2979,7 @@ export function ShiftAdminTab() {
                             ? request.request_type
                             : "";
                           const isBlocked = beforeHire || requestedOff || paidLeaveFull;
-                          const isCompanyOff = paidLeaveFull || (!requestedOff && isCompanyOffAssignment(assignment));
+                          const isCompanyOff = !paidLeaveType && !requestedOff && isCompanyOffAssignment(assignment);
                           const isConfigured = !isBlocked && !isCompanyOff && Boolean(
                             assignment?.shift_label && (
                               assignment.shift_label !== "自由入力" || assignment.start_time || assignment.end_time
@@ -3007,6 +3007,7 @@ export function ShiftAdminTab() {
                                   {REQUEST_LABELS[request.request_type]}
                                 </span>
                               )}
+                              {paidLeaveType && <span className="shift-request-badge">{REQUEST_LABELS[paidLeaveType]}</span>}
                               {beforeHire && <span className="shift-request-badge">入社前</span>}
                               {isCompanyOff && <span className="shift-company-off-badge">会社休</span>}
                               <div className="shift-cell__controls">
@@ -3292,7 +3293,7 @@ export function ShiftAdminTab() {
                           ? request.request_type
                           : "";
                         const isBlocked = beforeHire || requestedOff || paidLeaveFull;
-                        const isCompanyOff = paidLeaveFull || (!requestedOff && isCompanyOffAssignment(assignment));
+                        const isCompanyOff = !paidLeaveType && !requestedOff && isCompanyOffAssignment(assignment);
                         const isConfigured = !isBlocked && !isCompanyOff && Boolean(
                           assignment?.shift_label && (
                             assignment.shift_label !== "自由入力" || assignment.start_time || assignment.end_time
@@ -3315,6 +3316,7 @@ export function ShiftAdminTab() {
                                   希望: {REQUEST_LABELS[request.request_type]}
                                 </em>
                               )}
+                              {paidLeaveType && <em>{REQUEST_LABELS[paidLeaveType]}</em>}
                               {beforeHire && <em>入社日前</em>}
                               {isCompanyOff && <em className="shift-company-off-text">会社指定の休み</em>}
                             </span>

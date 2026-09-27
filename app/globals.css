@@ -12680,6 +12680,12 @@ html[data-theme="light"] .board-footer .selected-file {
   color: #ffffff !important;
 }
 
+.confirmed-shift-table__paid-leave,
+.confirmed-shift__legend-paid-leave {
+  background: #0e7490 !important;
+  color: #ffffff !important;
+}
+
 .confirmed-shift-table__off {
   background: #020617 !important;
   color: #ffffff !important;
