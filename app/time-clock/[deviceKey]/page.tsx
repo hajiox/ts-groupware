@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { SosPanel } from "@/components/sos-panel";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Check, Clock3, LogIn, LogOut, RotateCcw, Siren } from "lucide-react";
@@ -172,7 +173,8 @@ export default function TimeClockPage() {
         return;
       }
 
-      setMessage("SOS通知を送信しました");
+      setMessage(payload.message || "SOS受付済み・管理者の確認待ち");
+      window.dispatchEvent(new Event("tsg:sos-refresh"));
       window.setTimeout(() => setMessage(""), 3000);
     } catch {
       setMessage("SOS通知に失敗しました");
@@ -247,6 +249,7 @@ export default function TimeClockPage() {
         </div>
       )}
 
+      {isRoadsideDevice && <SosPanel deviceKey={deviceKey} />}
       {terminalError ? (
         <main className="time-clock-main">
           <section className="time-clock-recovery" role="alert">

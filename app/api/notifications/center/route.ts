@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isManagementUser } from '@/lib/user-roles'
 import { getUserSession } from '@/lib/session'
 import { adminClient } from '@/lib/supabase/admin'
 
@@ -14,7 +15,7 @@ const PRIVATE_NO_STORE_HEADERS = {
 
 type NotificationFeedRow = {
   event_key: string
-  event_type: 'mention' | 'task' | 'reaction' | 'comment'
+  event_type: 'mention' | 'task' | 'reaction' | 'comment' | 'sos'
   source_id: string
   actor_id: string | null
   actor_name: string
@@ -58,7 +59,13 @@ export async function GET(request: NextRequest) {
   const readThrough = typeof state?.read_through === 'string'
     ? Date.parse(state.read_through)
     : Date.now()
-  const items = ((feed || []) as NotificationFeedRow[]).map(item => ({
+  const sosRows: NotificationFeedRow[] = []
+  if (isManagementUser(user)) {
+    const {data: alerts,error: sosError}=await adminClient.from('gw_sos_alerts').select('id,device_name,created_at,status,acknowledged_name,resolved_at').order('created_at',{ascending:false}).limit(100)
+    if(sosError) return json({error:'SOS通知を取得できません'},500)
+    for(const a of alerts||[]) sosRows.push({event_key:`sos:${a.id}`,event_type:'sos',source_id:a.id,actor_id:null,actor_name:a.device_name,actor_picture_url:null,group_name:'道の駅 SOS',title:a.status==='pending'?'SOS 未対応':a.status==='acknowledged'?'SOS 対応中':'SOS 対応完了',summary:a.acknowledged_name?`${a.acknowledged_name}が対応`:'管理者の確認待ち',url:'/sos',created_at:a.created_at,due_date:null,completed_at:a.resolved_at,emoji:null})
+  }
+  const items = ([...((feed || []) as NotificationFeedRow[]),...sosRows].sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at)).slice(0,feedLimit)).map(item => ({
     ...item,
     is_unread: Date.parse(item.created_at) > readThrough,
   }))

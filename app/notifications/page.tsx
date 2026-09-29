@@ -15,7 +15,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import styles from "./notifications.module.css";
 
-type NotificationType = "mention" | "task" | "reaction" | "comment";
+type NotificationType = "mention" | "task" | "reaction" | "comment" | "sos";
 type NotificationFilter = "all" | NotificationType;
 
 type NotificationItem = {
@@ -35,6 +35,7 @@ type NotificationItem = {
 
 const FILTERS: Array<{ value: NotificationFilter; label: string }> = [
   { value: "all", label: "すべて" },
+  { value: "sos", label: "SOS" },
   { value: "mention", label: "メンション" },
   { value: "task", label: "タスク" },
   { value: "reaction", label: "リアクション" },
@@ -42,6 +43,7 @@ const FILTERS: Array<{ value: NotificationFilter; label: string }> = [
 ];
 
 const TYPE_META = {
+  sos: { label: "SOS", Icon: Bell, tone: styles.typeIconComment },
   mention: { label: "メンション", Icon: AtSign, tone: styles.typeIconMention },
   task: { label: "タスク", Icon: ListTodo, tone: styles.typeIconTask },
   reaction: { label: "リアクション", Icon: Heart, tone: styles.typeIconReaction },

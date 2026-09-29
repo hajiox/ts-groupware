@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { SosBanner } from "@/components/sos-banner";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { PullToRefresh } from "@/components/pull-to-refresh";
@@ -204,7 +205,7 @@ export default function RootLayout({
         <ServiceWorkerUpdater />
         <PullToRefresh />
         <div className="app-shell">
-          <main style={{ flex: 1 }}>{children}</main>
+          <main style={{ flex: 1 }}><SosBanner />{children}</main>
           <BottomNav />
         </div>
       </body>

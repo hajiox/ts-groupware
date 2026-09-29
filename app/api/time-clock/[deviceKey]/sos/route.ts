@@ -1,77 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
-import { sendPushNotificationToUser } from '@/lib/web-push'
-
-type DeviceRow = {
-  id: string
-  code?: string | null
-  name?: string | null
-  location?: string | null
+import { dispatchDueSos, getSosDevice, SOS_SELECT } from '@/lib/sos'
+export const dynamic = 'force-dynamic'
+type Context = {params:Promise<{deviceKey:string}>}
+export async function GET(_request:NextRequest,context:Context) {
+  const device=await getSosDevice((await context.params).deviceKey)
+  if(!device) return NextResponse.json({error:'道の駅端末が見つかりません'},{status:404})
+  const {data,error}=await adminClient.from('gw_sos_alerts').select(SOS_SELECT).eq('device_id',device.id).order('created_at',{ascending:false}).limit(1).maybeSingle()
+  if(error) return NextResponse.json({error:'SOS状態を取得できません'},{status:500})
+  return NextResponse.json({alert:data},{headers:{'Cache-Control':'no-store'}})
 }
-
-type AdminUserRow = {
-  id: string
-}
-
-function isRoadsideStationDevice(device: DeviceRow) {
-  const marker = `${device.code || ''} ${device.name || ''} ${device.location || ''}`
-  return marker.includes('michinoeki') || marker.includes('道の駅')
-}
-
-async function getDevice(deviceKey: string) {
-  const { data, error } = await adminClient
-    .from('gw_attendance_devices')
-    .select('id, code, name, location, device_key, is_active')
-    .eq('device_key', deviceKey)
-    .eq('is_active', true)
-    .single()
-
-  if (error || !data) return null
-  return data as DeviceRow
-}
-
-export async function POST(
-  _request: NextRequest,
-  context: { params: Promise<{ deviceKey: string }> },
-) {
-  const { deviceKey } = await context.params
-  const device = await getDevice(deviceKey)
-  if (!device) {
-    return NextResponse.json({ error: 'タイムレコーダー端末が見つかりません' }, { status: 404 })
+export async function POST(request:NextRequest,context:Context) {
+  const device=await getSosDevice((await context.params).deviceKey)
+  if(!device) return NextResponse.json({error:'道の駅端末が見つかりません'},{status:404})
+  const body=await request.json().catch(()=>({}))
+  if(body.action==='heartbeat') {
+    const {data,error}=await adminClient.from('gw_sos_alerts').select('id').eq('device_id',device.id).eq('status','pending').maybeSingle()
+    if(error) return NextResponse.json({error:'SOS状態取得に失敗しました'},{status:500})
+    try { if(data) await dispatchDueSos(data.id) } catch { return NextResponse.json({error:'SOS再通知を確認できません'},{status:503}) }
+    return NextResponse.json({ok:true})
   }
-
-  if (!isRoadsideStationDevice(device)) {
-    return NextResponse.json({ error: 'SOS通知は道の駅端末のみ利用できます' }, { status: 403 })
-  }
-
-  const { data: admins, error: adminError } = await adminClient
-    .from('gw_users')
-    .select('id')
-    .eq('status', 'approved')
-    .in('role', ['executive', 'admin'])
-
-  if (adminError) {
-    return NextResponse.json({ error: adminError.message }, { status: 500 })
-  }
-
-  const adminRows = (admins || []) as AdminUserRow[]
-  const tagBase = `tsg-time-clock-sos-${device.id}-${Date.now()}`
-  const results = await Promise.allSettled(
-    adminRows.map((admin) =>
-      sendPushNotificationToUser(admin.id, {
-        title: 'TSG SOS',
-        body: '道の駅タイムレコーダーでSOSが押されました。',
-        url: '/admin',
-        tag: tagBase,
-        icon: '/icon-192.png?v=20260618-tsg',
-      }),
-    ),
-  )
-
-  const failed = results.filter((result) => result.status === 'rejected').length
-  return NextResponse.json({
-    ok: true,
-    notified: adminRows.length - failed,
-    failed,
-  })
+  const {data,error}=await adminClient.rpc('gw_create_sos',{p_device_id:device.id})
+  if(error || !data) return NextResponse.json({error:'SOSを受付できません。電話で管理者へ連絡してください。'},{status:500})
+  let dispatchError=false
+  try { await dispatchDueSos(data.id) } catch { dispatchError=true }
+  return NextResponse.json({ok:true,alert:data,dispatchError,message:data.status==='acknowledged'?`${data.acknowledged_name||'管理者'}が対応します`:dispatchError?'SOS受付済み。通知処理に遅延があります。電話でも連絡してください。':'SOS受付済み・管理者の確認待ち'})
 }

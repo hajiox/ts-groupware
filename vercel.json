@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/new-hire-company-messages",
       "schedule": "5 0 * * *"
+    },
+    {
+      "path": "/api/cron/sos",
+      "schedule": "* * * * *"
     }
   ]
 }

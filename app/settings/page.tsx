@@ -194,11 +194,12 @@ export default function SettingsPage() {
           applicationServerKey: urlB64ToUint8Array(PUBLIC_VAPID_KEY)
         });
 
-        await fetch('/api/push/subscribe', {
+        const subscribeResponse = await fetch('/api/push/subscribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getDeviceHeaders() },
           body: JSON.stringify({ subscription: subscription.toJSON() }),
         });
+        if (!subscribeResponse.ok) throw new Error('通知端末の登録に失敗しました');
         setPushEnabled(true);
         setPushMessage("✅ この端末で通知を受け取る設定にしました。「テスト通知」で確認してください。");
       } else {
@@ -228,7 +229,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch("/api/push/test", { method: "POST" });
       if (res.ok) {
-        setPushMessage("テスト通知を送信しました");
+        setPushMessage("通知サービスがテスト通知を受け付けました。端末に実際に表示されたか確認してください。");
       } else {
         const data = await res.json().catch(() => null);
         setPushMessage(data?.error || "テスト通知に失敗しました");

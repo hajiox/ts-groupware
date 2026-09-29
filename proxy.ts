@@ -15,7 +15,7 @@ import {
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
-  const isNewHireMessageCron = pathname === '/api/cron/new-hire-company-messages'
+  const isNewHireMessageCron = pathname.startsWith('/api/cron/')
 
   const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim()
   if (process.env.VERCEL_ENV === 'production' && configuredSiteUrl && !isNewHireMessageCron) {
@@ -46,6 +46,8 @@ export function proxy(request: NextRequest) {
     '/placeholder',
   ]
   const publicExactPaths = [
+    '/api/cron/sos',
+    '/api/sos/receipt',
     '/api/cron/new-hire-company-messages', // Uses Vercel CRON_SECRET authentication in the route.
     '/api/integrations/board-post', // Uses integration-secret authentication in the route.
     '/api/integrations/meeting-transcriber/summary',

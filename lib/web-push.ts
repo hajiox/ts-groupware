@@ -38,6 +38,7 @@ type PushPayload = {
   url?: string
   tag?: string
   icon?: string
+  sosReceiptToken?: string
   badgeCount?: number
 }
 
@@ -187,10 +188,10 @@ async function _sendToSubscriptions(userId: string | null, payload: PushPayload)
   await _executeSend(subscriptionRows, payload)
 }
 
-async function _executeSend(subscriptions: any[], payload: PushPayload): Promise<void> {
+async function _executeSend(subscriptions: any[], payload: PushPayload): Promise<PushDeliveryResult> {
   if (!ensureVapidSetup()) {
     console.warn('[WebPush] VAPID鍵が未設定のため送信スキップ')
-    return
+    return {accepted:0,failed:subscriptions.length,outcome:'not_configured'}
   }
 
   const results = await Promise.allSettled(
@@ -206,6 +207,7 @@ async function _executeSend(subscriptions: any[], payload: PushPayload): Promise
           tag: payload.tag || 'ts-groupware-' + Date.now(),
           icon: payload.icon || '/icon-192.png',
           badgeCount,
+          sosReceiptToken: payload.sosReceiptToken,
         })
 
         await webpush.sendNotification(
@@ -248,4 +250,13 @@ async function _executeSend(subscriptions: any[], payload: PushPayload): Promise
 
   const succeeded = results.filter(r => r.status === 'fulfilled').length
   console.log(`[WebPush] 送信完了: ${succeeded}/${subscriptions.length}`)
+  return {accepted:succeeded,failed:failed.length,outcome:failed.length ? (succeeded ? 'partial' : 'failed') : 'accepted'}
+}
+
+export type PushDeliveryResult = { accepted:number; failed:number; outcome:string }
+export async function sendPushNotificationToUserWithResult(userId:string,payload:PushPayload):Promise<PushDeliveryResult> {
+  const {data,error}=await adminClient.from('gw_push_subscriptions').select('id,endpoint,p256dh,auth,user_id').eq('user_id',userId)
+  if(error) return {accepted:0,failed:0,outcome:'subscription_error'}
+  if(!data?.length) return {accepted:0,failed:0,outcome:'no_subscription'}
+  return _executeSend(data,payload)
 }

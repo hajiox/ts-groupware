@@ -1,3 +1,7 @@
+function reportSos(token, stage) {
+  if (!token) return Promise.resolve()
+  return fetch('/api/sos/receipt', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,stage})}).catch(() => {})
+}
 self.addEventListener('push', (event) => {
   if (!event.data) return
 
@@ -10,8 +14,10 @@ self.addEventListener('push', (event) => {
       vibrate: [100, 50, 100],
       tag: data.tag || 'ts-groupware-notification',
       renotify: true,
+      requireInteraction: Boolean(data.sosReceiptToken),
       data: {
         url: data.url || '/',
+        sosReceiptToken: data.sosReceiptToken,
       },
     }
 
@@ -24,7 +30,10 @@ self.addEventListener('push', (event) => {
 
     event.waitUntil(
       Promise.all([
-        self.registration.showNotification(data.title || 'TS Groupware', options),
+        self.registration.showNotification(data.title || 'TS Groupware', options)
+          .then(() => reportSos(data.sosReceiptToken, 'displayed'))
+          .catch(() => reportSos(data.sosReceiptToken, 'failed')),
+        reportSos(data.sosReceiptToken, 'received'),
         badgePromise
       ])
     )
@@ -45,6 +54,7 @@ function getNotificationTargetUrl(rawUrl) {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
+  event.waitUntil(reportSos(event.notification.data?.sosReceiptToken, 'clicked'))
 
   const targetUrl = getNotificationTargetUrl(event.notification.data?.url)
 
