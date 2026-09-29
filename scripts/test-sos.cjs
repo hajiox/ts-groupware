@@ -19,6 +19,15 @@ async function run(){
   const cron=load('app/api/cron/sos/route.ts',{'next/server':reply,'@/lib/sos':{dispatchDueSos:()=>{throw Error('must not run')}}});process.env.CRON_SECRET='mock';assert.equal((await cron.GET({headers:new Headers()})).status,401);
   const receipt=load('app/api/sos/receipt/route.ts',{'next/server':reply,'@/lib/supabase/admin':{adminClient:{}}});assert.equal((await receipt.POST({json:async()=>({token:'bad',stage:'displayed'})})).status,400);
 
+  let status='pending';let changes;const filters={};
+  const chain={update:x=>{changes=x;return chain},eq:(k,v)=>{filters[k]=v;return chain},select:()=>chain,maybeSingle:async()=>{if(filters.status!==status)return {data:null,error:null};status=changes.status;return {data:{id:'test',status},error:null}}};
+  const managerRoute=load('app/api/sos/route.ts',{'next/server':reply,'@/lib/session':{getUserSession:async()=>({id:'manager',role:'admin',display_name:'Test'})},'@/lib/user-roles':{isManagementUser:()=>true},'@/lib/supabase/admin':{adminClient:{from:()=>chain}},'@/lib/sos':{}});
+  const action=a=>managerRoute.POST({json:async()=>({id:'00000000-0000-4000-8000-000000000001',action:a})});
+  assert.equal((await action('resolve')).status,409);
+  assert.equal((await action('acknowledge')).status,200);assert.equal(changes.next_notification_at,null);
+  assert.equal((await action('acknowledge')).status,409);
+  assert.equal((await action('resolve')).status,200);
+  assert.equal((await action('bogus')).status,400);
   const handlers={};const reported=[];let displayed=0;let displayFailure=false;let options;
   vm.runInNewContext(fs.readFileSync('public/sw.js','utf8'),{self:{addEventListener:(n,f)=>handlers[n]=f,registration:{showNotification:async(_title,o)=>{options=o;displayed++;if(displayFailure)throw Error('blocked')}},location:{origin:'https://example.com'}},navigator:{},fetch:async(_url,o)=>{reported.push(JSON.parse(o.body).stage)},console,URL});
   async function event(){const promises=[];handlers.push({data:{json:()=>({title:'SOS',sosReceiptToken:'token',url:'/sos'})},waitUntil:p=>promises.push(p)});await Promise.all(promises)}
