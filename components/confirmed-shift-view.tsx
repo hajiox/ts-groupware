@@ -294,7 +294,6 @@ export function ConfirmedShiftView({
               <span className="confirmed-shift__legend-self">自分</span>
               <span className="confirmed-shift__legend-request">希望休</span>
               <span className="confirmed-shift__legend-off">会社休</span>
-              <span className="confirmed-shift__legend-paid-leave">有給</span>
             </div>
             <div className="confirmed-shift-table-scroll" role="region" aria-label={`${department}の確定シフト表`} tabIndex={0}>
               <table
@@ -370,15 +369,16 @@ export function ConfirmedShiftView({
                           const request = requestMap.get(`${date}:${key}`);
                           const requestedOff = request?.request_type === "day_off" || request?.request_type === "unavailable";
                           const paidLeaveFull = request?.request_type === "paid_leave_full";
-                          const companyOff = !paidLeaveFull && !requestedOff && isCompanyOffAssignment(assignment);
+                          // 公開シフトでは有給全休も会社休と同じ黒い「休」。申請区分は維持する。
+                          const companyOff = paidLeaveFull || (!requestedOff && isCompanyOffAssignment(assignment));
                           const label = requestedOff
                             ? "希望休"
-                            : paidLeaveFull ? "有給" : companyOff ? "休" : assignment?.shift_label || (assignment?.note && !assignment.note.startsWith("__") ? assignment.note : "");
+                            : companyOff ? "休" : assignment?.shift_label || (assignment?.note && !assignment.note.startsWith("__") ? assignment.note : "");
                           const time = assignment ? timeText(assignment.start_time, assignment.end_time) : "";
                           return (
                             <td
                               key={`${date}:${key}`}
-                              className={`${requestedOff ? "confirmed-shift-table__requested" : paidLeaveFull ? "confirmed-shift-table__paid-leave" : companyOff ? "confirmed-shift-table__off" : assignment?.shift_label ? "confirmed-shift-table__working" : ""}${employee.user_id === payload.userId ? " confirmed-shift-table__self" : ""}`}
+                              className={`${requestedOff ? "confirmed-shift-table__requested" : companyOff ? "confirmed-shift-table__off" : assignment?.shift_label ? "confirmed-shift-table__working" : ""}${employee.user_id === payload.userId ? " confirmed-shift-table__self" : ""}`}
                               {...coloredCellProps(date, `user:${employee.user_id || employee.employee_id}`)}
                               title={[employee.employee_name, label, time].filter(Boolean).join(" / ")}
                             >
