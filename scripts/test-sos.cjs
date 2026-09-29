@@ -1,5 +1,5 @@
 const fs=require('node:fs');const vm=require('node:vm');const assert=require('node:assert/strict');const ts=require('typescript');
-function load(file,deps){const module={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText,{module,exports:module.exports,require:n=>{if(!(n in deps))throw Error(n);return deps[n]},console,process,Date,URL});return module.exports}
+function load(file,deps){const testModule={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText,{module:testModule,exports:testModule.exports,require:n=>{if(!(n in deps))throw Error(n);return deps[n]},console,process,Date,URL});return testModule.exports}
 const reply={NextResponse:{json:(body,options)=>({body,status:options?.status||200})}};
 async function run(){
   let sent=0;let subscriptions=[];let subscriptionError=null;let fail=false;
