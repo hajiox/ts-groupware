@@ -38,13 +38,13 @@ export function SosPanel({history=false,deviceKey}:{history?:boolean;deviceKey?:
     try {const response=await fetch('/api/sos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,action})});const data=await response.json();if(!response.ok)throw new Error(data.error);await load();window.dispatchEvent(new Event('tsg:sos-refresh'))}catch(e){setError(e instanceof Error?e.message:'更新失敗')}finally{setBusy(false)}
   }
   if(!allowed&&!error) return history?<p>{loaded?'管理者でログインしてください。':'SOSを読み込み中…'}</p>:null
+  if(!history&&!deviceKey&&!hasPending) return null
   return <section style={{margin:'12px auto',maxWidth:850,padding:alerts.length||history||error?16:0}} aria-label="SOS状況">
-    {allowed&&!deviceKey&&!history&&<p><Link href="/sos">SOS履歴・通知登録状況</Link></p>}
-    {allowed&&!deviceKey&&needsRegistration&&<p role="alert" style={{padding:12,border:'2px solid #f59e0b'}}>SOSを受け取る通知端末が未登録です。本人のスマホで<Link href="/settings">通知設定を開き、通知を許可して登録</Link>してください。</p>}
+    {history&&allowed&&!deviceKey&&needsRegistration&&<p role="alert" style={{padding:12,border:'2px solid #f59e0b'}}>SOSを受け取る通知端末が未登録です。本人のスマホで<Link href="/settings">通知設定を開き、通知を許可して登録</Link>してください。</p>}
     {error&&<p role="alert" style={{color:'#ef4444'}}>{error}</p>}
     {history&&<><h1>道の駅 SOS・通知履歴</h1><p>未対応の場合は2分経過後に再通知します。「対応します」で再通知を停止し、対応後に「対応完了」を押してください。</p><p>端末画面が閉じている場合も定期処理で再通知します（実行のタイミングにより最大約1分遅れることがあります）。</p><p><Link href="/settings">通知設定・受信テスト</Link> ／ <Link href="/notifications">通知一覧</Link></p><ul>{managers.map(m=><li key={m.id}>{m.name}：{m.subscriptions?`${m.subscriptions}端末登録`:'通知端末未登録・本人の端末で通知設定が必要'}</li>)}</ul></>}
     {history&&!alerts.length&&<p>この機能の導入後、SOSの記録はありません。</p>}
-    {alerts.map(a=><article key={a.id} style={{background:a.status==='pending'?'#7f1d1d':'#163a35',color:'#fff',border:'2px solid '+(a.status==='pending'?'#ef4444':'#34d399'),borderRadius:12,padding:16,marginBottom:12}}>
+    {alerts.filter(a=>history||deviceKey||a.status==='pending').map(a=><article key={a.id} style={{background:a.status==='pending'?'#7f1d1d':'#163a35',color:'#fff',border:'2px solid '+(a.status==='pending'?'#ef4444':'#34d399'),borderRadius:12,padding:16,marginBottom:12}}>
       <strong>{a.status==='pending'?'🚨 SOS 未対応':a.status==='acknowledged'?'SOS 対応中':'SOS 対応完了'} — {a.device_name}</strong>
       <p>{new Date(a.created_at).toLocaleString('ja-JP')}</p>
       <p>{a.status==='pending'?'受付済み・管理者の確認待ち':`${a.acknowledged_name||'管理者'}が${a.status==='resolved'?'対応を完了しました':'対応します'}`}</p>

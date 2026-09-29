@@ -1,2 +1,2 @@
-import { SosPanel } from '@/components/sos-panel'
-export default function SosPage(){return <SosPanel history/>}
+import { redirect } from "next/navigation"
+export default function SosPage(){redirect("/admin?tab=sos")}

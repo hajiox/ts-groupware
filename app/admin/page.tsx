@@ -35,6 +35,7 @@ import { PaidLeaveAdminTab } from "@/components/paid-leave-admin-tab";
 import { SafeLineAvatar } from "@/components/safe-line-avatar";
 import { ShiftAdminTab } from "@/components/shift-admin-tab";
 import { AppraisalAdminTab } from "@/components/appraisal-admin-tab";
+import { SosPanel } from "@/components/sos-panel";
 import { PledgeAdminTab } from "@/components/pledge-admin-tab";
 import {
   RoleAccessIcons,
@@ -660,7 +661,7 @@ type PayrollDiffPayload = {
   rows: PayrollDiffRow[];
 };
 
-type Tab = "users" | "groups" | "attendance" | "leave" | "shifts" | "appraisals" | "pledges" | "payroll" | "hr" | "manual";
+type Tab = "sos" | "users" | "groups" | "attendance" | "leave" | "shifts" | "appraisals" | "pledges" | "payroll" | "hr" | "manual";
 type WorkStyle = "regular_5d_8h" | "regular_6d_6_5h" | "part_time_under_29_5h" | "full_time_part" | "officer";
 
 const WORK_STYLE_OPTIONS: { value: WorkStyle; label: string; detail: string }[] = [
@@ -5214,6 +5215,7 @@ export default function AdminPage() {
           else if (nextPermissions.canUsePersonalLeave) setTab("leave");
           else if (nextPermissions.canUseManual) setTab("manual");
         }
+        if (isManagementRole(getEffectiveUserRole(data.user)) && new URLSearchParams(window.location.search).get("tab") === "sos") setTab("sos");
         setAuthChecking(false);
       })
       .catch(() => router.replace("/groups"));
@@ -5256,6 +5258,7 @@ export default function AdminPage() {
     { id: "shifts", label: "シフト", visible: !!permissions?.canManageAttendance, roles: managementRoles, Icon: CalendarDays },
     { id: "appraisals", label: "査定", visible: !!permissions?.canManageUsers, roles: managementRoles, Icon: FileText },
     { id: "pledges", label: "誓約", visible: !!permissions?.canManageUsers, roles: managementRoles, Icon: FileSignature },
+    { id: "sos", label: "SOS", visible: isManagementRole(getEffectiveUserRole(currentUser)), roles: managementRoles, Icon: AlertTriangle },
     { id: "payroll", label: "給与・労務", visible: !!permissions?.canViewPayroll, roles: executiveRoles, Icon: Banknote },
     { id: "hr", label: "人事管理", visible: !!permissions?.canViewPayroll, roles: executiveRoles, Icon: ContactRound },
     {
@@ -5308,6 +5311,7 @@ export default function AdminPage() {
           </nav>
         </section>
 
+        {tab === "sos" && isManagementRole(getEffectiveUserRole(currentUser)) && <SosPanel history />}
         {tab === "users" && permissions?.canManageUsers && <UsersTab currentUser={currentUser} />}
         {tab === "groups" && permissions?.canManageGroups && <GroupsTab />}
         {tab === "attendance" && permissions?.canManageAttendance && <AttendanceAdminTab currentUser={currentUser} />}
