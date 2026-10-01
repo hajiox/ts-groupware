@@ -1780,6 +1780,13 @@ export function ShiftAdminTab() {
       }
       const reloaded = await load(selectedPeriod.id, selectedPeriod.department);
       if (!reloaded) throw new Error("保存は完了しましたが、再読込に失敗しました。画面を再読み込みしてください");
+      if (finalize && (
+        result?.finalized !== true ||
+        savedPayloadRef.current?.selectedPeriod?.id !== selectedPeriod.id ||
+        savedPayloadRef.current?.selectedPeriod?.status !== "confirmed"
+      )) {
+        throw new Error("シフトの確定状態を確認できませんでした。画面を再読み込みして状態を確認してください");
+      }
       setMessage(finalize
         ? `シフトを確定保存し、所属スタッフ${Number(result?.confirmationAlerts || 0)}名へ通知しました`
         : "シフトを一時保存しました");

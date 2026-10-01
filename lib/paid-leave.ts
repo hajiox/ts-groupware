@@ -585,10 +585,11 @@ export function calculateOrdinaryPaidLeaveWage(input: {
     throw new RangeError('leaveDays must be 0.5 or 1')
   }
 
-  const payableMinutes = scheduledMinutes * leaveDays
+  const wageMinutes = scheduledMinutes * leaveDays
   return {
-    payableMinutes,
-    amount: Math.round((payableMinutes / 60) * hourlyRate),
+    // Stored attendance minutes are integers; keep wage rounding independent.
+    payableMinutes: Math.round(wageMinutes),
+    amount: Math.round((wageMinutes / 60) * hourlyRate),
   }
 }
 
