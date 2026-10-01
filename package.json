@@ -14,6 +14,8 @@
     "test:tsa-direct-message-notification": "node scripts/test-tsa-direct-message-notification.cjs",
     "test:account-read-status": "node scripts/test-account-read-status.cjs",
     "test:attendance-deviations": "node --experimental-strip-types scripts/test-attendance-deviations.mjs",
+    "test:attendance-monthly-note-api": "node scripts/test-attendance-monthly-note-api.cjs",
+    "test:attendance-monthly-note-export": "node scripts/test-attendance-monthly-note-export.cjs",
     "test:new-hire-company-messages": "node --experimental-strip-types scripts/test-new-hire-company-messages.mjs",
     "test:new-hire-pledges": "node scripts/test-new-hire-pledge-cron.cjs",
     "test:confirmed-shift-roster": "node --experimental-strip-types scripts/test-confirmed-shift-roster.mjs",

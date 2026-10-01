@@ -52,6 +52,14 @@ type DailyNoteRow = {
   updated_at: string
 }
 
+type MonthlyNoteRow = {
+  id: string
+  user_id: string
+  note_month: string
+  memo: string
+  updated_at: string
+}
+
 const THIRTY_MINUTE_BREAK_NOTE = '30分休憩'
 
 function getJstDate(date = new Date()) {
@@ -250,6 +258,7 @@ export async function GET(request: NextRequest) {
     { data: users, error: usersError },
     punchResult,
     monthlyCheckResult,
+    monthlyNoteResult,
     dailyNoteResult,
     bereavementResult,
   ] = await Promise.all([
@@ -277,6 +286,10 @@ export async function GET(request: NextRequest) {
       .from('gw_attendance_monthly_checks')
       .select('id, check_month, user_id, checked_by, checked_at, note')
       .eq('check_month', cleanMonthStart(dateFrom)),
+    adminClient
+      .from('gw_attendance_monthly_notes')
+      .select('id, user_id, note_month, memo, updated_at')
+      .eq('note_month', cleanMonthStart(dateFrom)),
     (() => {
       let query = adminClient
         .from('gw_attendance_daily_notes')
@@ -307,6 +320,7 @@ export async function GET(request: NextRequest) {
     || usersError
     || punchResult.error
     || monthlyCheckResult.error
+    || monthlyNoteResult.error
     || dailyNoteResult.error
     || bereavementResult.error
   if (dbError) {
@@ -319,6 +333,8 @@ export async function GET(request: NextRequest) {
     .filter((punch) => !punch.user_id || eligibleUserIds.has(punch.user_id))
   const monthlyCheckRows = ((monthlyCheckResult.data || []) as MonthlyCheckRow[])
     .filter((check) => eligibleUserIds.has(check.user_id))
+  const monthlyNoteRows = ((monthlyNoteResult.data || []) as MonthlyNoteRow[])
+    .filter((note) => eligibleUserIds.has(note.user_id) && (!filterUserId || note.user_id === filterUserId))
   const dailyNoteRows = ((dailyNoteResult.data || []) as DailyNoteRow[])
     .filter((note) => eligibleUserIds.has(note.user_id))
   const bereavementRows = (bereavementResult.data || [])
@@ -360,6 +376,7 @@ export async function GET(request: NextRequest) {
     })),
     paidLeaveDays,
     monthlyChecks: monthlyCheckRows,
+    monthlyNotes: monthlyNoteRows,
     dailyNotes: dailyNoteRows,
     bereavementDays: bereavementRows,
     summary: {
@@ -736,6 +753,42 @@ export async function PATCH(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true, touched })
+  }
+
+  if (body.action === 'monthly_memo_save') {
+    const targetUserId = typeof body.user_id === 'string' ? body.user_id.trim() : ''
+    const month = typeof body.month === 'string' ? body.month.trim() : ''
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId)
+      || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)
+      || Number(month.slice(0, 4)) < 1900
+      || typeof body.memo !== 'string' || body.memo.length > 2000
+      || /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/.test(body.memo)) {
+      return NextResponse.json({ error: 'スタッフ、対象月、メモ（2000文字以内）を確認してください' }, { status: 400 })
+    }
+    const expectedUpdatedAt = body.expected_updated_at
+    if (expectedUpdatedAt !== null && (typeof expectedUpdatedAt !== 'string'
+      || !/^\d{4}-\d{2}-\d{2}T/.test(expectedUpdatedAt) || !Number.isFinite(Date.parse(expectedUpdatedAt)))) {
+      return NextResponse.json({ error: '保存済みメモを再読み込みしてください' }, { status: 400 })
+    }
+    const noteMonth = `${month}-01`
+    const eligibility = await isAttendanceUserEligibleForRange(targetUserId, noteMonth, monthEndFromStart(noteMonth))
+    if (eligibility.error) return NextResponse.json({ error: eligibility.error.message }, { status: 500 })
+    if (!eligibility.eligible) return NextResponse.json({ error: 'スタッフが見つかりません' }, { status: 404 })
+
+    const { data: saved, error: saveError } = await adminClient.rpc('gw_save_attendance_monthly_note', {
+      p_user_id: targetUserId,
+      p_note_month: noteMonth,
+      p_memo: body.memo.replace(/\r\n?/g, '\n').trim(),
+      p_actor_id: user!.id,
+      p_expected_updated_at: expectedUpdatedAt,
+    })
+    if (saveError) {
+      if (saveError.code === '40001') return NextResponse.json({
+        error: '他の管理者がメモを更新しました。入力内容を控えてから再読み込みしてください。',
+      }, { status: 409 })
+      return NextResponse.json({ error: saveError.message }, { status: 500 })
+    }
+    return NextResponse.json({ success: true, monthlyNote: saved?.[0] || null, checked: false })
   }
 
   if (body.action === 'monthly_staff_check') {

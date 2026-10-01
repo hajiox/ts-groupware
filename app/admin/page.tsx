@@ -153,6 +153,13 @@ type AttendanceAdminPayload = {
   users: User[];
   punches: AttendancePunch[];
   paidLeaveDays?: PaidLeaveAttendanceDay[];
+  monthlyNotes?: {
+    id: string;
+    user_id: string;
+    note_month: string;
+    memo: string;
+    updated_at: string;
+  }[];
   dailyNotes?: {
     id: string;
     user_id: string;
@@ -1686,6 +1693,13 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
   const [monthlyUserId, setMonthlyUserId] = useState("");
   const [monthlyDrafts, setMonthlyDrafts] = useState<Record<string, MonthlyAttendanceDraft>>({});
   const [monthlyBaseline, setMonthlyBaseline] = useState<Record<string, string>>({});
+  const [monthlyMemo, setMonthlyMemo] = useState<{
+    userId: string;
+    month: string;
+    memo: string;
+    baseline: string;
+    updatedAt: string | null;
+  } | null>(null);
   const [monthlyLoading, setMonthlyLoading] = useState(true);
   const [monthlySaving, setMonthlySaving] = useState(false);
   const [monthlyDeletingDate, setMonthlyDeletingDate] = useState<string | null>(null);
@@ -1946,8 +1960,20 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
     if (!payload || !userId) {
       setMonthlyDrafts({});
       setMonthlyBaseline({});
+      setMonthlyMemo(null);
       return;
     }
+
+    const savedMemo = (payload.monthlyNotes || []).find((note) => (
+      note.user_id === userId && note.note_month === `${month}-01`
+    ));
+    setMonthlyMemo({
+      userId,
+      month,
+      memo: savedMemo?.memo || "",
+      baseline: savedMemo?.memo || "",
+      updatedAt: savedMemo?.updated_at || null,
+    });
 
     const nextDrafts: Record<string, MonthlyAttendanceDraft> = {};
     const nextBaseline: Record<string, string> = {};
@@ -1995,6 +2021,7 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
   }
 
   function handleMonthlyMonthChange(value: string) {
+    if (!confirmDiscardMonthlyChanges()) return;
     setMonthlyMonth(value);
     setMonthlySelectedDocScannerIds([]);
     setMonthlyDocScannerDraftIds([]);
@@ -2005,6 +2032,8 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
   }
 
   function handleMonthlyDepartmentChange(department: UserDepartment) {
+    if (department === monthlyDepartment) return;
+    if (!confirmDiscardMonthlyChanges()) return;
     setMonthlyDepartment(department);
     loadMonthlyAttendance(monthlyMonth, department, "");
   }
@@ -2024,6 +2053,39 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
       const draft = monthlyDrafts[date];
       return draft && monthlyDraftSignature(draft) !== monthlyBaseline[date];
     });
+  }
+
+  function confirmDiscardMonthlyChanges() {
+    return (!monthlyMemoChanged && monthlyChangedDates.length === 0)
+      || confirm("未保存の変更があります。保存せずに切り替えますか？");
+  }
+
+  async function saveMonthlyMemo() {
+    if (!monthlyMemoChanged || !monthlyMemo) return true;
+    const res = await fetch("/api/admin/attendance", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "monthly_memo_save",
+        user_id: monthlyMemo.userId,
+        month: monthlyMemo.month,
+        memo: monthlyMemo.memo,
+        expected_updated_at: monthlyMemo.updatedAt,
+      }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || !payload.monthlyNote) {
+      alert(payload.error || "全体メモの保存に失敗しました");
+      return false;
+    }
+    setMonthlyMemo({
+      ...monthlyMemo,
+      memo: payload.monthlyNote.memo,
+      baseline: payload.monthlyNote.memo,
+      updatedAt: payload.monthlyNote.updated_at,
+    });
+    setMonthlyCheckedUserIds((ids) => ids.filter((id) => id !== monthlyMemo.userId));
+    return true;
   }
 
   async function saveMonthlyDraft(date: string) {
@@ -2066,21 +2128,28 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
 
   async function handleSaveMonthlyAll() {
     const dates = changedMonthlyDates();
-    if (dates.length === 0 || monthlySaving) return;
+    if ((dates.length === 0 && !monthlyMemoChanged) || monthlySaving) return;
     setMonthlySaving(true);
-    for (const date of dates) {
-      const ok = await saveMonthlyDraft(date);
-      if (!ok) {
-        setMonthlySaving(false);
-        return;
+    try {
+      for (const date of dates) {
+        const ok = await saveMonthlyDraft(date);
+        if (!ok) return;
       }
+      if (!await saveMonthlyMemo()) return;
+      loadMonthlyAttendance(monthlyMonth, monthlyDepartment, monthlyUserId);
+    } catch {
+      alert("通信エラーで保存できませんでした。入力内容を残しています。再度保存してください。");
+    } finally {
+      setMonthlySaving(false);
     }
-    loadMonthlyAttendance(monthlyMonth, monthlyDepartment, monthlyUserId);
-    setMonthlySaving(false);
   }
 
   async function handleDeleteMonthlyDay(date: string) {
     if (!monthlyUserId || monthlySaving || monthlyDeletingDate) return;
+    if (monthlyMemoChanged) {
+      alert("未保存の全体メモがあります。先に保存してから日別勤怠を削除してください。");
+      return;
+    }
     const userName = selectedMonthlyUser?.real_name || selectedMonthlyUser?.display_name || "選択中スタッフ";
     if (!confirm(`${userName} の ${date} の勤怠データを削除しますか？\n給与計算対象から外れますが、履歴は残ります。`)) return;
 
@@ -2107,6 +2176,10 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
   }
 
   function downloadMonthlyExcel(department: UserDepartment) {
+    if (monthlyMemoChanged || monthlyChangedDates.length > 0) {
+      alert("未保存の変更があります。先に保存してからExcelを出力してください。");
+      return;
+    }
     const params = new URLSearchParams({
       month: monthlyMonth,
       department,
@@ -2116,7 +2189,7 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
 
   async function toggleMonthlyStaffChecked(userId: string) {
     const isChecked = monthlyCheckedUserIds.includes(userId);
-    if (!isChecked && userId === monthlyUserId && monthlyChangedDates.length > 0) {
+    if (!isChecked && userId === monthlyUserId && (monthlyChangedDates.length > 0 || monthlyMemoChanged)) {
       alert("未保存の変更があります。先に保存してからチェック完了にしてください。");
       return;
     }
@@ -2147,6 +2220,10 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
 
   async function handleSubmitMonthlyToLaborOffice() {
     if (monthlySubmitting) return;
+    if (monthlyMemoChanged || monthlyChangedDates.length > 0) {
+      alert("未保存の変更があります。先に保存してから労務士へ提出してください。");
+      return;
+    }
     if (!monthlyAllChecked) {
       alert(`未チェックのスタッフがいます。全員チェック済みにしてから送付してください。\n未チェック: ${monthlyTotalUsers - monthlyCheckedCount}名`);
       return;
@@ -2455,6 +2532,9 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
   const selectedMonthlyUser = monthlyDepartmentUsers.find((user) => user.id === monthlyUserId) || null;
   const monthlyDates = datesInMonth(monthlyMonth);
   const monthlyChangedDates = changedMonthlyDates();
+  const monthlyMemoChanged = Boolean(monthlyMemo && monthlyMemo.userId === monthlyUserId
+    && monthlyMemo.month === monthlyMonth
+    && monthlyMemo.memo.replace(/\r\n?/g, "\n").trim() !== monthlyMemo.baseline);
   const monthlyAllUsers = (monthlyData?.users || []).filter((user) => USER_DEPARTMENTS.includes(user.department));
   const monthlyValidUserIds = new Set(monthlyAllUsers.map((user) => user.id));
   const monthlyCheckedSet = new Set(monthlyCheckedUserIds.filter((id) => monthlyValidUserIds.has(id)));
@@ -2558,13 +2638,18 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
               className="form-input"
               value={monthlyMonth}
               onChange={(event) => handleMonthlyMonthChange(event.target.value)}
+              disabled={monthlySaving || monthlyLoading || monthlySubmitting}
             />
           </label>
-          <button type="button" className="admin-btn-outline" onClick={() => loadMonthlyAttendance()} disabled={monthlyLoading}>
+          <button type="button" className="admin-btn-outline" onClick={() => {
+            if (confirmDiscardMonthlyChanges()) loadMonthlyAttendance();
+          }} disabled={monthlyLoading || monthlySaving || monthlySubmitting}>
             更新
           </button>
           <div className="admin-monthly-save-state">
-            {monthlyChangedDates.length > 0 ? `未保存 ${monthlyChangedDates.length}日` : "保存済み"}
+            {monthlyChangedDates.length > 0 || monthlyMemoChanged
+              ? `未保存 ${monthlyChangedDates.length}日${monthlyMemoChanged ? "・全体メモ" : ""}`
+              : "保存済み"}
           </div>
         </div>
 
@@ -2756,7 +2841,7 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
               type="button"
               className="admin-btn-accent"
               onClick={handleSubmitMonthlyToLaborOffice}
-              disabled={monthlyLoading || monthlySubmitting}
+              disabled={monthlyLoading || monthlySaving || monthlySubmitting}
             >
               {monthlySubmitting ? "送信中..." : monthlyAllChecked ? "労務士へ提出" : "未チェックあり"}
             </button>
@@ -2773,7 +2858,7 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
                 type="button"
                 className="admin-btn-outline"
                 onClick={() => downloadMonthlyExcel(department)}
-                disabled={monthlyLoading}
+                disabled={monthlyLoading || monthlySaving || monthlySubmitting}
               >
                 {department}をダウンロード
               </button>
@@ -2788,7 +2873,7 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
               type="button"
               className={`admin-monthly-department${monthlyDepartment === department ? " admin-monthly-department--active" : ""}`}
               onClick={() => handleMonthlyDepartmentChange(department)}
-              disabled={monthlyLoading}
+              disabled={monthlyLoading || monthlySaving || monthlySubmitting}
             >
               <span>{departmentIcon(department)}</span>
               <strong>{department}</strong>
@@ -2814,7 +2899,10 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
                     key={user.id}
                     type="button"
                     className={`admin-monthly-staff__button${monthlyUserId === user.id ? " admin-monthly-staff__button--active" : ""}${checked ? " admin-monthly-staff__button--checked" : ""}`}
-                    onClick={() => setMonthlyUserId(user.id)}
+                    onClick={() => {
+                      if (user.id === monthlyUserId || confirmDiscardMonthlyChanges()) setMonthlyUserId(user.id);
+                    }}
+                    disabled={monthlyLoading || monthlySaving || monthlySubmitting}
                   >
                     <Avatar user={user} size={32} />
                     <span>{user.real_name || user.display_name}</span>
@@ -2836,7 +2924,8 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
                   type="button"
                   className="btn-primary"
                   onClick={handleSaveMonthlyAll}
-                  disabled={monthlySaving || monthlyChangedDates.length === 0 || !selectedMonthlyUser}
+                  disabled={monthlySaving || monthlyLoading || monthlySubmitting
+                    || (monthlyChangedDates.length === 0 && !monthlyMemoChanged) || !selectedMonthlyUser}
                 >
                   {monthlySaving ? "保存中..." : "変更をまとめて保存"}
                 </button>
@@ -2853,10 +2942,29 @@ function AttendanceAdminTab({ currentUser }: { currentUser: User | null }) {
                   type="button"
                   className={`admin-btn-outline${selectedMonthlyChecked ? " admin-monthly-check-btn--done" : ""}`}
                   onClick={() => toggleMonthlyStaffChecked(selectedMonthlyUser.id)}
-                  disabled={monthlySaving}
+                  disabled={monthlySaving || monthlyLoading || monthlySubmitting}
                 >
                   {selectedMonthlyChecked ? "チェック済みを解除" : "このスタッフをチェック完了"}
                 </button>
+              </div>
+            ) : null}
+
+            {selectedMonthlyUser && monthlyMemo?.userId === monthlyUserId && monthlyMemo.month === monthlyMonth ? (
+              <div className="admin-monthly-overall-memo">
+                <label htmlFor="monthly-overall-memo">このスタッフ全体のメモ（労務士へ送付）</label>
+                <p>{monthlyMonth.replace("-", "年")}月の個人シート上部に表示されます。変更を保存したら、もう一度確認チェックを付けてください。</p>
+                <textarea
+                  id="monthly-overall-memo"
+                  className="form-input"
+                  aria-label="このスタッフ全体のメモ（労務士へ送付）"
+                  rows={3}
+                  maxLength={2000}
+                  value={monthlyMemo.memo}
+                  onChange={(event) => setMonthlyMemo({ ...monthlyMemo, memo: event.target.value })}
+                  placeholder="日別の備考とは別に、このスタッフの月全体について伝える内容"
+                  disabled={monthlySaving || monthlyLoading || monthlySubmitting}
+                />
+                <small>{monthlyMemo.memo.length}/2000文字 · 上の「変更をまとめて保存」で保存</small>
               </div>
             ) : null}
 

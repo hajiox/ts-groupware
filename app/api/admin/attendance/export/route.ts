@@ -47,6 +47,12 @@ type DailyNoteRow = {
   memo: string
 }
 
+type MonthlyNoteRow = {
+  user_id: string
+  note_month: string
+  memo: string
+}
+
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土']
 const THIRTY_MINUTE_BREAK_NOTE = '30分休憩'
 
@@ -141,6 +147,37 @@ function row(cells: unknown[], styleId?: string) {
   }).join('')}</Row>`
 }
 
+function monthlyMemoRow(memo: string | undefined) {
+  if (!memo) return ''
+  const normalizedMemo = memo.replace(/\r\n?/g, '\n')
+  const lines: string[] = []
+  let line = ''
+  let lineWidth = 0
+  // Merged Excel cells do not reliably auto-fit. Use short, fixed-height rows
+  // so even a 2000-character memo remains visible across printed pages.
+  for (const character of normalizedMemo) {
+    if (character === '\n') {
+      lines.push(`${line}\n`)
+      line = ''
+      lineWidth = 0
+      continue
+    }
+    const width = character === '\t' ? 4 : (character.codePointAt(0) || 0) <= 0x7f ? 1 : 2
+    if (lineWidth + width > 40) {
+      lines.push(line)
+      line = ''
+      lineWidth = 0
+    }
+    line += character
+    lineWidth += width
+  }
+  if (line) lines.push(line)
+  return lines.map((text, index) => {
+    const escapedMemo = xmlEscape(text).replace(/\n/g, '&#10;')
+    return `<Row ss:AutoFitHeight="0" ss:Height="${index === 0 ? 30 : 24}"><Cell ss:StyleID="MonthlyMemo"><Data ss:Type="String">${index === 0 ? '個人全体のメモ' : ''}</Data></Cell><Cell ss:MergeAcross="4" ss:StyleID="MonthlyMemo"><Data ss:Type="String">${escapedMemo}</Data></Cell></Row>`
+  }).join('')
+}
+
 function stripBreakMemoPrefix(value: string | null | undefined, hasThirtyMinuteBreak: boolean) {
   const memo = (value || '').trim()
   if (!hasThirtyMinuteBreak) return memo
@@ -205,6 +242,7 @@ function workbookXml(options: {
   employeesByUserId: Map<string, EmployeeRow>
   punchesByUserDate: Map<string, PunchRow[]>
   dailyNotesByUserDate: Map<string, string>
+  monthlyNotesByUserId: Map<string, string>
   bereavementDates: Set<string>
   paidLeaveByUserDate: Map<string, PaidLeaveAttendanceDay>
   dates: string[]
@@ -216,6 +254,7 @@ function workbookXml(options: {
       row(['所属', options.department]),
       row(['氏名', displayName(user)]),
       row(['社員NO', employee?.employee_code || '']),
+      monthlyMemoRow(options.monthlyNotesByUserId.get(user.id)),
       row([]),
       row(['日付', '曜日', '出勤', '退勤', '30分休憩', '労務士への連絡備考'], 'Header'),
       ...options.dates.map((date) => {
@@ -263,6 +302,10 @@ function workbookXml(options: {
    <Font ss:Bold="1"/>
    <Interior ss:Color="#D9EAF7" ss:Pattern="Solid"/>
   </Style>
+  <Style ss:ID="MonthlyMemo">
+   <Font ss:Size="10"/>
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+  </Style>
  </Styles>
  ${worksheets}
 </Workbook>`
@@ -287,7 +330,7 @@ export async function GET(request: NextRequest) {
     .map((user) => ({ ...user, display_name: displayName(user), department: normalizeUserDepartment(user.department) }))
 
   const userIds = userRows.map((user) => user.id)
-  const [punchesResult, dailyNotesResult, bereavementResult] = await Promise.all([
+  const [punchesResult, dailyNotesResult, monthlyNotesResult, bereavementResult] = await Promise.all([
     userIds.length
       ? adminClient
         .from('gw_attendance_punches')
@@ -308,6 +351,13 @@ export async function GET(request: NextRequest) {
       : Promise.resolve({ data: [], error: null }),
     userIds.length
       ? adminClient
+        .from('gw_attendance_monthly_notes')
+        .select('user_id, note_month, memo')
+        .in('user_id', userIds)
+        .eq('note_month', startDate)
+      : Promise.resolve({ data: [], error: null }),
+    userIds.length
+      ? adminClient
         .from('gw_workday_resolutions')
         .select('user_id, work_date')
         .in('user_id', userIds)
@@ -320,6 +370,7 @@ export async function GET(request: NextRequest) {
 
   if (punchesResult.error) return NextResponse.json({ error: punchesResult.error.message }, { status: 500 })
   if (dailyNotesResult.error) return NextResponse.json({ error: dailyNotesResult.error.message }, { status: 500 })
+  if (monthlyNotesResult.error) return NextResponse.json({ error: monthlyNotesResult.error.message }, { status: 500 })
   if (bereavementResult.error) return NextResponse.json({ error: bereavementResult.error.message }, { status: 500 })
 
   const employeesByUserId = new Map<string, EmployeeRow>()
@@ -346,6 +397,10 @@ export async function GET(request: NextRequest) {
   const dailyNotesByUserDate = new Map<string, string>()
   for (const note of (dailyNotesResult.data || []) as DailyNoteRow[]) {
     dailyNotesByUserDate.set(`${note.user_id}:${note.work_date}`, note.memo)
+  }
+  const monthlyNotesByUserId = new Map<string, string>()
+  for (const note of (monthlyNotesResult.data || []) as MonthlyNoteRow[]) {
+    monthlyNotesByUserId.set(note.user_id, note.memo)
   }
   const bereavementDates = new Set(
     (bereavementResult.data || []).map((row) => `${row.user_id}:${row.work_date}`),
@@ -374,6 +429,7 @@ export async function GET(request: NextRequest) {
     employeesByUserId,
     punchesByUserDate,
     dailyNotesByUserDate,
+    monthlyNotesByUserId,
     bereavementDates,
     paidLeaveByUserDate,
     dates: eachDate(startDate, endDate),
