@@ -22,6 +22,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'post_id と emoji が必要です' }, { status: 400 })
   }
 
+  const { data: post, error: postError } = await adminClient
+    .from('gw_posts')
+    .select('id, user_id, group_id, content, parent_id')
+    .eq('id', post_id)
+    .maybeSingle()
+  if (postError) return NextResponse.json({ error: postError.message }, { status: 500 })
+  if (!post) return NextResponse.json({ error: '投稿が見つかりません' }, { status: 404 })
+
+  const { data: membership, error: membershipError } = await adminClient
+    .from('gw_group_members')
+    .select('user_id')
+    .eq('group_id', post.group_id)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  if (membershipError) return NextResponse.json({ error: membershipError.message }, { status: 500 })
+  if (!membership) return NextResponse.json({ error: 'このグループに参加していません' }, { status: 403 })
+
   // 既存チェック
   const { data: existing } = await adminClient
     .from('gw_reactions')
@@ -50,12 +67,6 @@ export async function POST(request: NextRequest) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
-
-    const { data: post } = await adminClient
-      .from('gw_posts')
-      .select('id, user_id, group_id, content, parent_id')
-      .eq('id', post_id)
-      .single()
 
     if (post && post.user_id !== user.id) {
       const { data: group } = await adminClient

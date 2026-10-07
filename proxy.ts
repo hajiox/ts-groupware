@@ -46,6 +46,7 @@ export function proxy(request: NextRequest) {
     '/placeholder',
   ]
   const publicExactPaths = [
+    '/api/data/v1/execute', // Dedicated scoped Bearer authentication is enforced by the route.
     '/api/cron/sos',
     '/api/sos/receipt',
     '/api/cron/new-hire-company-messages', // Uses Vercel CRON_SECRET authentication in the route.
@@ -58,7 +59,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // セッション Cookie の存在チェック
+  // セッション Cookie の署名とサーバー側の期限を検証する。
   const session = request.cookies.get(SESSION_COOKIE_NAME)
   const parsedSession = parseSessionCookieValue(session?.value)
   if (!parsedSession || isSessionExpired(parsedSession)) {

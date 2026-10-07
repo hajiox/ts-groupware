@@ -1,0 +1,8 @@
+# Merge this section only. Replace the installation path; keep credentials out.
+[mcp_servers.tsg_data]
+command = "node"
+args = ["C:/tools/tsg-mcp/src/server.mjs"]
+env_vars = ["TSG_DATA_API_TOKEN", "TSG_DATA_API_BASE_URL"]
+startup_timeout_sec = 15
+tool_timeout_sec = 45
+enabled = true

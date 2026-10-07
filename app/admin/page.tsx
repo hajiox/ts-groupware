@@ -36,6 +36,7 @@ import { SafeLineAvatar } from "@/components/safe-line-avatar";
 import { ShiftAdminTab } from "@/components/shift-admin-tab";
 import { AppraisalAdminTab } from "@/components/appraisal-admin-tab";
 import { SosPanel } from "@/components/sos-panel";
+import { DataConnectionsPanel } from "@/components/data-connections-panel";
 import { PledgeAdminTab } from "@/components/pledge-admin-tab";
 import {
   RoleAccessIcons,
@@ -668,7 +669,7 @@ type PayrollDiffPayload = {
   rows: PayrollDiffRow[];
 };
 
-type Tab = "sos" | "users" | "groups" | "attendance" | "leave" | "shifts" | "appraisals" | "pledges" | "payroll" | "hr" | "manual";
+type Tab = "sos" | "users" | "groups" | "attendance" | "leave" | "shifts" | "appraisals" | "pledges" | "payroll" | "hr" | "manual" | "data-connections";
 type WorkStyle = "regular_5d_8h" | "regular_6d_6_5h" | "part_time_under_29_5h" | "full_time_part" | "officer";
 
 const WORK_STYLE_OPTIONS: { value: WorkStyle; label: string; detail: string }[] = [
@@ -5324,6 +5325,7 @@ export default function AdminPage() {
           else if (nextPermissions.canUseManual) setTab("manual");
         }
         if (isManagementRole(getEffectiveUserRole(data.user)) && new URLSearchParams(window.location.search).get("tab") === "sos") setTab("sos");
+        if (data.user.role === "executive" && new URLSearchParams(window.location.search).get("tab") === "data-connections") setTab("data-connections");
         setAuthChecking(false);
       })
       .catch(() => router.replace("/groups"));
@@ -5369,6 +5371,7 @@ export default function AdminPage() {
     { id: "sos", label: "SOS", visible: isManagementRole(getEffectiveUserRole(currentUser)), roles: managementRoles, Icon: AlertTriangle },
     { id: "payroll", label: "給与・労務", visible: !!permissions?.canViewPayroll, roles: executiveRoles, Icon: Banknote },
     { id: "hr", label: "人事管理", visible: !!permissions?.canViewPayroll, roles: executiveRoles, Icon: ContactRound },
+    { id: "data-connections", label: "外部Codex接続", visible: currentUser?.role === "executive", roles: executiveRoles, Icon: Link2 },
     {
       id: "manual",
       label: "マニュアル",
@@ -5429,6 +5432,7 @@ export default function AdminPage() {
         {tab === "pledges" && permissions?.canManageUsers && <PledgeAdminTab />}
         {tab === "payroll" && permissions?.canViewPayroll && <PayrollLaborAdminTab />}
         {tab === "hr" && permissions?.canViewPayroll && <HRAdminTab currentUser={currentUser} />}
+        {tab === "data-connections" && currentUser?.role === "executive" && <DataConnectionsPanel />}
         {tab === "manual" && permissions?.canUseManual && (
           <ManualAdminTab canManageAttendance={permissions.canManageAttendance} />
         )}

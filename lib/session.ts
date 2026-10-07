@@ -41,8 +41,8 @@ export async function getUserSession() {
   user.display_name = user.real_name || user.display_name
   user.picture_url = normalizeLinePictureUrl(user.picture_url)
 
-  // Keep active sessions alive for 30 days and migrate legacy v2 values to the
-  // current plain user-id format. Read-only server contexts can reject writes.
+  // Renew only a verified, unexpired signed session. Unsigned legacy cookies
+  // require LINE or device authentication again and must never be upgraded here.
   try {
     cookieStore.set(SESSION_COOKIE_NAME, createSessionCookieValue(parsedSession.userId), getSessionCookieOptions())
   } catch {

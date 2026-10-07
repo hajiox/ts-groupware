@@ -3,12 +3,16 @@ export const USER_ROLES = ['executive', 'admin', 'member'] as const
 export type UserRole = (typeof USER_ROLES)[number]
 
 export type UserRoleLike = {
+  id?: string | null
   role?: string | null
   display_name?: string | null
   real_name?: string | null
 }
 
-export const EXECUTIVE_NAMES = ['佐藤正彦', '佐藤ちさと'] as const
+const FIXED_EXECUTIVE_USER_IDS = new Set([
+  'afbc01a8-3963-43c4-8005-7146bf9ff850',
+  '7457839f-aba2-4169-95e5-ca88f70841c7',
+])
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
   executive: '役員',
@@ -30,16 +34,11 @@ export function isUserRole(value: unknown): value is UserRole {
 }
 
 export function isFixedExecutiveUser(user: UserRoleLike | null | undefined) {
-  if (!user) return false
-  const executiveNames = EXECUTIVE_NAMES.map(normalizeUserName)
-  return [user.real_name, user.display_name]
-    .map(normalizeUserName)
-    .filter(Boolean)
-    .some((name) => executiveNames.includes(name as (typeof executiveNames)[number]))
+  return Boolean(user?.id && FIXED_EXECUTIVE_USER_IDS.has(user.id))
 }
 
 export function getEffectiveUserRole(user: UserRoleLike | null | undefined): UserRole {
-  if (user?.role === 'executive' || isFixedExecutiveUser(user)) return 'executive'
+  if (user?.role === 'executive') return 'executive'
   if (user?.role === 'admin') return 'admin'
   return 'member'
 }
