@@ -48,13 +48,17 @@ export async function GET(request: NextRequest) {
     state,
     scope: 'profile openid',
   })
+  // Home Screen web apps can lose the session when auto login switches to LINE
+  // and returns to Safari. Offer LINE's browser authentication as a fallback.
+  const browserLogin = request.nextUrl.searchParams.get('browser') === '1'
+  if (browserLogin) params.set('disable_auto_login', 'true')
 
   const authUrl = `https://access.line.me/oauth2/v2.1/authorize?${params.toString()}`
 
   await logAuthEvent({
     event: 'line_start_redirect',
     flowId,
-    detail: `redirect_uri=${redirectUri}`,
+    detail: `redirect_uri=${redirectUri};browser_login=${browserLogin}`,
     request,
   })
 

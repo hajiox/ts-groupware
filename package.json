@@ -10,6 +10,7 @@
     "google:gmail-token": "node scripts/google-gmail-oauth-token.mjs",
     "lint": "eslint .",
     "test:session-security": "node scripts/test-session-security.cjs",
+    "test:pwa-login": "node scripts/test-pwa-login.cjs",
     "test:reaction-access": "node scripts/test-reaction-access.cjs",
     "test:user-role-security": "node scripts/test-user-role-security.cjs",
     "test:data-api-http": "node scripts/test-data-api-http.cjs",

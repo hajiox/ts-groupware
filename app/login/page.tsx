@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://v0-line-blush.vercel.app";
 const siteOrigin = new URL(siteUrl).origin;
@@ -26,8 +26,19 @@ function LoginContent() {
   const error = searchParams.get('error');
   const nextPath = getSafeNextPath(searchParams.get('next'));
   const lineLoginUrl = nextPath ? `${baseLineLoginUrl}?next=${encodeURIComponent(nextPath)}` : baseLineLoginUrl;
+  const browserLoginUrl = `${lineLoginUrl}${nextPath ? '&' : '?'}browser=1`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(lineLoginUrl)}`;
   const [checkingSession, setCheckingSession] = useState(!error);
+  const [isIosHomeScreen, setIsIosHomeScreen] = useState(false);
+  const browserLoginStarted = useRef(false);
+
+  useEffect(() => {
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = (navigator as Navigator & { standalone?: boolean }).standalone === true
+      || window.matchMedia('(display-mode: standalone)').matches;
+    setIsIosHomeScreen(isIos && standalone);
+  }, []);
 
   const errorMessages: Record<string, string> = {
     cancelled: 'ログインがキャンセルされました',
@@ -44,20 +55,33 @@ function LoginContent() {
   const errorMessage = error ? errorMessages[error] || `エラーが発生しました (${error})` : null;
 
   useEffect(() => {
-    if (error) return;
-
     let cancelled = false;
-    fetch('/api/auth/me')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
+    let inFlight = false;
+    const checkSession = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        const response = await fetch('/api/auth/me', { cache: 'no-store' });
+        const data = response.ok ? await response.json() : null;
         if (!cancelled && data?.user) router.replace('/groups');
-      })
-      .finally(() => {
+      } catch {
+        // A connection failure must leave the login controls available.
+      } finally {
+        inFlight = false;
         if (!cancelled) setCheckingSession(false);
-      });
+      }
+    };
+    const onResume = () => {
+      if (browserLoginStarted.current && document.visibilityState === 'visible') void checkSession();
+    };
+    if (!error) void checkSession();
+    window.addEventListener('pageshow', onResume);
+    document.addEventListener('visibilitychange', onResume);
 
     return () => {
       cancelled = true;
+      window.removeEventListener('pageshow', onResume);
+      document.removeEventListener('visibilitychange', onResume);
     };
   }, [error, router]);
 
@@ -140,6 +164,15 @@ function LoginContent() {
         </span>
         LINEでログイン
       </a>
+
+      {isIosHomeScreen && (
+        <div style={{ marginTop: 16, textAlign: 'center', fontSize: 14 }}>
+          <a href={browserLoginUrl} onClick={() => { browserLoginStarted.current = true; }}>
+            ログインが繰り返される場合はこちら
+          </a>
+          <p className="login-note">LINEアプリへ切り替えずに認証します。</p>
+        </div>
+      )}
 
       <details className="login-qr-details">
         <summary>スマホで開くQR</summary>

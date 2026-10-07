@@ -198,6 +198,31 @@ async function main() {
   assert.equal(cookieWrites.length, beforeForgedDevice)
   fixture.status = 'approved'
 
+  process.env.LINE_CHANNEL_ID = 'test-only-line-channel'
+  process.env.LINE_CHANNEL_SECRET = 'test-only-line-channel-secret'
+  const lineStartRoute = load('app/api/auth/line/route.ts', {
+    'next/server': { NextResponse: FakeNextResponse },
+    '@/lib/auth-log': { getAuthFlowId: () => 'test', logAuthEvent: async () => {} },
+    '@/lib/line-oauth-state': { createLineOAuthState: () => 'test-only-signed-state' },
+  })
+  for (const browser of [null, '1', 'true', '0', 'https://attacker.invalid']) {
+    const url = new URL('/api/auth/line', 'https://test.invalid')
+    url.searchParams.set('next', '/admin?tab=shifts')
+    if (browser !== null) url.searchParams.set('browser', browser)
+    url.searchParams.set('redirect_uri', 'https://attacker.invalid')
+    const response = await lineStartRoute.GET(request(url.pathname + url.search))
+    const destination = new URL(response.headers.get('Location'))
+    assert.equal(destination.origin, 'https://access.line.me')
+    assert.equal(destination.searchParams.get('disable_auto_login'), browser === '1' ? 'true' : null)
+    assert.equal(destination.searchParams.get('redirect_uri'), 'https://test.invalid/api/auth/line/callback')
+    assert.equal(destination.searchParams.get('state'), 'test-only-signed-state')
+    assert.equal(destination.searchParams.get('scope'), 'profile openid')
+    assert.ok(response.cookieWrites.some(([action, name, value, options]) => action === 'set'
+      && name === 'line_oauth_next' && value === '/admin?tab=shifts' && options.httpOnly && options.sameSite === 'lax'))
+    assert.ok(!response.cookieWrites.some(([action, name]) => action === 'set' && name === cookie.SESSION_COOKIE_NAME),
+      'Starting browser authentication must not create a user session')
+  }
+
   const lineRoute = load('app/api/auth/line/callback/route.ts', {
     'next/server': { NextResponse: FakeNextResponse }, '@/lib/session-cookie': cookie,
     '@/lib/supabase/admin': { adminClient },
