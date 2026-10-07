@@ -13,6 +13,7 @@
     "test:reaction-access": "node scripts/test-reaction-access.cjs",
     "test:user-role-security": "node scripts/test-user-role-security.cjs",
     "test:data-api-http": "node scripts/test-data-api-http.cjs",
+    "test:drive-access-boundary": "node scripts/test-drive-access-boundary.cjs",
     "test:recipe-price-notification": "node scripts/test-recipe-price-notification.cjs",
     "test:recipe-product-name-notification": "node scripts/test-recipe-product-name-notification.cjs",
     "test:tsa-direct-message-notification": "node scripts/test-tsa-direct-message-notification.cjs",
