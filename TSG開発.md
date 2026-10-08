@@ -1,3 +1,63 @@
+## 2026-10-08 管理職専用CodexMTGとTSA PCの改修窓口
+
+管理職4名とTSG君だけが参加する固定Chat CodexMTGを作成。役職・承認状態と参加者を同期し、一覧・本文・リアクション・管理APIでも現在の管理職権限を確認する。PCごとのハッシュ保存キー（90日、有効PC名をサーバー固定）を新設し、TSG君の本文には登録済みPC名を付ける。管理職の依頼はDBへ保存し、担当PC TSAだけが取得・実行する。他PCのCodexは連携・報告・調査のみ。Codex-originの提案は人間の改修承認にはならず、報告からの無限返信を防ぐ。
+
+専用の新規ephemeral CLI workerを追加し、実hostname・登録PC・人間の改修許可を確認。TSG/TSA/DocScannerのGitHub正規repoを固定し、最新既定branchからのfresh cloneと変更前後の検証を要求する。同時実行1件、180秒lease・30秒更新、編集・削除・権限喪失・実行結果不明は確認待ちとし、自動で同じ改修を再実行しない。CLIの既存モデル・ログインを維持し、互換性のない共通MCP設定を専用起動から除く。読取専用は秘密なしSkill本文を限定入力として渡す。
+
+本番DBにmigration 202610080001と履歴を適用し、Chat5名・一般スタッフ0・匿名直接読取不可を確認。main 20704f1、本番初回 dpl_CoqFHaAZuDH6whZKX8z6FK78bB4p READY・固定alias/commit一致。開設案内は専用APIから1件だけ投稿し、同一キー再送はduplicate、TSG君とPC prefix固定、本番表示とブラウザーエラー0を確認。匿名API401、owner claim空、SQL隔離テスト・HTTP/既存アクセス境界テスト・型・全体lint0errors/既存27warnings・89route build成功。
+
+通知は情報を含まないDB Realtime wakeを受け、断線時は2分間隔・再接続時に回収する。実機確認でSupabaseがpayloadへ通知配送用UUID idを自動付加する仕様を特定し、空payloadまたはそのUUIDだけを許容するよう受信判定を修正した。業務本文・投稿ID・PC名・秘密をwakeへ入れない。PC停止中はキューに残り、Windowsログイン後の専用Scheduled Taskが取得する。統合モニタは既存の1画面へ追加し、稼働中のTSA worker4件は変更しない。
+
+worker回帰16件・対象lint・PowerShell構文成功。本番のDB起点wakeを実受信し、owner実CLIとreadonly実CLIのstructured completedを確認した。正規3repoのfresh cloneからowner動作を確認し、すべてcleanを維持した。401/403後は認証待ちで通信・再接続を止め、設定/CLIの非0終了も自動起動ループにしない。他PCの実接続はPC登録後の作業として残る。隔離Postgresは停止済みだが、合成fixtureだけの一時フォルダ削除は自動承認レビューのblocked by policyにより残置した。
+## 2026-10-07 iPhoneホーム画面TSGの再ログイン調査と補助経路
+
+ユーザーがiPhoneホーム画面版でLINEログイン後も再認証になると報告。今日の59bbd03によるUUID/v2→署名v3切替で各browserの初回失効は意図したもの。繰り返しは想定外。本番iOSログはLINE認証成功・開始Cookie不在/署名state有効で、PWA/Safariの保存先分離と整合。実機保存状態は未実測。PCの既存ログインは保持。
+
+fresh clone C:/作業用/jobs/tsg-login-persistence-20261007（HEAD=origin/main clean）からiOS standalone限定の『ログインが繰り返される場合はこちら』を追加。browser=1完全一致だけで公式disable_auto_login=true、通常LINE経路とnext/固定callback/stateを維持。補助クリック後のpageshow/visibleだけauth/me再確認、inFlight/cleanup/失敗ループ防止。署名鍵、30日保持、承認判定、Cookieの保護、DBは変更なし。旧Cookie復活なし。
+
+main 7680e5f948a04c14a6b227bd6bdc60cb72b3d9e1、本番dpl_Fd1apaj2W6pGtCpx3Snyge2PS49N READY・alias一致。OAuth通常/補助パラメーター、実TSXの6端末/復帰/error/cleanupのVMテスト、認証/API/添付拒否、型、lint0エラー27既存警告、build89ページ成功。独立レビュー済み。本番HTTPの固定callback/補助auto-login無効/開始時session未発行/匿名auth-me401と、Chrome通常画面・セッション保持・ブラウザエラー0を確認。
+
+iPhone実機はユーザーへホーム画面TSG更新→補助認証→閉じて再起動の確認を依頼中で、解消済みとは断定しない。補助リンクはPWA内で押す。操作メモ C:/作業用/TSG_データAPI_MCP_20261007.md。公式根拠 WebKit Safari17.2のインストール後データ分離、LINE Loginのdisable_auto_login仕様。TSA/DocScanner変更・DM送信なし。
+
+## 2026-10-07 Next.js脆弱性修正と添付認証境界の確認
+
+fresh clone C:/作業用/jobs/tsg-next-security-20261007 でmain一致・cleanを確認し、Next.js/eslint-config-nextを16.2.4から16.3.8へ固定更新。更新42d3f6c、添付認証拒否テスト追加の最終d2bcb3cb37ec4d68a9c4c6f8bf9936329fd3e4eeをmainへpush。本番dpl_Eh9yMPu46ARfLaAQvfcuH5R2FUHb READY・固定alias/commit一致。DB/業務データは変更なし。
+
+GHSA-p293-qw3h-jr36 / GHSA-2xp9-vwfh-vxw4 / GHSA-vcvr-r3jv-pc5jを解消。production audit critical3→0・Next指摘25→0、全依存もcritical0/Next0。他依存のproduction high15/moderate8、全依存high24/moderate9は既存残件。型、認証/API/role/reaction/シフトfocused、lint0エラー27警告、Next16.3.8 build89ページ成功。lockfile差分の独立レビュー済み。
+
+新API匿名/無効Bearer401/no-store、旧API/添付DELETE等の匿名・キー形式のみ307を本番16ケースで確認し、最終デプロイでも再確認。LINE再ログイン済み本人で掲示板20件・タスク・外部Codex管理UIを確認し、最終ブラウザエラー0。匿名/専用キー/無関係Bridge headerの旧添付関連48拒否とmember拒否を隔離VMテスト化、実DB/Drive/ネットワーク呼出なし。
+
+旧添付所有権は未修正の別件。管理者だけでなくapproved一般社員も、参加先の自投稿/Chat添付へ既知DriveIDを登録して自投稿を削除すると、サーバー資格情報が削除可能なファイルを削除し得る。匿名・専用MCP単独からは到達不可。新MCP14操作には添付/Driveがなく公開attachments空固定。image-proxyも上流へDrive資格情報を付けない。既存uploadはanyone:reader仕様のため公開URL所持者の閲覧は元々可能。実削除/実投稿での再現は未実施。
+
+詳細・残件・最終commit/deployは C:/作業用/TSG_データAPI_MCP_20261007.md。独立MCP配布ZIPはNextを同梱せず変更不要。TSA/DocScanner変更と元Chatへのメッセージ送信なし。
+
+## 2026-10-07 外部Codex向けTSGデータAPI・MCP
+
+main `59bbd03c767850534d575f39ff9b83e54573eeab`、Vercel `dpl_4iTsDW6KGBvi6wSFsn1sZRrKR3ZC` READY・本番alias一致。fresh clone `C:/作業用/jobs/tsg-data-api-mcp-20261007` から検証・commit・push。Supabase migration `202610070001` を適用し履歴登録済み。
+
+`POST /api/data/v1/execute` と独立STDIO `integrations/tsg-mcp` の固定14ツールを実装。許可した掲示板/フロア、固定投稿ナレッジ、本人タスク、接続専用下書きが対象。専用キーはhashのみ保存、役員本人が管理から発行/失効しscope・掲示板・現在の所属/roleを毎回検証。CAS、冪等性、上限、変更前後の監査を実装。公開はprepare→人間が管理画面で固定差分承認→commit、10分・version束縛。Push/FAX/email等を暗黙送信せず、HR/給与/勤怠/休暇/権限/任意SQL等はMCP範囲外。既存TSG君と正当Bridge認証は維持。
+
+既存入口の監査で署名なしUUID/v2セッション、表示名での役員推定、device署名の公開固定fallback、リアクション所属未検証、匿名SELECT可能なposts/tasks、匿名の強更新12RPCを確認し修正。署名付きv3セッション（production/previewは独立したSESSION_SIGNING_SECRET）と保存role判定へ変更、対象4テーブルと12RPCをservice_role専用にした。通常UIはserverAPI経由で維持。旧Cookieは通常LINE/登録端末での再ログインが必要。
+
+HTTP/認証/role/reaction/既存査定・掲示板focused tests、TypeScript、lint（エラー0・既存22警告）、build成功。実DBのDDL+fixture全ROLLBACK検証と適用後回帰、MCP6テスト成功。本番HTTPS/MCP実通信でread、非公開下書き、CAS/冪等拒否、scope拒否、旧API分離、失効401を確認。検証接続2件は失効済み、実投稿/実タスク/通知は変更なし。検証専用下書きと監査のみ保持。アプリソース/DB/Bridge鍵を含まないZIPを別フォルダーへ展開し、依存導入と5テスト成功（app policy対照1件は独立配布でskip）を確認。
+
+操作メモ `C:/作業用/TSG_データAPI_MCP_20261007.md`、配布 `C:/作業用/TSG_MCP_20261007_59bbd03.zip`。本人LINE再ログイン後、Chromeの佐藤正彦で本番管理UIの発行項目/安全な既定選択/未入力発行不可/失効済2接続/承認欄/操作履歴16件を確認。目視レイアウト正常・ブラウザエラー0。認証Cookieの捏造/移行はしていない。将来旧添付削除を外部公開する場合は任意DriveIDの所有権境界を先に修正する必要がある（今回MCPは添付操作を提供しない）。TSA/DocScanner変更・元Chatへのメッセージ送信なし。
+
+## 2026-10-01 製造シフトの半休を含む確定保存を修正
+
+半休の有給計算で平均501分×0.5が250.5分になり、整数の保存処理が失敗。丸め後も実勤務240分との大小比較で止まることを確認。保存分は既存方針どおり四捨五入し、支給金額は丸め前の時間から従来どおり計算する。DBの比較はordinary_wageかつthree_month_average_hoursの場合だけ免除し、他の制約を維持。画面もAPIの確定フラグと再読込した同一期間のconfirmedを確認してから成功表示する。
+
+TSG main fe4bcee、本番dpl_5wRsBuuWanV95pZzHco6qRzmw27G Ready・固定alias一致。Supabase migration 202610010002適用・履歴修復済み。実コードの賃金/同期/確定API/画面テスト、DB一時表の制約テスト、架空スタッフによる実RPCの0.5日承認・確定・隔離通知1件・再送重複防止をROLLBACKで検証。型、lint（既存23警告・0エラー）、89ルートbuild成功。本番管理画面で対象期間と確定保存ボタンを確認。
+
+実際の10月前半シフトは入力済み117件を保持し、管理者の再確定を待つ。渡部瞳へTSG君から修正完了と再読み込み後の確定保存をDMし、201・宛先/投稿者/保存本文一致を確認。実シフトの確定や実スタッフの有給残数を検証のために変更していない。
+
+## 2026-10-01 労務士提出用の個人全体メモ
+- 管理→勤怠の月末修正画面に、スタッフ・対象月別の全体メモ（2000文字）を追加。日別備考から独立保存し、確認解除でも保持。変更をまとめて保存し、内容変更時は確認チェックを解除する。
+- service_role限定の月次メモテーブル/RPCで保存と確認解除を同一トランザクション化。更新日時の競合を409で拒否し、未保存のまま提出・Excel出力や画面切替による消失を防ぐ。
+- 添付Excelの各個人シート上部へ全体メモを追加。長文・改行・空行・絵文字は明示した行高の複数行で表示し、メモ読込失敗時は生成を停止。提出メールも同じExcel生成経路を使用する。
+- 新規API/Excelテスト、DBロールバックテスト、型検査、Lint（既存23警告）、89ルートbuildに成功。マイグレーション202610010001を適用・履歴登録。本番画面の入力状態・空欄復元を確認し、実際の勤怠メモはテスト保存していない。
+- 新規クローン C:\作業用\jobs\tsg-labor-employee-memo-20261001 の main acecd24 をpush。本番dpl_4UcsTpFWzr5iHtxr4oMGUbKSocyR READY、v0-line-blush.vercel.appの割当を確認。依頼された使い方DMはTSG君API201・宛先/本文一致で送信済み。労務士への実送信はテストしていない。
+
 ## 2026-09-23 役員向け管理者査定画面の閲覧
 - 役員の査定画面へ「管理者の査定画面を確認」を追加し、管理者を選ぶと、その管理者に割り当てられたメンバー、未着手・下書き・完了の進捗、10項目の評価・備考、面談確認5項目を管理者本人と同じ並びで確認できるようにした。
 - 他の管理者を表示している間は「役員確認モード・閲覧のみ」と明示し、査定日・評価・備考・面談チェックの変更と保存を無効化する。役員が管理者名義の査定を誤って更新することを防ぎ、管理者本人の既存入力・保存動作は変更しない。
@@ -1445,10 +1505,21 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - 確定シフトは有給全休を「有給」と専用色で表示し、凡例を追加。希望休・会社休の区別を維持する。DB・休暇残数・勤務割当の変更なし。
 - 対象ESLint、型チェック、全体Lint（既存警告23件・エラー0件）、シフト名簿／希望対象除外テスト、87ページのビルド成功。
 
-## 2026-09-29 公開確定シフトの有給全休を黒い「休」へ復元
-- 9/27の変更で社員向け確定シフトにも有給の専用表示を追加したが、ユーザー指定は公開シフト上では会社指定休と同じ黒い「休」。ConfirmedShiftViewのみその表示へ戻し、希望休の優先判定は維持。
-- 有給申請・残数・管理者編集表示・勤務人数の集計は変更しない。DB変更なし。半休の既存扱いも維持。
+## 2026-09-29 道の駅 SOS 永続化・2分後再通知
+- GitHub mainの新規cloneから実装。gw_sos_alerts / gw_sos_deliveriesとRPCを追加し、端末単位の連打重複防止、原子的な送信対象確保、2分経過後の再通知、管理者の対応開始・完了を実装。
+- 管理者の全画面に未対応表示と履歴リンク、/sosに宛先登録数・送信/受信/表示状況、通知一覧にSOSを追加。道の駅にも担当者名を表示。通知一覧の既読化では再通知は止まらない。
+- 本人端末未登録の管理者へ設定案内。Pushの成功はサービス受付として表示し、Service Worker受信・表示処理成功・クリックを別途記録。本人が読んだ証明とはしない。旧Service Workerの端末は更新後から受信記録対応。
+- foregroundは10秒周期で期限確認、Vercel cronは毎分。2分未満には再送しない。画面停止時は最大約1分のスケジューラ遅延があり得る。対応開始と既に送信中の通知が交差した場合、その一通は到着し得る。
+- DBトランザクション内で連打、再実行、2分境界、対応開始で停止、完了後再発信、DB権限を検証しrollback。Push未登録/未設定/失敗、SW受信/表示失敗、API権限・状態遷移テスト成功。型・ビルド成功、全体Lintは既存警告23件のみ。
+- 本番migration適用・GitHub push済み。Vercel自身の/api/cron/sos実行がHTTP 200（vercel-cron/1.0）を確認。本番CRON_SECRETはsensitiveでenv pullでは値を取得できない。既存キーは変更しない。
+- 実機通知許可・表示確認は本人のスマホ操作が必要。自動電話は既存連携なし、サービス/宛先/未対応時間未確定で未実装。過去SOSの端末表示・対応状況は復元していない。
 
-## 2026-09-29 SOS履歴の入口を管理メニューへ移動
-- 全画面上部の常設SOS履歴リンクを削除し、管理画面にSOSタブを追加。/sosは/admin?tab=sosへ転送し既存通知リンクを維持。
-- 通常画面のSOS表示は未対応の緊急警告に限定。履歴・対応中/完了・通知端末の登録状況は管理メニュー内で確認する。道の駅の状態表示、2分後再通知、管理者権限は維持。
+## 2026-09-29 社員向け確定シフトの有給全休を黒い「休」へ復元
+- 9/27変更で公開確定シフトに有給専用表示が追加されたため、ユーザー指示で会社指定休と同じ黒い「休」へ復元。希望休の優先判定は維持。変更はConfirmedShiftViewの表示のみで、有給申請・残数・管理編集表示・集計・半休は変更なし。
+- 新規clone、commit bcbbbb1、本番dpl_FQvKfcoF9ebJrtEbkN1Ka4NdnbKT READY。型・Lint（既存23警告のみ）・既存シフトテスト・本番build成功。
+- 本番9/28道の駅の有給全休セルが「休」、背景rgb(2,6,23)、会社休クラスであることと希望休表示を確認。藤田さんへTSG君の冪等DM APIで原因・修正・再保存不要を報告し201/本文/宛先照合済み。
+
+## 2026-09-29 SOS常設入口を管理へ移動
+- ユーザー指定により全画面上部のSOS履歴リンクを削除。管理メニューに通常のSOSタブを追加し、/sosは/admin?tab=sosへ転送。
+- 通常画面では未対応SOSの警告だけ表示する。通知登録状況・履歴・対応中/完了は管理内へ集約。道の駅端末の状態表示・2分後再通知・権限チェックを維持。
+- fresh cloneからcommit db8fc44。型・全体Lint（既存23警告のみ）・本番build成功、GitHub push済み。DB変更・メッセージ送信なし。

@@ -15,9 +15,15 @@ Start-ScheduledTask -TaskName 'TSG Codex MTG Worker'
 
 実際の通知確認には `--probe-wake` を使います。既定30秒以内に空wakeを受信すれば直ちに回数だけを返して成功し、届かなければ `ok:false` / `wakeCount:0` と終了コード1を返します。確認中に管理者が明示許可した開設案内を投稿する方法なら、テスト専用投稿を追加する必要はありません。
 
-Realtimeの `codex-mtg-v1` / `wake` は空の通知だけを受け取ります。通知には本文・個人情報・ジョブIDを含めず、起動・再接続時と通知時に認証APIからclaimします。通知断に備えて2分ごとに回収し、同時ジョブは1件だけです。サーバーの180秒leaseを30秒ごとに更新します。leaseが不明になったら自分のCodexプロセスを停止し、コード変更を自動再実行しません。
+Realtimeの `codex-mtg-v1` / `wake` は空の通知、またはSupabaseが自動追加するUUIDの `id` だけを持つ通知を受け取ります。それ以外のフィールド・本文・個人情報・ジョブIDは受理しません。通知のidは起床の合図にしか使わず、起動・再接続時と通知時に認証APIからclaimします。通知断に備えて2分ごとに回収し、同時ジョブは1件だけです。サーバーの180秒leaseを30秒ごとに更新します。leaseが不明になったら自分のCodexプロセスを停止し、コード変更を自動再実行しません。
 
-コード編集は実hostname・登録PC名がともに `TSA`、サーバーの `canExecuteCode` がtrue、human originかつ `allowCodeChange` がtrueの場合だけです。他PCやCodex-originは `read-only` sandboxです。`--ignore-user-config` でユーザー共通のMCP等の実行設定を読み込まず、アプリ/プラグインも無効にします。既存 `CODEX_HOME/config.toml` のトップレベル `model` だけを取り出し、その値を `--model` で明示して選択を保持します。モデル未設定・不正時は推測せず起動を止めます。設定ファイルは変更せず、同じ `CODEX_HOME` を渡すため既存ログインを使います。AGENTS.md・Skillsは有効です。コード改修はhigh、読取専用はmediumです。各ジョブは専用Skillと新しい `codex exec --ephemeral` を使い、対象repoを最新既定branchからfreshcloneして一致・cleanを検証します。TSGは入口とし、TSA/DocScannerが固定allowlistに未登録なら対象追加待ちを明示して止まります。直近50投稿から該当依頼の周辺最大10件・12000文字だけを引用資料として使い、scopeや実行権限を増やしません。依頼本文やCLI stdout/stderrをログ・モニタへ保存しません。専用キーなどの秘密を子プロセス環境へ渡しません。
+APIが401/403を返した場合は認証対応待ちとし、以後のAPI呼出・Realtime再接続を止めます。モニタは `waiting_for_user` を表示し、登録とキーを確認した管理者による手動再起動が必要です。通常の通信断は2分の回収処理で復旧を試みます。設定・CLIなどのエラーでworkerが非0終了した場合、ランチャーは15秒ごとの再起動を行わず終了します。
+
+コード編集は実hostname・登録PC名がともに `TSA`、サーバーの `canExecuteCode` がtrue、human originかつ `allowCodeChange` がtrueの場合だけです。他PCやCodex-originは `read-only` sandboxと明示した `approval_policy="never"` で動き、書込権限へ切り替えません。`--ignore-user-config` でユーザー共通のMCP等の実行設定を読み込まず、アプリ/プラグインも無効にします。既存 `CODEX_HOME/config.toml` からトップレベル `model` と、Windowsの場合は既存 `[windows] sandbox="elevated"` だけを取り出して起動引数へ明示します。モデル未設定・不正、Windowsでelevatedが未設定の場合は推測せず起動を止め、別sandboxへ自動fallbackしません。設定ファイル・ACL・sandbox setupは変更せず、同じ `CODEX_HOME` を渡すため既存ログインを使います。AGENTS.md・Skillsは有効です。コード改修はhigh、読取専用はmediumです。
+
+各ジョブは新しい `codex exec --ephemeral` を使い、対象repoを最新既定branchからfreshcloneして一致・cleanを検証します。コード改修では秘密なしの専用Skill本文だけを、そのジョブの `.agents/skills/tsg-codex-mtg/SKILL.md` へコピーして参照します。コピー先はworkspaceの権限を継承し、秘密設定フォルダのACLを広げたり、設定・キー・journalをコピーしたりしません。読取専用ではworkerが固定の専用Skillパスから読み込んだ本文をpromptへ直接渡し、Skillの再読取りを要求しません。本文は16KiB以内のstrict UTF-8に限定し、秘密キー形式やNULを含むものは起動前に拒否します。提案評価にrepo証拠が必要で読取りを拒否された場合は `needs_operator` とし、権限を緩めたり根拠を推測したりしません。
+
+TSGは入口とし、TSA/DocScannerが固定allowlistに未登録なら対象追加待ちを明示して止まります。直近50投稿から該当依頼の周辺最大10件・12000文字だけを引用資料として使い、scopeや実行権限を増やしません。依頼本文やCLI stdout/stderrをログ・モニタへ保存しません。専用キーなどの秘密を子プロセス環境へ渡しません。
 
 `job-state.json` は秘密leaseを含むため、private設定と同じアクセス制限で扱います。実行途中に再起動した場合は `needs_operator` のまま止まり、同じAI作業を再開しません。送信待ちの完了結果が残る場合だけ、同じjob/lease/status/summaryで完了APIへ再送します。状態不明・期限切れ・CONFLICTは管理者がクラウドのジョブとfreshclone内の変更を確認して処置します。確認前にjournalや作業cloneを消さないでください。
 

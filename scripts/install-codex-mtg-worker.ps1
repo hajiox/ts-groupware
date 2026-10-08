@@ -64,6 +64,7 @@ $runtimeDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $nodePath = (Get-Command node.exe -ErrorAction Stop).Source
 while ($true) {
   & $nodePath (Join-Path $runtimeDir 'worker.mjs') --config (Join-Path $runtimeDir 'worker.config.json')
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   Start-Sleep -Seconds 15
 }
 '@

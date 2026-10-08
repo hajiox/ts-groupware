@@ -66,9 +66,24 @@ export function configuredModel(codexHome) {
   return match[1] || match[2]
 }
 
-export function buildCodexArgs(config, workDir, resultPath, schemaPath, allowCodeChange) {
+export function configuredWindowsSandbox(codexHome, platform = process.platform) {
+  if (platform !== 'win32') return null
+  let text
+  try { text = readFileSync(join(codexHome, 'config.toml'), 'utf8') } catch { throw fault('WINDOWS_SANDBOX_NOT_CONFIGURED') }
+  let inWindows = false; const candidates = []
+  for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    if (/^\s*\[/.test(line)) inWindows = /^\s*\[windows\]\s*(?:#.*)?$/.test(line)
+    else if (inWindows && /^\s*(?:sandbox|"sandbox"|'sandbox')\s*=/.test(line)) candidates.push(line)
+  }
+  if (candidates.length !== 1 || !/^\s*(?:sandbox|"sandbox"|'sandbox')\s*=\s*(?:"elevated"|'elevated')\s*(?:#.*)?$/.test(candidates[0])) throw fault('WINDOWS_SANDBOX_NOT_CONFIGURED')
+  return 'elevated'
+}
+
+export function buildCodexArgs(config, workDir, resultPath, schemaPath, allowCodeChange, platform = process.platform) {
+  const windowsSandbox = configuredWindowsSandbox(config.codexHome, platform)
   return ['exec', '--ephemeral', '--json', '--color', 'never', '--skip-git-repo-check', '--cd', workDir,
-    ...(allowCodeChange ? ['--approve-for-me'] : ['--sandbox', 'read-only']),
+    ...(allowCodeChange ? ['--approve-for-me'] : ['--sandbox', 'read-only', '-c', 'approval_policy="never"']),
+    ...(windowsSandbox ? ['-c', `windows.sandbox="${windowsSandbox}"`] : []),
     '--ignore-user-config', '--model', configuredModel(config.codexHome), '--disable', 'apps', '--disable', 'plugins',
     '-c', `model_reasoning_effort="${allowCodeChange ? 'high' : 'medium'}"`, '--output-schema', schemaPath, '--output-last-message', resultPath, '-']
 }
@@ -88,8 +103,23 @@ export function contextEvidence(posts, postId) {
   return result
 }
 
+export function readScopedSkill(config) {
+  try {
+    const path = join(config.root, 'skill', 'SKILL.md'); const file = statSync(path)
+    if (!file.isFile() || file.size < 1 || file.size > 16_384) throw fault('SCOPED_SKILL_INVALID')
+    const data = readFileSync(path)
+    if (data.byteLength > 16_384) throw fault('SCOPED_SKILL_INVALID')
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(data)
+    if (!text.trim() || text.includes('\0') || (config.token && text.includes(config.token)) || /\b(?:tsg_mtg_|tsg_data_|sb_secret_|sk-)[A-Za-z\d_-]+/.test(text)) throw fault('SCOPED_SKILL_INVALID')
+    return text
+  } catch { throw fault('SCOPED_SKILL_INVALID') }
+}
+
 export function buildPrompt(config, job, workDir, allowCodeChange) {
-  return `Use $tsg-codex-mtg. Read the scoped Skill at ${join(config.root, 'skill', 'SKILL.md')}.\n` +
+  const skill = allowCodeChange
+    ? `Use $tsg-codex-mtg. Read the scoped Skill at ${join(workDir, '.agents', 'skills', 'tsg-codex-mtg', 'SKILL.md')}.\n`
+    : `The trusted worker has loaded the dedicated Skill below. Follow this inline Skill; do not reopen Skill files or invoke tools just to load it. Evaluate the proposal from the supplied evidence without tools when sufficient. If repository evidence is necessary and reading is refused, return needs_operator; never relax permissions or infer unverified repository facts.\nTRUSTED_SCOPED_SKILL=${JSON.stringify(readScopedSkill(config))}\n`
+  return skill +
     `TRUSTED WORKER CONTRACT\nOwner PC: TSA. Current registered PC: ${config.pcName}. Mode: ${allowCodeChange ? 'authorized human implementation' : 'READ-ONLY judgment; no code changes, commits, deployments, messages or data mutations are authorized'}.\n` +
     `Use only the fresh repositories in ${workDir}. Verified repository allowlist: ${JSON.stringify(config.repositories || [])}. TSG is the entry repository; if the request concerns TSA/DocScanner, verify the correct authoritative repository using the relevant system map or GitHub before editing its fresh clone. If that repository is not in the fixed allowlist or its identity is unclear, return needs_operator; never apply another system's changes to TSG. Preserve the user-selected default model. Effort is ${allowCodeChange ? 'high for production-impacting implementation' : 'medium for read-only coordination'}. Never resume, read or search existing chats, rollouts or sessions. Never read Bridge/worker configuration, credentials, tokens or unrelated employee records. Never invoke another Codex process or change the worker, its configuration, install files, startup task, permissions or monitor.\n` +
     `For human implementation, the request below is the authorized scope. Follow the global AGENTS.md and the relevant development Skill, verify GitHub fresh default-branch state, perform focused checks, and fetch again before any commit/push/deployment. Do not change unrelated repositories. If authorization, an identity, a lease, an account or required information is missing, return needs_operator. Never publish status yourself: the trusted completion endpoint posts the result as TSG君 with the PC name.\n` +
@@ -177,7 +207,12 @@ export function subscribeWake(realtime, callbacks, WebSocketImpl = WebSocket, ti
         if (message.payload?.status !== 'ok') { socket.close(); return }
         timers.clearTimeout(joinTimeout); callbacks.subscribed?.()
       }
-      if (message.event === 'broadcast' && message.payload?.event === 'wake' && message.payload?.payload && Object.keys(message.payload.payload).length === 0) callbacks.wake?.()
+      const wakePayload = message.payload?.payload
+      if (message.event === 'broadcast' && message.payload?.event === 'wake' && wakePayload && typeof wakePayload === 'object' && !Array.isArray(wakePayload)) {
+        const keys = Object.keys(wakePayload)
+        // realtime.send adds a provider-generated UUID; it is only a wake hint.
+        if (keys.length === 0 || (keys.length === 1 && keys[0] === 'id' && typeof wakePayload.id === 'string' && UUID.test(wakePayload.id))) callbacks.wake?.()
+      }
       if (['phx_error', 'phx_close'].includes(message.event)) socket.close()
     })
     socket.addEventListener('error', () => socket.close())
@@ -234,8 +269,16 @@ function terminate(child) {
 
 export async function runCodex(config, job, workDir, allowCodeChange, signal, onState, spawnImpl = spawn) {
   const schemaPath = join(workDir, 'worker-result.schema.json'); const resultPath = join(workDir, 'worker-result.json')
+  const args = buildCodexArgs(config, workDir, resultPath, schemaPath, allowCodeChange)
+  const prompt = buildPrompt(config, job, workDir, allowCodeChange)
+  if (allowCodeChange) {
+    const skillPath = join(workDir, '.agents', 'skills', 'tsg-codex-mtg', 'SKILL.md')
+    mkdirSync(dirname(skillPath), { recursive: true })
+    // Write text only so the new file inherits workspace access, not the private source ACL.
+    writeFileSync(skillPath, readScopedSkill(config), 'utf8')
+  }
   atomicJson(schemaPath, RESULT_SCHEMA)
-  const child = spawnImpl(findCodex(config), buildCodexArgs(config, workDir, resultPath, schemaPath, allowCodeChange), { cwd: workDir, env: { ...childEnvironment(), CODEX_HOME: config.codexHome }, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] })
+  const child = spawnImpl(findCodex(config), args, { cwd: workDir, env: { ...childEnvironment(), CODEX_HOME: config.codexHome }, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] })
   const abort = () => terminate(child)
   signal.addEventListener('abort', abort, { once: true })
   if (signal.aborted) abort()
@@ -243,7 +286,7 @@ export async function runCodex(config, job, workDir, allowCodeChange, signal, on
   child.stderr.resume()
   onState({ codexPid: child.pid, step: allowCodeChange ? '新しい作業環境で改修を実行しています' : '読み取り専用で提案を確認しています' })
   child.stdin.on('error', () => {})
-  child.stdin.end(buildPrompt(config, job, workDir, allowCodeChange), 'utf8')
+  child.stdin.end(prompt, 'utf8')
   try {
     const code = await new Promise((accept, reject) => { child.once('error', () => reject(fault('CODEX_START_FAILED'))); child.once('close', accept) })
     if (signal.aborted) throw fault('LEASE_UNCERTAIN')
@@ -256,20 +299,33 @@ export async function runCodex(config, job, workDir, allowCodeChange, signal, on
 
 export class Worker {
   constructor(config, dependencies = {}) {
-    this.config = config; this.api = dependencies.api || createApi(config); this.prepare = dependencies.prepare || prepareWorkspace; this.run = dependencies.run || runCodex
+    this.config = config; this.prepare = dependencies.prepare || prepareWorkspace; this.run = dependencies.run || runCodex
     this.monitor = dependencies.monitor || (state => writeMonitor(config, state)); this.journal = dependencies.journal || (value => atomicJson(join(config.root, 'job-state.json'), value))
-    this.busy = false; this.pending = false; this.blocked = false; this.stopped = false; this.state = { status: 'idle' }; this.abort = null
+    this.busy = false; this.pending = false; this.blocked = false; this.stopped = false; this.authenticationRequired = false; this.state = { status: 'idle' }; this.abort = null
+    this.onAuthenticationRequired = dependencies.onAuthenticationRequired
+    const api = dependencies.api || createApi(config)
+    this.api = async (...args) => {
+      if (this.authenticationRequired) throw fault('MACHINE_UNAUTHORIZED')
+      try { return await api(...args) }
+      catch (error) { if (error.message === 'MACHINE_UNAUTHORIZED') this.requireAuthentication(); throw error }
+    }
     this.hostname = dependencies.hostname || hostname(); this.heartbeatMs = dependencies.heartbeatMs || 30_000
   }
   report(update) { this.state = { ...this.state, ...update }; try { this.monitor(this.state) } catch { /* Monitor failure must not cancel the job. */ } }
+  requireAuthentication() {
+    if (this.authenticationRequired) return
+    this.authenticationRequired = true; this.pending = false; this.abort?.abort()
+    this.report({ status: 'waiting_for_user', step: '接続認証が無効です。自動通信を停止しました。登録とキーを確認して手動で再起動してください' })
+    this.onAuthenticationRequired?.()
+  }
   async refresh() { this.info = validateInfo(await this.api(), this.config); return this.info }
   async wake() {
-    if (this.stopped || this.blocked) return
+    if (this.stopped || this.blocked || this.authenticationRequired) return
     this.pending = true
     if (this.busy) return
     this.busy = true
     try {
-      while (this.pending && !this.stopped && !this.blocked) {
+      while (this.pending && !this.stopped && !this.blocked && !this.authenticationRequired) {
         this.pending = false
         await this.refresh()
         const response = await this.api('claim')
@@ -280,7 +336,7 @@ export class Worker {
         await this.execute({ ...job, context: contextEvidence(this.info.posts, job.postId) })
         this.pending = true
       }
-    } catch { this.report({ status: 'waiting_for_user', step: '接続またはジョブ状態を確認してください。自動で同じ作業を再実行しません' }) }
+    } catch { if (!this.authenticationRequired) this.report({ status: 'waiting_for_user', step: '接続またはジョブ状態を確認してください。自動で同じ作業を再実行しません' }) }
     finally { this.busy = false }
   }
   async execute(job) {
@@ -363,6 +419,7 @@ async function main() {
   if (Number(process.versions.node.split('.')[0]) < 22) throw fault('NODE_22_REQUIRED')
   findCodex(config)
   configuredModel(config.codexHome)
+  configuredWindowsSandbox(config.codexHome)
   if (!existsSync(join(config.root, 'skill', 'SKILL.md'))) throw fault('SCOPED_SKILL_MISSING')
   if (args.includes('--check')) { process.stdout.write('Configuration and CLI check passed. No API or job was called.\n'); return }
   if (args.includes('--probe') || args.includes('--probe-wake')) {
@@ -382,7 +439,8 @@ async function main() {
     rmSync(lock)
   }
   const descriptor = openSync(lock, 'wx', 0o600); writeFileSync(descriptor, String(process.pid)); closeSync(descriptor)
-  const worker = new Worker(config); let stopRealtime; let fallback; let machineTimer; let refreshing = false
+  let stopRealtime; let fallback; let machineTimer; let refreshing = false
+  const worker = new Worker(config, { onAuthenticationRequired: () => { stopRealtime?.(); stopRealtime = null; clearTimeout(worker.debounce); clearInterval(fallback) } })
   const shutdown = () => { worker.stop(); stopRealtime?.(); clearInterval(fallback); clearInterval(machineTimer); if (!worker.busy) { rmSync(lock, { force: true }); process.exitCode = 0 } }
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown)
   try {
@@ -390,19 +448,20 @@ async function main() {
     if (existsSync(statePath)) { try { saved = JSON.parse(readFileSync(statePath, 'utf8')) } catch { throw fault('JOURNAL_UNREADABLE') } }
     await worker.recover(saved)
     const reconcile = async () => {
-      if (refreshing || worker.stopped) return
+      if (refreshing || worker.stopped || worker.authenticationRequired) return
       refreshing = true
       try {
         const info = await worker.refresh()
+        if (worker.authenticationRequired) return
         if (!stopRealtime) stopRealtime = subscribeWake(info.realtime, { subscribed: () => void worker.wake(), wake: () => { clearTimeout(worker.debounce); worker.debounce = setTimeout(() => void worker.wake(), 200) } })
         if (!worker.busy) await worker.api('machineHeartbeat')
         void worker.wake()
-      } catch { worker.report({ status: 'waiting_for_user', step: '接続を再確認しています。未処理の依頼はクラウドに残ります' }) }
+      } catch { if (!worker.authenticationRequired) worker.report({ status: 'waiting_for_user', step: '接続を再確認しています。未処理の依頼はクラウドに残ります' }) }
       finally { refreshing = false }
     }
     await reconcile()
-    fallback = setInterval(() => void reconcile(), FALLBACK_MS)
-    machineTimer = setInterval(() => { worker.report({}); if (!worker.busy) void worker.api('machineHeartbeat').catch(() => {}) }, 30_000)
+    if (!worker.authenticationRequired) fallback = setInterval(() => void reconcile(), FALLBACK_MS)
+    machineTimer = setInterval(() => { worker.report({}); if (!worker.busy && !worker.authenticationRequired) void worker.api('machineHeartbeat').catch(() => {}) }, 30_000)
   } catch { shutdown(); throw fault('WORKER_START_FAILED') }
   process.once('exit', () => { try { if (Number(readFileSync(lock, 'utf8')) === process.pid) rmSync(lock) } catch { /* Preserve another process's lock. */ } })
 }
