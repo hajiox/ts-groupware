@@ -28,6 +28,9 @@ DECLARE
   remote_token text:=encode(sha256(convert_to(gen_random_uuid()::text,'UTF8')),'hex');
   rotated_token text:=encode(sha256(convert_to(gen_random_uuid()::text,'UTF8')),'hex');
   owner uuid; remote uuid; job uuid; lease text; result_post uuid; request_post uuid;
+  dm_post uuid; dm_group uuid; private_post uuid:=gen_random_uuid();
+  duplicate_group uuid;
+  body_status text;
   r jsonb; again jsonb; args jsonb; before_count bigint; seq_before bigint; called_before boolean;
   seq_after bigint; called_after boolean;
 BEGIN
@@ -110,9 +113,19 @@ BEGIN
   IF r#>>'{data,leaseExpiresAt}' IS NULL THEN RAISE EXCEPTION 'Heartbeat did not extend the lease'; END IF;
   args:=jsonb_build_object('jobId',job,'leaseToken',lease,'status','completed','summary','Synthetic completion');
   r:=public.gw_codex_mtg_machine(token,'complete',args); result_post:=(r#>>'{data,postId}')::uuid;
+  SELECT result_dm_post_id INTO dm_post FROM public.gw_codex_mtg_jobs WHERE id=job;
+  SELECT group_id INTO dm_group FROM public.gw_posts WHERE id=dm_post;
+  IF dm_post IS NULL OR dm_group IS NULL
+    OR (SELECT content FROM public.gw_posts WHERE id=dm_post) NOT LIKE E'【PC: TSA】\n完了\nSynthetic completion%'
+    OR (SELECT user_id FROM public.gw_posts WHERE id=dm_post)<>'f78baef5-d40c-4886-b51d-a02efbf794fe'::uuid
+    OR (SELECT count(*) FROM public.gw_group_members WHERE group_id=dm_group)<>2
+    OR NOT EXISTS(SELECT 1 FROM public.gw_group_members WHERE group_id=dm_group AND user_id=actor) THEN
+    RAISE EXCEPTION 'Human completion did not save a private result DM';
+  END IF;
   again:=public.gw_codex_mtg_machine(token,'complete',args);
   IF NOT (again#>>'{data,duplicate}')::boolean OR (again#>>'{data,postId}')::uuid<>result_post THEN RAISE EXCEPTION 'Completion replay was not idempotent'; END IF;
   IF (SELECT count(*) FROM public.gw_codex_mtg_jobs)<>2 THEN RAISE EXCEPTION 'Completion report recursively created a job'; END IF;
+  IF (SELECT count(*) FROM public.gw_posts WHERE group_id=dm_group)<>1 THEN RAISE EXCEPTION 'Completion replay duplicated the DM'; END IF;
   PERFORM pg_temp.expect_mtg_error('IDEMPOTENCY_CONFLICT',token,'complete',args||'{"summary":"Changed completion"}');
 
   before_count:=(SELECT count(*) FROM public.gw_codex_mtg_jobs);
@@ -140,6 +153,37 @@ BEGIN
     RAISE EXCEPTION 'Codex request received human/code authority';
   END IF;
   r:=public.gw_codex_mtg_machine(token,'complete',jsonb_build_object('jobId',job,'leaseToken',lease,'status','completed','summary','Readonly request answered'));
+  IF (SELECT result_dm_post_id FROM public.gw_codex_mtg_jobs WHERE id=job) IS NOT NULL
+    OR (SELECT count(*) FROM public.gw_posts WHERE group_id=dm_group)<>1 THEN RAISE EXCEPTION 'Codex completion sent a human DM'; END IF;
+
+  INSERT INTO public.gw_posts(id,group_id,user_id,content) VALUES(private_post,'a8081dbe-15db-4d41-a18b-b22bb55d2b39',actor,'Synthetic private result request');
+  r:=public.gw_codex_mtg_machine(token,'claim','{}'); job:=(r#>>'{data,job,id}')::uuid; lease:=r#>>'{data,job,leaseToken}';
+  INSERT INTO public.gw_group_members(group_id,user_id) VALUES(dm_group,outsider);
+  before_count:=(SELECT count(*) FROM public.gw_posts);
+  args:=jsonb_build_object('jobId',job,'leaseToken',lease,'status','completed','summary','Private completion');
+  PERFORM pg_temp.expect_mtg_error('CONFLICT',token,'complete',args);
+  IF (SELECT count(*) FROM public.gw_posts)<>before_count
+    OR (SELECT status FROM public.gw_codex_mtg_jobs WHERE id=job)<>'claimed' THEN
+    RAISE EXCEPTION 'Unsafe DM group did not roll back chat report and completion together';
+  END IF;
+  DELETE FROM public.gw_group_members WHERE group_id=dm_group AND user_id=outsider;
+  INSERT INTO public.gw_groups(name,description,type,created_by)
+    SELECT 'Synthetic duplicate DM',description,'chat',created_by FROM public.gw_groups WHERE id=dm_group RETURNING id INTO duplicate_group;
+  PERFORM pg_temp.expect_mtg_error('CONFLICT',token,'complete',args);
+  DELETE FROM public.gw_groups WHERE id=duplicate_group;
+  r:=public.gw_codex_mtg_machine(token,'complete',args);
+  IF (SELECT count(*) FROM public.gw_posts WHERE group_id=dm_group)<>2 THEN RAISE EXCEPTION 'Existing private group was not reused'; END IF;
+  SELECT result_dm_post_id INTO dm_post FROM public.gw_codex_mtg_jobs WHERE id=job;
+  DELETE FROM public.gw_posts WHERE id=dm_post;
+  r:=public.gw_codex_mtg_machine(token,'complete',args);
+  IF (SELECT count(*) FROM public.gw_posts WHERE group_id=dm_group)<>1 THEN RAISE EXCEPTION 'Completion retry recreated a deleted DM'; END IF;
+
+  FOREACH body_status IN ARRAY ARRAY['needs_operator','failed'] LOOP
+    INSERT INTO public.gw_posts(group_id,user_id,content) VALUES('a8081dbe-15db-4d41-a18b-b22bb55d2b39',actor,'Synthetic incomplete result request');
+    r:=public.gw_codex_mtg_machine(token,'claim','{}'); job:=(r#>>'{data,job,id}')::uuid; lease:=r#>>'{data,job,leaseToken}';
+    r:=public.gw_codex_mtg_machine(token,'complete',jsonb_build_object('jobId',job,'leaseToken',lease,'status',body_status,'summary','Incomplete result'));
+    IF (SELECT result_dm_post_id FROM public.gw_codex_mtg_jobs WHERE id=job) IS NOT NULL THEN RAISE EXCEPTION 'Incomplete result sent a completion DM'; END IF;
+  END LOOP;
 
   INSERT INTO public.gw_posts(id,group_id,user_id,content) VALUES(edited_post,'a8081dbe-15db-4d41-a18b-b22bb55d2b39',actor,'Synthetic editable request');
   r:=public.gw_codex_mtg_machine(token,'claim','{}'); job:=(r#>>'{data,job,id}')::uuid; lease:=r#>>'{data,job,leaseToken}';

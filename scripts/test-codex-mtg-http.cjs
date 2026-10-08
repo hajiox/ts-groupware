@@ -22,9 +22,14 @@ const core = load('lib/codex-mtg.ts', { 'next/server': next, '@/lib/data-api-htt
 const roles = load('lib/user-roles.ts')
 const calls = []
 const pushCalls = []
+const dmPushCalls = []
+const dmReads = []
+const jobReads = []
 const postReads = []
 const notificationContent = `【PC: TSA】\n${'保存済みの報告本文'.repeat(12)}`
 let pushShouldFail = false
+let dmPushShouldFail = false
+let completionJob = null
 let actor = null
 let rpcResult = { data: { ok: true, data: { job: null } }, error: null }
 const deps = {
@@ -35,16 +40,27 @@ const deps = {
   '@/lib/web-push': { sendPushNotificationToGroup: async (...args) => {
     pushCalls.push(args)
     if (pushShouldFail) throw new Error('Synthetic push failure')
+  }, sendPushNotificationToUser: async (...args) => {
+    dmPushCalls.push(args)
+    if (dmPushShouldFail) throw new Error('Synthetic DM push failure')
   } },
   '@/lib/supabase/admin': { adminClient: {
     rpc: async (name, args) => { calls.push({ name, args }); return rpcResult },
     from(table) {
-      assert.equal(table, 'gw_posts', 'Notification reads must stay on stored posts')
+      assert.ok(['gw_posts', 'gw_codex_mtg_jobs'].includes(table))
       const filters = {}
       const query = {
-        select(columns) { assert.equal(columns, 'id,content'); return query },
+        select(columns) { assert.ok(['id,content', 'author_id,result_dm_post_id', 'id,group_id,content'].includes(columns)); return query },
         eq(key, value) { filters[key] = value; return query },
         async maybeSingle() {
+          if (table === 'gw_codex_mtg_jobs') {
+            jobReads.push({ ...filters })
+            return { data: completionJob, error: null }
+          }
+          if (!filters.group_id) {
+            dmReads.push({ ...filters })
+            return { data: { id: filters.id, group_id: uuid, content: notificationContent }, error: null }
+          }
           postReads.push({ ...filters })
           return { data: { id: filters.id, content: notificationContent }, error: null }
         },
@@ -159,6 +175,36 @@ async function main() {
     assert.equal(JSON.stringify(warning).includes(token), false)
     assert.equal(JSON.stringify(warning).includes(notificationContent), false)
   }
+  completionJob = { author_id: uuid, result_dm_post_id: uuid }
+  for (const scenario of ['new', 'duplicate', 'groupPushFailure', 'dmPushFailure', 'codex', 'needs_operator', 'failed']) {
+    const duplicate = scenario === 'duplicate'
+    const status = ['needs_operator', 'failed'].includes(scenario) ? scenario : 'completed'
+    completionJob = scenario === 'codex' ? null : { author_id: uuid, result_dm_post_id: uuid }
+    pushShouldFail = scenario === 'groupPushFailure'
+    dmPushShouldFail = scenario === 'dmPushFailure'
+    rpcResult = { data: { ok: true, data: { postId: uuid, duplicate, jobId: uuid, status } }, error: null }
+    const before = dmPushCalls.length
+    const beforeJobs = jobReads.length
+    console.warn = () => {}
+    try {
+      const result = await machine.POST(request({ action: 'complete', jobId: uuid, leaseToken: uuid, status, summary: '結果' }))
+      assert.equal(result.status, 200, 'Optional push failure cannot undo saved results')
+    } finally { console.warn = originalWarn }
+    const shouldPush = !duplicate && status === 'completed' && scenario !== 'codex'
+    assert.equal(dmPushCalls.length - before, shouldPush ? 1 : 0, scenario)
+    assert.equal(jobReads.length - beforeJobs, !duplicate && status === 'completed' ? 1 : 0)
+    if (shouldPush) {
+      assert.deepEqual(jobReads.at(-1), { id: uuid, result_post_id: uuid, origin: 'human', status: 'completed' })
+      assert.deepEqual(dmReads.at(-1), { id: uuid, user_id: policy.CODEX_MTG_BOT_USER_ID })
+      assert.deepEqual(dmPushCalls.at(-1), [uuid, {
+        title: '開発依頼の結果 - TSG君', body: notificationContent.substring(0, 80),
+        url: `/chat/${uuid}`, tag: `codex-mtg-dm-${uuid}`,
+      }, uuid])
+    }
+  }
+  pushShouldFail = false
+  dmPushShouldFail = false
+  completionJob = null
   rpcResult = { data: { ok: true, data: {} }, error: null }
   for (const user of [null, { id: uuid, role: 'member', status: 'approved' }, { id: uuid, role: 'executive', status: 'suspended' }]) {
     actor = user
