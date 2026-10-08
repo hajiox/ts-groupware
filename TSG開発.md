@@ -1,3 +1,10 @@
+## 2026-10-08 他PC向けCodexMTG MCPと安全なキー受取
+
+利用者の実行指示でCEO_S・CEO-DOUGAを連携・報告専用PCとして登録。`integrations/codex-mtg-mcp`に読取・報告・質問の3ツール、固定接続先、実PC名照合、重複防止、秘密非表示のSTDIOアダプターを追加。ジョブ取得・改修実行は公開しない。既存CMS受取を基に、CodexMTG単独キーと各データキーの受取、公開証明書の申請手順を配布可能にした。平文キーは配布ZIPや掲示板に含めない。
+
+MCP 6テスト、Windows CMS往復・再受取・異なるハッシュ拒否・既存キー非上書き・単独データキー受取、実TSG読取成功。型検査成功、lintは0 errors/既存27 warnings、89route build成功。CEO_S向けCodexMTG/TSG/DocScanner暗号文を申請元証明書へ暗号化して指定社内共有へ保存。TSGは両PCに7掲示板・読取9操作・90日、DocScannerは利用者指定の全書類情報/取引先読取のみ・89日。OCR/原本403を確認。社内HTTPS入口は停止していたため既存launcherで起動し、証明書検証ありhealth/read成功。DocScanner本体やFWは変更なし。
+
+残作業: 他PCでの受取・MCP導入・実読取。CEO-DOUGAは受取公開証明書未着のため暗号文配布待ち。TSAキーはCEO_S分を画面発行したがブラウザー連携が秘密欄を伏せるため、人が保護保存helperへ入力する工程が必要。自宅TSAキーは未発行。他PCの常駐自動監視は本配布に含めない。
 ## 2026-10-08 CodexMTGの実行環境競合を修正
 
 CEO_S・CEO-DOUGAからの連携質問は受信と自動返答まで進んでいたが、Windows sandbox準備が共用node_repl.exeのファイルロック（os error 32）で失敗し、実作業は確認待ちになっていた。CLI子プロセスのLOCALAPPDATAだけをジョブ内の専用フォルダーへ分離し、既存CODEX_HOME・elevated sandbox・承認方式・モデル指定を維持した。アプリ全体や他のCodex作業は停止していない。
