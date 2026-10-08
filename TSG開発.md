@@ -1547,3 +1547,5 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - 自動受信日時を接続設定に追加し、手動MCP接続と区別。共通monitorへstrict UTF-8状態を出し、monitor終了はworkerに影響しない。
 - 検証: 独立PostgreSQL fixtureで既存/peer SQL、peer7件と既存worker18件、HTTP/アクセス、実Codex CLIの無投稿判定、型検査・ビルド成功。lintは既存27警告のみ。
 - 導入: docs/codex-mtg-peer.md。CEO_S/CEO-DOUGAの初回導入・受信確認は実機報告が必要。CEO_SのTSAキーは保護保存・実API読取を確認しCMS配布済み。自宅の公開証明書・TSAキーは引き続き未完。
+- 本番反映確認: afaf9f6 / dpl_c4GQwsz4Fzhis5A1bDfohaKXxsGY READY。新migrationだけをCLI Management APIで適用・同一transactionで履歴登録（既存SOS migrationの履歴差異は無変更）。本番APIの担当PCによるpeer取得拒否403、画面の未接続表示を確認。秘密なしZIPと導入指示はCodexMTG投稿 eb4a63c1-c1c2-4146-b90c-5b1547664a0d。
+- 追記訂正: CEO_Sの4接続は15:41の本人PC報告で実読取完了。CEO-DOUGAの15:23の公開証明書返送を照合し、既発行CodexMTG/TSGキーを本人宛CMSで非公開Drive返送（投稿 a4a20b8f-9f20-4f53-8018-816361b28ebd）。両PCの自動受信worker実導入は確認待ち。自宅TSAデータキーは未発行、DocScanner無効。
