@@ -26,3 +26,24 @@ MCPの手動読取だけでは他PCのCodexは起動しない。CEO_S / CEO-DOUG
 
 ローカル保存: `%LOCALAPPDATA%/TSG Codex MTG Peer`（ユーザーとSYSTEMのみ）、新規解析環境: `%USERPROFILE%/CodexWork/CodexMTG`。
 更新時は稼働中プロセスを勝手に終了・上書きしない。初回のキー受取・導入・接続が済むまでは自動受信完了と報告しない。
+
+## v2: Windows PC名の大小文字差で初回導入が停止した場合（2026-10-08）
+
+`CEO-douga` / `CEO-DOUGA` のように大小文字だけが異なるWindows PC名を同一と照合する修正版です。
+共有検証関数を修正し、`--probe` と通常受信の両方に適用します。別PC名、固定Chatの不一致、
+不正なPC名・権限値は引き続き拒否します。TSA限定の改修実行判定も変更しません。
+既存キー、サーバー登録PC名、Nodeの実hostname、Windows PC名は変更不要です。
+
+自動受信が未起動で、旧インストーラーがStartup登録前に停止したPCでは次の手順で再導入してください。
+既に稼働中の場合はこの手順で上書きせず、別途更新作業を依頼してください。
+
+1. 修正版ZIPを掲示SHA256で照合し、新しい専用フォルダーへ展開します。旧配布へ手作業の判定回避パッチを当てません。
+2. 展開先で `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-codex-mtg-peer.ps1 -NoStart` を実行します。
+   既存保護キーをそのまま使い、`--check` と `--probe` の成功後にStartupを登録します。この段階では起動しません。
+3. `--probe` の出力が `ok:true`、`pcName:"CEO-DOUGA"`、`canExecuteCode:false` であることを確認します。
+   失敗時は停止し、PC名・登録・キーを書き換えて通しません。秘密値は出力・投稿しません。
+4. 同じインストーラーを `-NoStart` なしで実行し、既存の共通monitorとTSGの「自動受信: 最終確認」を確認します。
+   実機で両方を確認するまで自動受信完了とは扱いません。
+
+専用MCPは同梱の `integrations/codex-mtg-mcp/README.md` の1.0.1更新手順で再読込します。
+TSGデータ読取の確認は独立して行い、自宅DocScannerは無効を維持します。

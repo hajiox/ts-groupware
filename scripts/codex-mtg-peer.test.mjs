@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { PeerWorker, validatePeerResult, validatePeerCompletion } from './codex-mtg-peer.mjs'
-import { GROUP_ID } from './codex-mtg-worker.mjs'
+import { GROUP_ID, validateInfo, canChangeCode } from './codex-mtg-worker.mjs'
 const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const postId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const config = { pcName: 'CEO_S', token: `tsg_mtg_${'a'.repeat(43)}` }
@@ -12,7 +12,7 @@ function fixture(options = {}) {
   const worker = new PeerWorker(config, {
     api: async (action, body) => {
       calls.push({ action, body })
-      if (!action) return info
+      if (!action) return options.info || info
       if (action === 'peerClaim') { if (delivered) return { ok: true, job: null }; delivered = true; return { ok: true, job: { ...job, ...options.job } } }
       if (action === 'peerHeartbeat') { if (options.leaseError) throw new Error('NETWORK'); return { ok: true, leaseExpiresAt: new Date(Date.now() + 180000).toISOString() } }
       if (action === 'peerComplete') {
@@ -62,4 +62,26 @@ test('machine mismatch and revoked authentication never claim or run AI', async 
   await worker.wake(); await worker.wake(); assert.equal(worker.stopped, true); assert.equal(calls.length, 1)
   const f = fixture(); f.worker.config = { ...config, pcName: 'CEO-DOUGA' }; await f.worker.wake()
   assert.equal(f.runs(), 0); assert.equal(f.calls.some(c => c.action === 'peerClaim'), false)
+})
+test('Windows hostname case difference passes peer identity and keeps registered spelling', async () => {
+  const registered = { ...info, machine: { ...info.machine, pcName: 'CEO-DOUGA' } }
+  const f = fixture({ info: registered }); f.worker.config = { ...config, pcName: 'CEO-douga' }
+  await f.worker.wake()
+  assert.equal(f.runs(), process.platform === 'win32' ? 1 : 0)
+  assert.equal(f.worker.stopped, process.platform !== 'win32')
+  if (process.platform === 'win32') assert.equal(validateInfo(registered, f.worker.config).machine.pcName, 'CEO-DOUGA')
+  assert.equal(canChangeCode(f.worker.config, registered.machine, { ...job, allowCodeChange: true }, 'CEO-douga'), false)
+})
+test('identity validation rejects other PCs, malformed names, wrong Chat and invalid permissions', () => {
+  for (const pcName of ['CEO_DOUGA', 'CEO-DOUGA2', ' CEO-DOUGA', 'CEO-DOUGA ', 'CEO-DOUGA.', 'ＣEO-DOUGA', '', null, 1]) {
+    assert.throws(() => validateInfo({ ...info, machine: { ...info.machine, pcName } }, { ...config, pcName: 'CEO-douga' }), /MACHINE_IDENTITY_INVALID/)
+  }
+  assert.throws(() => validateInfo({ ...info, group: { id: 'wrong-chat' } }, config), /MACHINE_IDENTITY_INVALID/)
+  assert.throws(() => validateInfo({ ...info, machine: { ...info.machine, canExecuteCode: 'false' } }, config), /MACHINE_IDENTITY_INVALID/)
+})
+test('case-compatible peer still refuses owner execution permission', async () => {
+  const f = fixture({ info: { ...info, machine: { ...info.machine, canExecuteCode: true } } })
+  await f.worker.wake()
+  assert.equal(f.worker.stopped, true); assert.equal(f.runs(), 0)
+  assert.equal(f.calls.some(c => c.action === 'peerClaim'), false)
 })

@@ -45,3 +45,15 @@ MCPが未接続の間のこの初回連絡だけは、利用者の指示に基�
 
 このMCPは手動呼出し用です。常駐監視・自動応答は別の [他PC受信worker](../../docs/codex-mtg-peer.md) を導入します。TSA専用workerを他PCで起動しないでください。
 DocScannerは自宅からの承認済みLAN経路がない間は無効のままにします。
+
+## 1.0.1: Windows PC名の大小文字差（2026-10-08）
+
+Windowsに限り、Nodeの実hostname `CEO-douga` とサーバー登録 `CEO-DOUGA` を同じPC名として照合します。
+ASCIIの大小文字だけを比較時に揃え、空白の除去、記号の置換、別名、Unicodeの類似文字は許容しません。
+サーバーの登録名・投稿PC名・キー・固定Chat・権限は変更しません。Windows以外は厳密比較です。
+
+既存キーの再受取・PC名変更・再登録・キー再発行は不要です。修正版を新しい専用フォルダーへ展開し、
+その `integrations/codex-mtg-mcp` で `npm ci --omit=dev --ignore-scripts` を実行してください。
+既存MCPの `args` のserverパスだけを新フォルダーの `src/server.mjs` へ変更し、
+既存の環境変数・有効ツール・モデル・sandbox設定を保持して接続を再読込します。
+`codex_mtg_read` で登録PC名 `CEO-DOUGA` と固定Chatを確認してください。自動受信の再導入は上記の別手順です。

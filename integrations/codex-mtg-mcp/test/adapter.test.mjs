@@ -19,6 +19,34 @@ test('foreign PC identity cannot read or post', async () => {
   const result = await execute({ ...config, pcName: 'CEO-DOUGA' }, 'codex_mtg_report', { sourceKey: 'report:one', content: 'authorized' }, async () => { calls++; return response(snapshot) })
   assert.equal(result.code, 'PC_IDENTITY_MISMATCH'); assert.equal(calls, 1)
 })
+test('Windows hostname casing matches without changing the registered name or post payload', async () => {
+  const local = { ...config, pcName: 'CEO-douga' }
+  const registered = { ...snapshot, machine: { ...snapshot.machine, pcName: 'CEO-DOUGA' } }
+  for (const name of ['codex_mtg_read', 'codex_mtg_report', 'codex_mtg_request']) {
+    let writes = 0
+    const value = await execute(local, name, name === 'codex_mtg_read' ? {} : { sourceKey: 'case:one', content: '確認' }, async (_url, init) => {
+      if (init.method === 'POST') {
+        writes++; assert.equal(JSON.parse(init.body).pcName, undefined)
+        return response({ ok: true })
+      }
+      return response(registered)
+    })
+    assert.equal(value.ok, process.platform === 'win32')
+    assert.equal(writes, process.platform === 'win32' && name !== 'codex_mtg_read' ? 1 : 0)
+    if (value.ok && name === 'codex_mtg_read') assert.equal(value.machine.pcName, 'CEO-DOUGA')
+  }
+})
+test('case matching never accepts aliases, malformed names or a different Chat', async () => {
+  for (const pcName of ['CEO_DOUGA', 'CEO-DOUGA2', ' CEO-DOUGA', 'CEO-DOUGA ', 'CEO-DOUGA.', 'ＣEO-DOUGA', '', null, 1]) {
+    let calls = 0
+    const value = await execute({ ...config, pcName: 'CEO-douga' }, 'codex_mtg_report', { sourceKey: 'case:reject', content: '確認' }, async () => {
+      calls++; return response({ ...snapshot, machine: { ...snapshot.machine, pcName } })
+    })
+    assert.equal(value.code, 'PC_IDENTITY_MISMATCH'); assert.equal(calls, 1)
+  }
+  const value = await execute(config, 'codex_mtg_read', {}, async () => response({ ...snapshot, group: { id: 'wrong-chat' } }))
+  assert.equal(value.code, 'PC_IDENTITY_MISMATCH')
+})
 test('only three tools; invalid input never reaches API', async () => {
   for (const [name, args] of [['claim', {}], ['codex_mtg_report', { sourceKey: 'job-complete:one', content: 'x' }], ['codex_mtg_read', { token: 'bad' }], ['codex_mtg_report', { sourceKey: 'one', content: 'x', pcName: 'TSA' }]]) {
     const result = await execute(config, name, args, () => { throw Error('Must not fetch') })

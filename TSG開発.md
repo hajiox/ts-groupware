@@ -1,3 +1,9 @@
+## 2026-10-08 CodexMTG Windows PC名の大小文字差
+
+Nodeのhostname `CEO-douga` と登録名 `CEO-DOUGA` の大小文字差で、専用MCPとpeerの初回probeが拒否される問題を修正。配布ソースのPC名照合だけをWindowsでASCII大小文字不問にし、固定Chat、別PC名・不正名拒否、TSA限定改修権限、登録表示名・既存キーを維持。MCP 1.0.1とpeer v2の既存キーを使う再導入手順をREADME/docsへ追記。
+
+MCP 8件、worker/peer 27件成功（既存monitor契約の検査1件は環境不足でskip）。型検査・89route build成功、lint 0 errors/既存27 warnings。fresh main一致確認後に変更。稼働worker、配置済みファイル、Startup、権限、monitor、秘密値には触れず、Git管理の配布ソースのみ更新。共有context同期は所有権エラーで停止し、導入済み資料を使用。修正版の取得・MCP実読取・probe・共通monitor/自動受信最終確認は対象PCで実測が必要。
+
 ## 2026-10-08 他PC向けCodexMTG MCPと安全なキー受取
 
 利用者の実行指示でCEO_S・CEO-DOUGAを連携・報告専用PCとして登録。`integrations/codex-mtg-mcp`に読取・報告・質問の3ツール、固定接続先、実PC名照合、重複防止、秘密非表示のSTDIOアダプターを追加。ジョブ取得・改修実行は公開しない。既存CMS受取を基に、CodexMTG単独キーと各データキーの受取、公開証明書の申請手順を配布可能にした。平文キーは配布ZIPや掲示板に含めない。

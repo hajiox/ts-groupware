@@ -33,7 +33,13 @@ export function loadConfig(path = join(DEFAULT_ROOT, 'worker.config.json')) {
 }
 
 export function validateInfo(info, config) {
-  if (info?.ok !== true || !UUID.test(info.machine?.id || '') || info.machine.pcName !== config.pcName || typeof info.machine.canExecuteCode !== 'boolean' || info.group?.id !== GROUP_ID) throw fault('MACHINE_IDENTITY_INVALID')
+  // Match Windows hostname casing only; retain the registered spelling and all authorization checks.
+  const validName = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(value)
+  const registered = info?.machine?.pcName
+  const actual = config.pcName
+  const sameName = validName(registered) && validName(actual) && (process.platform === 'win32'
+    ? registered.toLowerCase() === actual.toLowerCase() : registered === actual)
+  if (info?.ok !== true || !UUID.test(info.machine?.id || '') || !sameName || typeof info.machine.canExecuteCode !== 'boolean' || info.group?.id !== GROUP_ID) throw fault('MACHINE_IDENTITY_INVALID')
   const realtime = info.realtime
   if (!realtime || realtime.topic !== 'codex-mtg-v1' || typeof realtime.anonKey !== 'string' || realtime.anonKey.length > 4096) throw fault('REALTIME_CONFIG_INVALID')
   const url = new URL(realtime.url)
