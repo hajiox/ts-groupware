@@ -8,16 +8,18 @@
 & .\scripts\install-codex-mtg-worker.ps1 -NoStart
 node "$env:LOCALAPPDATA\TSG Codex MTG\worker.mjs" --check
 node "$env:LOCALAPPDATA\TSG Codex MTG\worker.mjs" --probe --probe-ms 30000
-Start-ScheduledTask -TaskName 'TSG Codex MTG Worker'
+& .\scripts\install-codex-mtg-worker.ps1
 ```
 
-`--check` はローカル設定・既存モデル指定・CLI・Skillの存在だけを確認します。`--probe` は機械の認証とRealtime購読だけを確認し、claim・AI起動・投稿を行いません。購読後 `--probe-ms`（0〜60000、既定15000）だけ待ち、接続確認と購読回数・空wake受信回数だけを表示します。本文やキーは表示しません。installerは既存の専用workerが稼働していれば停止・上書きせず終了します。Scheduled Taskは本人ログイン時に非表示で起動します。既存の統合モニタの `states/tsg-codex-mtg.json` を使い、別のモニタウィンドウを作りません。
+`--check` はローカル設定・既存モデル指定・CLI・Skillの存在だけを確認します。`--probe` は機械の認証とRealtime購読だけを確認し、claim・AI起動・投稿を行いません。購読後 `--probe-ms`（0〜60000、既定15000）だけ待ち、接続確認と購読回数・空wake受信回数だけを表示します。本文やキーは表示しません。installerは既存の専用workerが稼働していれば停止・上書きせず終了します。現在ユーザーのStartupフォルダーに `TSG Codex MTG.lnk` を置き、本人ログイン時にWindows PowerShell 5から非表示で起動します。`-NoStart` は配置・検証だけ、通常のインストールは同じ絶対パスを使って直接非表示で起動します。停止中の旧 `TSG Codex MTG Worker` タスクだけを削除し、TSAの既存タスクには触れません。workerの単一プロセスlockを維持します。既存の統合モニタの `states/tsg-codex-mtg.json` を使い、別のモニタウィンドウを作りません。
 
 実際の通知確認には `--probe-wake` を使います。既定30秒以内に空wakeを受信すれば直ちに回数だけを返して成功し、届かなければ `ok:false` / `wakeCount:0` と終了コード1を返します。確認中に管理者が明示許可した開設案内を投稿する方法なら、テスト専用投稿を追加する必要はありません。
 
 Realtimeの `codex-mtg-v1` / `wake` は空の通知、またはSupabaseが自動追加するUUIDの `id` だけを持つ通知を受け取ります。それ以外のフィールド・本文・個人情報・ジョブIDは受理しません。通知のidは起床の合図にしか使わず、起動・再接続時と通知時に認証APIからclaimします。通知断に備えて2分ごとに回収し、同時ジョブは1件だけです。サーバーの180秒leaseを30秒ごとに更新します。leaseが不明になったら自分のCodexプロセスを停止し、コード変更を自動再実行しません。
 
 APIが401/403を返した場合は認証対応待ちとし、以後のAPI呼出・Realtime再接続を止めます。モニタは `waiting_for_user` を表示し、登録とキーを確認した管理者による手動再起動が必要です。通常の通信断は2分の回収処理で復旧を試みます。設定・CLIなどのエラーでworkerが非0終了した場合、ランチャーは15秒ごとの再起動を行わず終了します。
+
+Startupのランチャーは、インストール時に検証したNode実行ファイルの絶対パスを使います。起動時の `--check` はAPIやジョブを呼びません。起動に失敗した場合は専用フォルダの `startup-status.json` で固定の処理段階・Node終了コード・例外の型だけを確認できます。設定・秘密・依頼本文・CLI出力は保存せず、前回の状態を上書きします。Nodeの配置が変わった場合は、workerを停止した状態で再インストールしてください。
 
 コード編集は実hostname・登録PC名がともに `TSA`、サーバーの `canExecuteCode` がtrue、human originかつ `allowCodeChange` がtrueの場合だけです。他PCやCodex-originは `read-only` sandboxと明示した `approval_policy="never"` で動き、書込権限へ切り替えません。`--ignore-user-config` でユーザー共通のMCP等の実行設定を読み込まず、アプリ/プラグインも無効にします。既存 `CODEX_HOME/config.toml` からトップレベル `model` と、Windowsの場合は既存 `[windows] sandbox="elevated"` だけを取り出して起動引数へ明示します。モデル未設定・不正、Windowsでelevatedが未設定の場合は推測せず起動を止め、別sandboxへ自動fallbackしません。設定ファイル・ACL・sandbox setupは変更せず、同じ `CODEX_HOME` を渡すため既存ログインを使います。AGENTS.md・Skillsは有効です。コード改修はhigh、読取専用はmediumです。
 

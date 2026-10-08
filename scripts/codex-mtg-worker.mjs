@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url'
 export const GROUP_ID = 'a8081dbe-15db-4d41-a18b-b22bb55d2b39'
 export const API_ORIGIN = 'https://v0-line-blush.vercel.app'
 export const FALLBACK_MS = 120_000
+export const MACHINE_HEARTBEAT_MS = 20_000
 const UUID = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i
 const SUMMARY_MAX = 2000
 const DEFAULT_ROOT = join(process.env.LOCALAPPDATA || homedir(), 'TSG Codex MTG')
@@ -152,7 +153,7 @@ export function monitorState(config, state) {
     progress: state.progress || 0, currentStep: state.step || '次の依頼を待っています', summary: null,
     startedAt: state.startedAt || now, updatedAt: now, heartbeatAt: now, lastResponseAt: state.lastResponseAt || now,
     estimatedEarliestAt: null, estimatedLatestAt: null, bridgePid: process.pid, codexPid: state.codexPid || null,
-    operatorWaitReason: state.status === 'waiting_for_user' ? state.step : null,
+    operatorWaitReason: state.status === 'waiting_for_user' ? state.step : null, lastTerminal: state.lastTerminal || null,
   }
 }
 
@@ -312,6 +313,14 @@ export class Worker {
     this.hostname = dependencies.hostname || hostname(); this.heartbeatMs = dependencies.heartbeatMs || 30_000
   }
   report(update) { this.state = { ...this.state, ...update }; try { this.monitor(this.state) } catch { /* Monitor failure must not cancel the job. */ } }
+  recordCompletion(completion) {
+    const status = completion.status === 'needs_operator' ? 'waiting_for_user' : completion.status
+    // Keep only fixed operational text; the actual result remains in the authorized Chat.
+    const summary = status === 'completed' ? '作業結果を Codex MTG に記録しました' : status === 'failed' ? '失敗の結果を Codex MTG に記録しました' : '管理者の確認が必要です。Codex MTG の結果を確認してください'
+    const lastTerminal = { jobId: completion.jobId, taskLabel: 'Codex MTG', status, summary, finishedAt: new Date().toISOString() }
+    this.journal({ phase: 'acknowledged', jobId: completion.jobId })
+    this.report({ status: status === 'completed' ? 'completed' : 'waiting_for_user', jobId: completion.jobId, codexPid: null, progress: 100, step: '結果を Codex MTG に記録しました', lastTerminal })
+  }
   requireAuthentication() {
     if (this.authenticationRequired) return
     this.authenticationRequired = true; this.pending = false; this.abort?.abort()
@@ -375,14 +384,14 @@ export class Worker {
     const completion = { ...lease, status: result.status, summary: result.summary }
     this.journal({ phase: 'completion_pending', completion, allowCodeChange })
     if (leaseLost) { this.blocked = true; this.report({ status: 'waiting_for_user', codexPid: null, step: '実行権が不明です。管理者の確認が必要です' }); return }
-    try { validateCompletion(await this.api('complete', completion), completion); this.journal({ phase: 'acknowledged', jobId: job.id }); this.report({ status: result.status === 'completed' ? 'completed' : 'waiting_for_user', codexPid: null, progress: 100, step: '結果を Codex MTG に記録しました' }) }
+    try { validateCompletion(await this.api('complete', completion), completion); this.recordCompletion(completion) }
     catch { this.blocked = true; this.report({ status: 'waiting_for_user', codexPid: null, step: '結果の記録を確認できません。保存した同じ結果の再送だけが可能です' }) }
   }
   async recover(saved) {
     if (!saved || saved.phase === 'acknowledged') return
     this.blocked = true
     if (saved.phase === 'completion_pending' && saved.completion) {
-      try { validateCompletion(await this.api('complete', saved.completion), saved.completion); this.journal({ phase: 'acknowledged', jobId: saved.completion.jobId }); this.blocked = false; return } catch { /* Never restart the AI after uncertain completion. */ }
+      try { validateCompletion(await this.api('complete', saved.completion), saved.completion); this.recordCompletion(saved.completion); this.blocked = false; return } catch { /* Never restart the AI after uncertain completion. */ }
     }
     this.report({ status: 'waiting_for_user', jobId: saved.jobId || saved.completion?.jobId, step: '前回作業の状態が不明です。管理者が実行状況を確認してください' })
   }
@@ -461,7 +470,7 @@ async function main() {
     }
     await reconcile()
     if (!worker.authenticationRequired) fallback = setInterval(() => void reconcile(), FALLBACK_MS)
-    machineTimer = setInterval(() => { worker.report({}); if (!worker.busy && !worker.authenticationRequired) void worker.api('machineHeartbeat').catch(() => {}) }, 30_000)
+    machineTimer = setInterval(() => { worker.report({}); if (!worker.busy && !worker.authenticationRequired) void worker.api('machineHeartbeat').catch(() => {}) }, MACHINE_HEARTBEAT_MS)
   } catch { shutdown(); throw fault('WORKER_START_FAILED') }
   process.once('exit', () => { try { if (Number(readFileSync(lock, 'utf8')) === process.pid) rmSync(lock) } catch { /* Preserve another process's lock. */ } })
 }

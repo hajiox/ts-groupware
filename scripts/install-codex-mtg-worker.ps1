@@ -19,6 +19,7 @@ if (Test-Path -LiteralPath $lockPath) {
 }
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw '先に専用worker.config.jsonを安全に配置してください。キーを引数へ渡さないでください。' }
 $nodePath = (Get-Command node.exe -ErrorAction Stop).Source
+if (-not [System.IO.Path]::IsPathRooted($nodePath) -or -not (Test-Path -LiteralPath $nodePath -PathType Leaf)) { throw 'Node executable path is invalid.' }
 & $nodePath --check $workerSource
 if ($LASTEXITCODE -ne 0) { throw 'workerの構文検証に失敗しました。' }
 if ($CheckOnly) { Write-Output '構文と配置先を確認しました。登録・起動・API呼出は行っていません。'; return }
@@ -61,20 +62,57 @@ $launcherPath = Join-Path $installPath 'start-worker.ps1'
 $launcher = @'
 $ErrorActionPreference = 'Stop'
 $runtimeDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$nodePath = (Get-Command node.exe -ErrorAction Stop).Source
-while ($true) {
-  & $nodePath (Join-Path $runtimeDir 'worker.mjs') --config (Join-Path $runtimeDir 'worker.config.json')
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-  Start-Sleep -Seconds 15
+$nodePath = '__TSG_VERIFIED_NODE_PATH__'
+$startupPath = Join-Path $runtimeDir 'startup-status.json'
+function Write-StartupStatus([string]$Step, $NodeExitCode = $null, [string]$CatchType = $null) {
+  $status = @{ step = $Step; nodeExitCode = $NodeExitCode; catchType = $CatchType } | ConvertTo-Json -Compress
+  [System.IO.File]::WriteAllText($startupPath, $status, (New-Object System.Text.UTF8Encoding($false)))
+}
+try {
+  Write-StartupStatus 'launcher_start'
+  if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) { throw (New-Object System.IO.FileNotFoundException) }
+  Write-StartupStatus 'config_check'
+  $ErrorActionPreference = 'Continue'
+  & $nodePath (Join-Path $runtimeDir 'worker.mjs') --config (Join-Path $runtimeDir 'worker.config.json') --check 1>$null 2>$null
+  $nodeExitCode = $LASTEXITCODE
+  $ErrorActionPreference = 'Stop'
+  if ($nodeExitCode -ne 0) { Write-StartupStatus 'config_check_failed' $nodeExitCode; exit $nodeExitCode }
+  while ($true) {
+    Write-StartupStatus 'worker_start' 0
+    $ErrorActionPreference = 'Continue'
+    & $nodePath (Join-Path $runtimeDir 'worker.mjs') --config (Join-Path $runtimeDir 'worker.config.json') 1>$null 2>$null
+    $nodeExitCode = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    Write-StartupStatus 'worker_exit' $nodeExitCode
+    if ($nodeExitCode -ne 0) { exit $nodeExitCode }
+    Start-Sleep -Seconds 15
+  }
+} catch {
+  try { Write-StartupStatus 'launcher_failed' $null $_.Exception.GetType().Name } catch {}
+  exit 1
 }
 '@
+$launcher = $launcher.Replace('__TSG_VERIFIED_NODE_PATH__', $nodePath.Replace("'", "''"))
 [System.IO.File]::WriteAllText($launcherPath, $launcher, (New-Object System.Text.UTF8Encoding($false)))
-$taskName = 'TSG Codex MTG Worker'
+$powerShellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+if (-not (Test-Path -LiteralPath $powerShellPath -PathType Leaf)) { throw 'Windows PowerShell executable is unavailable.' }
 $arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $launcherPath + '"'
-$action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument $arguments -WorkingDirectory $installPath
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
-$principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'TSG Codex MTG専用。既存TSA workerとは別に実行し、統合モニタへ状態を書き込みます。' -Force | Out-Null
-if (-not $NoStart) { Start-ScheduledTask -TaskName $taskName }
-Write-Output 'TSG専用workerを登録しました。秘密値は表示していません。既存TSA workerは変更していません。'
+$startupDir = [System.Environment]::GetFolderPath('Startup')
+if (-not $startupDir -or -not [System.IO.Path]::IsPathRooted($startupDir)) { throw 'Current-user Startup directory is unavailable.' }
+$legacyTask = Get-ScheduledTask -TaskName 'TSG Codex MTG Worker' -ErrorAction SilentlyContinue
+if ($legacyTask -and $legacyTask.State -notin @('Ready', 'Disabled')) { throw 'TSG worker task is not stopped; it will not be stopped or removed automatically.' }
+New-Item -ItemType Directory -Path $startupDir -Force | Out-Null
+$shortcutPath = Join-Path $startupDir 'TSG Codex MTG.lnk'
+$shortcutShell = New-Object -ComObject WScript.Shell
+try {
+  $shortcut = $shortcutShell.CreateShortcut($shortcutPath)
+  $shortcut.TargetPath = $powerShellPath
+  $shortcut.Arguments = $arguments
+  $shortcut.WorkingDirectory = $env:SystemRoot
+  $shortcut.WindowStyle = 7
+  $shortcut.Description = 'TSG Codex MTG worker; unified monitor state only.'
+  $shortcut.Save()
+} finally { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shortcutShell) | Out-Null }
+if ($legacyTask) { Unregister-ScheduledTask -TaskName 'TSG Codex MTG Worker' -Confirm:$false -ErrorAction Stop }
+if (-not $NoStart) { Start-Process -FilePath $powerShellPath -ArgumentList $arguments -WindowStyle Hidden | Out-Null }
+Write-Output 'TSG専用workerのStartup登録を完了しました。秘密値は表示していません。既存TSA workerは変更していません。'

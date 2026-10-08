@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { API_ORIGIN, FALLBACK_MS, GROUP_ID, Worker, buildCodexArgs, buildPrompt, canChangeCode, childEnvironment, configuredModel, configuredWindowsSandbox, contextEvidence, createApi, loadConfig, monitorState, probe, readScopedSkill, runCodex, subscribeWake } from './codex-mtg-worker.mjs'
+import { API_ORIGIN, FALLBACK_MS, GROUP_ID, MACHINE_HEARTBEAT_MS, Worker, buildCodexArgs, buildPrompt, canChangeCode, childEnvironment, configuredModel, configuredWindowsSandbox, contextEvidence, createApi, loadConfig, monitorState, probe, readScopedSkill, runCodex, subscribeWake } from './codex-mtg-worker.mjs'
 
 const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const postId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -205,6 +205,40 @@ test('duplicate wake serializes jobs and monitors contain no request, credential
   const monitorText = JSON.stringify(states)
   for (const secret of [token, leaseToken, job.content, job.requesterName]) assert.equal(monitorText.includes(secret), false)
   assert.equal(calls.filter(action => action === 'complete').length, 1)
+})
+
+test('idle monitor retains only fixed terminal metadata after completion and replay, with heartbeat headroom', async () => {
+  const schemaPath = join(process.env.LOCALAPPDATA || '', 'Codex Bridge Monitor', 'bridge-monitor-state.schema.json')
+  const terminalContract = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, 'utf8')).properties.lastTerminal : null
+  const actualSummary = '合成テスト専用の実回答。モニタには保存しません。'
+  assert.equal(MACHINE_HEARTBEAT_MS, 20_000)
+  for (const resultStatus of ['completed', 'needs_operator', 'failed']) {
+    const records = []; let claims = 0
+    const worker = new Worker(config, {
+      hostname: 'TSA', monitor: state => records.push(monitorState(config, state)), journal: () => {}, prepare: async () => 'synthetic-workdir',
+      api: async (action, fields) => !action ? info : action === 'claim' ? { ok: true, job: claims++ === 0 ? job : null } : action === 'heartbeat' ? lease() : complete(fields),
+      run: async () => ({ status: resultStatus, summary: actualSummary }),
+    })
+    assert.equal(worker.heartbeatMs, 30_000)
+    await worker.wake()
+    const idle = records.at(-1)
+    assert.equal(idle.status, 'idle'); assert.equal(idle.jobId, null)
+    assert.deepEqual(Object.keys(idle.lastTerminal).sort(), ['jobId', 'taskLabel', 'status', 'summary', 'finishedAt'].sort())
+    assert.equal(idle.lastTerminal.jobId, id)
+    assert.equal(idle.lastTerminal.status, resultStatus === 'needs_operator' ? 'waiting_for_user' : resultStatus)
+    assert.ok(Number.isFinite(Date.parse(idle.lastTerminal.finishedAt)))
+    if (terminalContract) {
+      assert.deepEqual(Object.keys(idle.lastTerminal).sort(), [...terminalContract.required].sort())
+      assert.ok(terminalContract.properties.status.enum.includes(idle.lastTerminal.status))
+      for (const [key, value] of Object.entries(idle.lastTerminal)) if (terminalContract.properties[key].maxLength) assert.ok(value.length <= terminalContract.properties[key].maxLength)
+    }
+    for (const secret of [token, leaseToken, job.content, job.requesterName, actualSummary]) assert.equal(JSON.stringify(records).includes(secret), false)
+    const restored = new Worker(config, { monitor: () => {}, journal: () => {}, api: async (_action, fields) => ({ ...complete(fields), duplicate: true }) })
+    await restored.recover({ phase: 'completion_pending', completion: { jobId: id, leaseToken, status: resultStatus, summary: actualSummary } })
+    restored.report({ status: 'idle', jobId: null })
+    assert.equal(monitorState(config, restored.state).lastTerminal.status, idle.lastTerminal.status)
+    assert.equal(JSON.stringify(monitorState(config, restored.state)).includes(actualSummary), false)
+  }
 })
 
 test('lease failure aborts an active run and blocks automatic rerun/complete', async () => {
