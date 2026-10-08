@@ -1555,3 +1555,9 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - 導入: docs/codex-mtg-peer.md。CEO_S/CEO-DOUGAの初回導入・受信確認は実機報告が必要。CEO_SのTSAキーは保護保存・実API読取を確認しCMS配布済み。自宅の公開証明書・TSAキーは引き続き未完。
 - 本番反映確認: afaf9f6 / dpl_c4GQwsz4Fzhis5A1bDfohaKXxsGY READY。新migrationだけをCLI Management APIで適用・同一transactionで履歴登録（既存SOS migrationの履歴差異は無変更）。本番APIの担当PCによるpeer取得拒否403、画面の未接続表示を確認。秘密なしZIPと導入指示はCodexMTG投稿 eb4a63c1-c1c2-4146-b90c-5b1547664a0d。
 - 追記訂正: CEO_Sの4接続は15:41の本人PC報告で実読取完了。CEO-DOUGAの15:23の公開証明書返送を照合し、既発行CodexMTG/TSGキーを本人宛CMSで非公開Drive返送（投稿 a4a20b8f-9f20-4f53-8018-816361b28ebd）。両PCの自動受信worker実導入は確認待ち。自宅TSAデータキーは未発行、DocScanner無効。
+## 2026-10-08 CodexMTG上部の表示を簡素化
+
+連携状況・PC登録・長文の処理結果が会話を圧迫するため、通常表示を「Codex連携」と担当PCの短い状態表示の1行へ変更。詳細は初期状態で閉じ、PC設定と処理履歴も個別に開く形式にした。長文は履歴の各項目を開いた場合だけ表示し、詳細全体の高さを制限。既存の自動受信、状態更新、登録権限、API・DBは変更なし。
+
+型検査・89route build成功、lint 0 errors/既存27 warnings。GitHub main 4254f73と一致するfresh cloneから作業。本番反映後に初期折りたたみと詳細開閉を確認する。
+
