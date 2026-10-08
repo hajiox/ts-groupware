@@ -5,6 +5,7 @@ import { markGroupRead } from '@/lib/read-status'
 import { deleteFileFromDrive } from '@/lib/drive'
 import { normalizeMentionContent } from '@/lib/mention-names'
 import { isManagementRole } from '@/lib/user-roles'
+import { CODEX_MTG_BOT_USER_ID, isCodexMtgGroup } from '@/lib/codex-mtg-policy'
 
 type Attachment = {
   url?: string
@@ -22,7 +23,10 @@ function getDirectChatUserIds(description?: string | null) {
   return [...new Set([userIdA, userIdB].filter((id): id is string => Boolean(id)))]
 }
 
-async function getChatAccess(groupId: string, userId: string) {
+async function getChatAccess(groupId: string, userId: string, userRole?: string) {
+  if (isCodexMtgGroup(groupId) && !isManagementRole(userRole)) {
+    return { group: null, membership: null, error: 'CodexMTGは管理職専用です', status: 403 }
+  }
   const [{ data: group }, { data: membership }] = await Promise.all([
     adminClient
       .from('gw_groups')
@@ -139,7 +143,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'group_id が必要です' }, { status: 400 })
   }
 
-  const access = await getChatAccess(groupId, user.id)
+  const access = await getChatAccess(groupId, user.id, user.role)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -283,7 +287,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'メッセージまたは添付ファイルが必要です' }, { status: 400 })
   }
 
-  const access = await getChatAccess(groupId, user.id)
+  const access = await getChatAccess(groupId, user.id, user.role)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -427,12 +431,15 @@ export async function PATCH(request: NextRequest) {
   if (fetchError || !existing) {
     return NextResponse.json({ error: 'メッセージが見つかりません' }, { status: 404 })
   }
+  if (isCodexMtgGroup(existing.group_id) && existing.user_id === CODEX_MTG_BOT_USER_ID) {
+    return NextResponse.json({ error: 'Codexの報告は編集・削除できません' }, { status: 403 })
+  }
 
   if (existing.parent_id) {
     return NextResponse.json({ error: 'Chatメッセージではありません' }, { status: 400 })
   }
 
-  const access = await getChatAccess(existing.group_id, user.id)
+  const access = await getChatAccess(existing.group_id, user.id, user.role)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -485,12 +492,15 @@ export async function DELETE(request: NextRequest) {
   if (fetchError || !existing) {
     return NextResponse.json({ error: 'メッセージが見つかりません' }, { status: 404 })
   }
+  if (isCodexMtgGroup(existing.group_id) && existing.user_id === CODEX_MTG_BOT_USER_ID) {
+    return NextResponse.json({ error: 'Codexの報告は編集・削除できません' }, { status: 403 })
+  }
 
   if (existing.parent_id) {
     return NextResponse.json({ error: 'Chatメッセージではありません' }, { status: 400 })
   }
 
-  const access = await getChatAccess(existing.group_id, user.id)
+  const access = await getChatAccess(existing.group_id, user.id, user.role)
   if (access.error) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

@@ -6,6 +6,8 @@ import { ImageAnnotationEditor } from "@/components/image-annotation-editor";
 import { linkifyText } from "@/components/link-preview";
 import { ReadReceiptAvatars, type ReadReceiptUser } from "@/components/read-receipt-avatars";
 import { SafeLineAvatar } from "@/components/safe-line-avatar";
+import { CodexMtgStatus } from "@/components/codex-mtg-status";
+import { CODEX_MTG_BOT_USER_ID, isCodexMtgGroup } from "@/lib/codex-mtg-policy";
 import { getClipboardImageFile } from "@/lib/clipboard-image";
 import { uploadClientFile } from "@/lib/client-upload";
 import { getDeviceHeaders } from "@/lib/device-id";
@@ -221,6 +223,13 @@ export default function ChatPage() {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
+      if (isCodexMtgGroup(id) && (res.status === 401 || res.status === 403)) {
+        setGroup(null);
+        setMembers([]);
+        setCurrentUser(null);
+        setMessages([]);
+        messageIdsRef.current.clear();
+      }
       throw new Error(data.error || "チャットの取得に失敗しました");
     }
 
@@ -514,10 +523,12 @@ export default function ChatPage() {
   }
 
   function canEditMessage(message: Message) {
+    if (isCodexMtgGroup(id) && message.user_id === CODEX_MTG_BOT_USER_ID) return false;
     return message.isOwn || canModerateChat;
   }
 
   function canDeleteMessage(message: Message) {
+    if (isCodexMtgGroup(id) && message.user_id === CODEX_MTG_BOT_USER_ID) return false;
     if (message.isOwn) return true;
     return !isDirectChat && canModerateChat;
   }
@@ -667,6 +678,10 @@ export default function ChatPage() {
           </button>
         )}
       </header>
+
+      {isCodexMtgGroup(id) && isManagementRole(currentUser?.role) && (
+        <CodexMtgStatus canManageMachines={currentUser?.role === "executive"} />
+      )}
 
       <div className="thread-search thread-search--chat" role="search">
         <input

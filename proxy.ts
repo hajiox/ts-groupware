@@ -51,6 +51,7 @@ export function proxy(request: NextRequest) {
     '/api/sos/receipt',
     '/api/cron/new-hire-company-messages', // Uses Vercel CRON_SECRET authentication in the route.
     '/api/integrations/board-post', // Uses integration-secret authentication in the route.
+    '/api/integrations/codex-mtg', // Uses a dedicated machine token verified by the route.
     '/api/integrations/meeting-transcriber/summary',
     '/api/integrations/meeting-transcriber/self-dm',
   ]

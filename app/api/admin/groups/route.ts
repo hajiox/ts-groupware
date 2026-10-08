@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
 import { isManagementUser } from '@/lib/user-roles'
+import { isCodexMtgGroup } from '@/lib/codex-mtg-policy'
 
 /**
  * 管理者用グループ管理 API
@@ -48,6 +49,9 @@ export async function DELETE(request: NextRequest) {
 
   if (!group_id) {
     return NextResponse.json({ error: 'group_id が必要です' }, { status: 400 })
+  }
+  if (isCodexMtgGroup(group_id)) {
+    return NextResponse.json({ error: 'CodexMTGは連携用のため削除できません' }, { status: 403 })
   }
 
   const { data: group, error: groupError } = await adminClient

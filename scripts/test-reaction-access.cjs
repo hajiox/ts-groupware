@@ -57,6 +57,8 @@ const dependencies = {
   'next/server': { NextResponse: FakeNextResponse },
   '@/lib/session': { getUserSession: async () => authenticated ? { id: actorId, display_name: '試験担当' } : null },
   '@/lib/supabase/admin': { adminClient: { from: query } },
+  '@/lib/user-roles': { isManagementUser: user => ['executive', 'admin'].includes(user?.role) },
+  '@/lib/codex-mtg-policy': { isCodexMtgGroup: value => typeof value === 'string' && value.toLowerCase() === 'a8081dbe-15db-4d41-a18b-b22bb55d2b39' },
   '@/lib/web-push': { sendPushNotificationToUser: async (...args) => pushes.push(args) },
 }
 const output = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', 'app', 'api', 'reactions', 'route.ts'), 'utf8'), {

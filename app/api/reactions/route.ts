@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
+import { isManagementUser } from '@/lib/user-roles'
+import { isCodexMtgGroup } from '@/lib/codex-mtg-policy'
 
 /**
  * POST /api/reactions — リアクション追加/トグル
@@ -29,6 +31,9 @@ export async function POST(request: NextRequest) {
     .maybeSingle()
   if (postError) return NextResponse.json({ error: postError.message }, { status: 500 })
   if (!post) return NextResponse.json({ error: '投稿が見つかりません' }, { status: 404 })
+  if (isCodexMtgGroup(post.group_id) && !isManagementUser(user)) {
+    return NextResponse.json({ error: 'CodexMTGは管理職専用です' }, { status: 403 })
+  }
 
   const { data: membership, error: membershipError } = await adminClient
     .from('gw_group_members')

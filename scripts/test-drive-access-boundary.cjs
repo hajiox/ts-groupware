@@ -75,6 +75,7 @@ async function main() {
     '@/lib/read-status': blockedService,
     '@/lib/mention-names': blockedService,
     '@/lib/user-roles': roles,
+    '@/lib/codex-mtg-policy': load('lib/codex-mtg-policy.ts'),
     '@/lib/pledge-paper': blockedService,
     '@/lib/pledges': blockedService,
     '@/lib/hr-resume-service': blockedService,

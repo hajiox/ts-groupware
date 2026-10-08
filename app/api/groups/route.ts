@@ -3,6 +3,7 @@ import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
 import { isManagementUser } from '@/lib/user-roles'
 import { getUnreadCountsByGroup } from '@/lib/unread'
+import { isCodexMtgGroup } from '@/lib/codex-mtg-policy'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -57,7 +58,8 @@ export async function GET() {
     .select('*')
     .in('id', explicitGroupIds)
     .order('updated_at', { ascending: false })
-  const groups = (rawGroups || []).filter(group => !isDirectChat(group))
+  const groups = (rawGroups || []).filter(group => !isDirectChat(group)
+    && (!isCodexMtgGroup(group.id) || isManagementUser(user)))
   const groupIds = groups.map(group => group.id)
 
   if (groupIds.length === 0) {

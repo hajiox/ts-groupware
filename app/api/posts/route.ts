@@ -5,6 +5,7 @@ import { deleteFileFromDrive } from '@/lib/drive'
 import { markGroupRead } from '@/lib/read-status'
 import { normalizeMentionContent } from '@/lib/mention-names'
 import { isManagementUser } from '@/lib/user-roles'
+import { CODEX_MTG_BOT_USER_ID, isCodexMtgGroup } from '@/lib/codex-mtg-policy'
 
 /**
  * GET /api/posts?group_id=xxx — 投稿一覧取得
@@ -93,7 +94,8 @@ function postingDisabledResponse(policy: GroupPostingPolicy) {
   }, { status: 403 })
 }
 
-async function hasGroupMembership(groupId: string, userId: string) {
+async function hasGroupMembership(groupId: string, userId: string, userRole?: string) {
+  if (isCodexMtgGroup(groupId) && !isManagementUser({ role: userRole })) return false
   const { data, error } = await adminClient
     .from('gw_group_members')
     .select('user_id')
@@ -232,7 +234,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    if (!await hasGroupMembership(groupId, user.id)) {
+    if (!await hasGroupMembership(groupId, user.id, user.role)) {
       return NextResponse.json({ error: 'この掲示板に参加していません' }, { status: 403 })
     }
   } catch (error) {
@@ -493,7 +495,7 @@ export async function POST(request: NextRequest) {
   }
   let postingPolicy: GroupPostingPolicy
   try {
-    if (!await hasGroupMembership(group_id, user.id)) {
+    if (!await hasGroupMembership(group_id, user.id, user.role)) {
       return NextResponse.json({ error: 'この掲示板に参加していません' }, { status: 403 })
     }
     postingPolicy = await loadGroupPostingPolicy(group_id)
@@ -755,10 +757,13 @@ export async function PATCH(request: NextRequest) {
   if (fetchError || !existing) {
     return NextResponse.json({ error: '投稿が見つかりません' }, { status: 404 })
   }
+  if (isCodexMtgGroup(existing.group_id) && existing.user_id === CODEX_MTG_BOT_USER_ID) {
+    return NextResponse.json({ error: 'Codexの報告は編集・削除できません' }, { status: 403 })
+  }
 
   let postingPolicy: GroupPostingPolicy
   try {
-    if (!await hasGroupMembership(existing.group_id, user.id)) {
+    if (!await hasGroupMembership(existing.group_id, user.id, user.role)) {
       return NextResponse.json({ error: 'この掲示板に参加していません' }, { status: 403 })
     }
     postingPolicy = await loadGroupPostingPolicy(existing.group_id)
@@ -1003,10 +1008,13 @@ export async function DELETE(request: NextRequest) {
   if (fetchError || !post) {
     return NextResponse.json({ error: '投稿が見つかりません' }, { status: 404 })
   }
+  if (isCodexMtgGroup(post.group_id) && post.user_id === CODEX_MTG_BOT_USER_ID) {
+    return NextResponse.json({ error: 'Codexの報告は編集・削除できません' }, { status: 403 })
+  }
 
   let postingPolicy: GroupPostingPolicy
   try {
-    if (!await hasGroupMembership(post.group_id, user.id)) {
+    if (!await hasGroupMembership(post.group_id, user.id, user.role)) {
       return NextResponse.json({ error: 'この掲示板に参加していません' }, { status: 403 })
     }
     postingPolicy = await loadGroupPostingPolicy(post.group_id)

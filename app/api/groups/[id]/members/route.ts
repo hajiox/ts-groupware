@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
 import { isManagementRole } from '@/lib/user-roles'
+import { isCodexMtgGroup } from '@/lib/codex-mtg-policy'
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getUserSession()
@@ -12,6 +13,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const { id: groupId } = await params
   if (!groupId) {
     return NextResponse.json({ error: 'group_id が必要です' }, { status: 400 })
+  }
+  if (isCodexMtgGroup(groupId) && !isManagementRole(user.role)) {
+    return NextResponse.json({ error: 'CodexMTGは管理職専用です' }, { status: 403 })
   }
 
   const { data: group } = await adminClient

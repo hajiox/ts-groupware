@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient } from '@/lib/supabase/admin'
 import { getUserSession } from '@/lib/session'
 import { isManagementUser } from '@/lib/user-roles'
+import { CODEX_MTG_BOT_USER_ID, isCodexMtgGroup } from '@/lib/codex-mtg-policy'
 
 /**
  * 管理者用グループメンバー管理 API
@@ -44,7 +45,10 @@ export async function GET(request: NextRequest) {
     .order('display_name', { ascending: true })
 
   // メンバーに含まれるユーザー / 含まれないユーザー
-  const memberUsers = (allUsers || [])
+  const eligibleUsers = (allUsers || []).filter(candidate => !isCodexMtgGroup(groupId)
+    || (candidate.status === 'approved'
+      && (isManagementUser(candidate) || candidate.id === CODEX_MTG_BOT_USER_ID)))
+  const memberUsers = eligibleUsers
     .filter(u => explicitMemberUserIds.has(u.id))
     .map(u => ({
       ...u,
@@ -52,7 +56,7 @@ export async function GET(request: NextRequest) {
       group_role: membershipByUserId.get(u.id)?.role || 'member',
     }))
 
-  const nonMembers = (allUsers || [])
+  const nonMembers = eligibleUsers
     .filter(u => !explicitMemberUserIds.has(u.id))
     .map(u => ({ ...u, display_name: u.real_name || u.display_name }))
 
@@ -72,13 +76,19 @@ export async function POST(request: NextRequest) {
 
   const { data: approvedUsers } = await adminClient
     .from('gw_users')
-    .select('id')
+    .select('id, role, status')
     .in('id', user_ids)
     .or('status.eq.approved,status.is.null')
 
   const approvedUserIds = new Set((approvedUsers || []).map(u => u.id))
   if (approvedUserIds.size !== user_ids.length) {
     return NextResponse.json({ error: '未承認または停止中のユーザーはメンバーに追加できません' }, { status: 400 })
+  }
+  if (isCodexMtgGroup(group_id) && (approvedUsers || []).some(candidate => (
+    candidate.status !== 'approved'
+      || (!isManagementUser(candidate) && candidate.id !== CODEX_MTG_BOT_USER_ID)
+  ))) {
+    return NextResponse.json({ error: 'CodexMTGには承認済み管理職のみ追加できます' }, { status: 403 })
   }
 
   const inserts = user_ids.map((uid: string) => ({
