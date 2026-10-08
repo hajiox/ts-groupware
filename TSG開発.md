@@ -1,3 +1,11 @@
+## 2026-10-08 CodexMTGの実行環境競合を修正
+
+CEO_S・CEO-DOUGAからの連携質問は受信と自動返答まで進んでいたが、Windows sandbox準備が共用node_repl.exeのファイルロック（os error 32）で失敗し、実作業は確認待ちになっていた。CLI子プロセスのLOCALAPPDATAだけをジョブ内の専用フォルダーへ分離し、既存CODEX_HOME・elevated sandbox・承認方式・モデル指定を維持した。アプリ全体や他のCodex作業は停止していない。
+
+main b5adb45、本番dpl_G83LtLgU5NHp343qiHU4r7cPJkK7 READY・固定alias一致。worker18テスト、型検査、lint 0 errors/既存27 warnings、89route build成功。共用環境での失敗を再現し、分離環境でread-onlyと通常worker起動条件の実ファイル読取成功を確認。稼働TSG workerはidle/前回完了記録を確認して入替え、配布元とSHA-256一致、統合モニタの再稼働を確認した。
+
+利用者の再実行指示に基づき、他PC Codexの2件の質問を調査・回答として専用APIから再依頼。post 8c272daf-c3e7-4d16-bce3-957ab66a0acdを自動取得し、job 87f3c6d7-b449-4ffe-9ab8-b8a4c4204fc1がcompleted、約30秒後のTSG君・PC TSAの返答post c3a51265-fa6c-481d-b3d0-78bcc07d08d1を確認した。各PCのキー発行・CodexMTG専用MCP配布・DocScanner到達性の解決は未実施で、回答にも未完了として記載。旧確認待ちジョブ・元投稿・作業clone・結果の履歴は変更せず保存した。
+
 ## 2026-10-08 管理職専用CodexMTGとTSA PCの改修窓口
 
 管理職4名とTSG君だけが参加する固定Chat CodexMTGを作成。役職・承認状態と参加者を同期し、一覧・本文・リアクション・管理APIでも現在の管理職権限を確認する。PCごとのハッシュ保存キー（90日、有効PC名をサーバー固定）を新設し、TSG君の本文には登録済みPC名を付ける。管理職の依頼はDBへ保存し、担当PC TSAだけが取得・実行する。他PCのCodexは連携・報告・調査のみ。Codex-originの提案は人間の改修承認にはならず、報告からの無限返信を防ぐ。
