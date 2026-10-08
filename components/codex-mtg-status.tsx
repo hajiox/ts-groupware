@@ -10,6 +10,7 @@ type Machine = {
   lastSeenAt: string | null;
   revokedAt: string | null;
   expiresAt?: string | null;
+  peerListenerSeenAt?: string | null;
 };
 
 type StatusResponse = {
@@ -137,6 +138,8 @@ export function CodexMtgStatus({ canManageMachines }: { canManageMachines: boole
           <div key={machine.id} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", paddingTop: 4 }}>
             <strong>{machine.pcName}</strong>
             <span>{machine.canExecuteCode ? "担当PC" : "連携・報告専用"} / {machine.revokedAt ? "失効済み" : `最終接続: ${seenAt(machine.lastSeenAt)}`}</span>
+            {!machine.canExecuteCode && !machine.revokedAt && <span>自動受信: {machine.peerListenerSeenAt
+              ? `最終確認 ${seenAt(machine.peerListenerSeenAt)}` : "未接続（MCP接続だけでは自動受信しません）"}</span>}
             {!machine.revokedAt && machine.expiresAt && <span>キー期限: {new Date(machine.expiresAt).toLocaleDateString("ja-JP")}</span>}
             {canManageMachines && !machine.revokedAt && <button type="button" disabled={busy} onClick={() => void manageMachine({ action: "revoke", machineId: machine.id })} style={{ color: "#f87171", textDecoration: "underline" }}>失効</button>}
           </div>

@@ -185,7 +185,7 @@ export function createApi(config, fetchImpl = fetch) {
     finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
     let result
     try { result = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))) } catch { throw fault('API_RESPONSE_INVALID') }
-    if (!response.ok || result?.ok !== true) throw fault(response.status === 401 || response.status === 403 ? 'MACHINE_UNAUTHORIZED' : 'API_REQUEST_FAILED')
+    if (!response.ok || result?.ok !== true) throw Object.assign(fault(response.status === 401 || response.status === 403 ? 'MACHINE_UNAUTHORIZED' : 'API_REQUEST_FAILED'), { status: response.status })
     return result
   }
 }
@@ -274,7 +274,7 @@ export function findCodex(config) {
   return candidate
 }
 
-function terminate(child) {
+export function terminate(child) {
   if (!child?.pid || child.exitCode !== null) return
   if (process.platform === 'win32') spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, shell: false, stdio: 'ignore' })
   else child.kill('SIGTERM')

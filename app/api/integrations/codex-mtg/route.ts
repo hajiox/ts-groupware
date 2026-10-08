@@ -32,11 +32,11 @@ export async function POST(request: NextRequest) {
     const parsed = codexMtgMachineSchema.safeParse(await readDataBody(request))
     if (!parsed.success) return dataFailure('VALIDATION', requestId)
     const { action, ...args } = parsed.data
-    const { data, error } = await adminClient.rpc('gw_codex_mtg_machine', {
+    const { data, error } = await adminClient.rpc(action.startsWith('peer') ? 'gw_codex_mtg_peer' : 'gw_codex_mtg_machine', {
       p_token_hash: hash, p_action: action, p_args: args,
     })
     if (error) return dataRpcFailure(error, requestId, `codex_mtg_${action}`)
-    if ((action === 'post' || action === 'complete') && data?.ok === true
+    if ((action === 'post' || action === 'complete' || action === 'peerComplete') && data?.ok === true
       && data.data?.duplicate === false && typeof data.data.postId === 'string') {
       try {
         const { data: post, error: postError } = await adminClient.from('gw_posts')

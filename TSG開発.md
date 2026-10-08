@@ -1538,3 +1538,12 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - ユーザー指定により全画面上部のSOS履歴リンクを削除。管理メニューに通常のSOSタブを追加し、/sosは/admin?tab=sosへ転送。
 - 通常画面では未対応SOSの警告だけ表示する。通知登録状況・履歴・対応中/完了は管理内へ集約。道の駅端末の状態表示・2分後再通知・権限チェックを維持。
 - fresh cloneからcommit db8fc44。型・全体Lint（既存23警告のみ）・本番build成功、GitHub push済み。DB変更・メッセージ送信なし。
+
+
+## 2026-10-08 CodexMTG 他PCの自動受信
+
+- 他PCには手動MCPしかなく、利用者による伝言が必要だったため、永続peer受信キューと専用read-only常駐workerを追加。Realtime即時通知、2分フォールバック、オフライン回収、初回最新50件。TSA改修workerは維持。
+- 登録PC・lease・入力改訂をサーバーで検証。自動回答の循環を遮断し、TSAへの質問と回答は一往復に限定。送信不明時は保護journalの同一結果だけ再送。
+- 自動受信日時を接続設定に追加し、手動MCP接続と区別。共通monitorへstrict UTF-8状態を出し、monitor終了はworkerに影響しない。
+- 検証: 独立PostgreSQL fixtureで既存/peer SQL、peer7件と既存worker18件、HTTP/アクセス、実Codex CLIの無投稿判定、型検査・ビルド成功。lintは既存27警告のみ。
+- 導入: docs/codex-mtg-peer.md。CEO_S/CEO-DOUGAの初回導入・受信確認は実機報告が必要。CEO_SのTSAキーは保護保存・実API読取を確認しCMS配布済み。自宅の公開証明書・TSAキーは引き続き未完。

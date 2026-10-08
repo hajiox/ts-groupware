@@ -180,6 +180,18 @@ async function main() {
   assert.equal(calls.at(-1).args.p_args.tokenHash, crypto.createHash('sha256').update(data.token).digest('hex'))
   assert.equal(JSON.stringify(calls).includes(data.token), false)
   assert.equal(calls.at(-1).args.p_args.canExecuteCode, undefined)
-  console.log('CodexMTG HTTP boundary and first-delivery/duplicate/push-failure checks passed')
+  rpcResult = { data: { ok: true, data: { job: null } }, error: null }
+  assert.equal((await machine.POST(request({ action: 'peerClaim' }))).status, 200)
+  assert.equal(calls.at(-1).name, 'gw_codex_mtg_peer')
+  await failure(await machine.POST(request({ action: 'peerClaim', machineId: uuid })), 400, 'VALIDATION')
+  await failure(await machine.POST(request({ action: 'peerComplete', jobId: uuid, leaseToken: uuid, decision: 'execute', summary: 'invalid' })), 400, 'VALIDATION')
+  for (const decision of ['silent', 'report', 'question', 'needs_operator']) {
+    const before = pushCalls.length
+    rpcResult = { data: { ok: true, data: { jobId: uuid, decision, postId: decision === 'silent' ? null : uuid, duplicate: false } }, error: null }
+    assert.equal((await machine.POST(request({ action: 'peerComplete', jobId: uuid, leaseToken: uuid, decision, summary: decision === 'silent' ? '' : '回答' }))).status, 200)
+    assert.equal(calls.at(-1).name, 'gw_codex_mtg_peer')
+    assert.equal(pushCalls.length - before, decision === 'silent' ? 0 : 1)
+  }
+  console.log('CodexMTG HTTP boundary, peer routing and notification checks passed')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })
