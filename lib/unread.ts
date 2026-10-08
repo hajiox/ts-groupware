@@ -1,4 +1,5 @@
 import { adminClient } from '@/lib/supabase/admin'
+import { isCodexMtgGroup } from '@/lib/codex-mtg-policy'
 
 type GroupRow = {
   id: string
@@ -56,7 +57,8 @@ async function getReadMap(userId: string, groupIds: string[]) {
 }
 
 export async function getUnreadCountsByGroup(userId: string, groupIds: string[]) {
-  const uniqueGroupIds = [...new Set(groupIds)].filter(Boolean)
+  // CodexMTGは一覧・ナビゲーション・Pushのバッジの未読集計対象外。
+  const uniqueGroupIds = [...new Set(groupIds)].filter(groupId => Boolean(groupId) && !isCodexMtgGroup(groupId))
   if (uniqueGroupIds.length === 0) return {}
 
   const readBaselines = await getReadMap(userId, uniqueGroupIds)

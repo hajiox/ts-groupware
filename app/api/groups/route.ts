@@ -60,6 +60,8 @@ export async function GET() {
     .order('updated_at', { ascending: false })
   const groups = (rawGroups || []).filter(group => !isDirectChat(group)
     && (!isCodexMtgGroup(group.id) || isManagementUser(user)))
+    // CodexMTGは更新日時にかかわらず末尾。他のグループの順序は維持する。
+    .sort((a, b) => Number(isCodexMtgGroup(a.id)) - Number(isCodexMtgGroup(b.id)))
   const groupIds = groups.map(group => group.id)
 
   if (groupIds.length === 0) {
