@@ -1,5 +1,7 @@
 # Codex MTG 専用worker
 
+2026-10-08: WindowsではCLI子プロセスの`LOCALAPPDATA`だけを各ジョブの`.codex-localappdata`へ分離します。共用の`node_repl.exe`が使用中でもsandbox準備が同じファイルのACL更新と競合しないためです。既存ログインは同じ`CODEX_HOME`で使用し、elevated sandbox・承認方式・モデル指定は維持します。共通設定や他のCodexプロセスは変更しません。実機で共用環境の読取失敗と、分離環境の読取成功を確認しました。
+
 既存TSA Bridgeを変更せず、Windowsのログイン中に専用workerを動かします。Node.js 22以上、既存Codex CLIログイン、GitHubへのgitアクセスが必要です。npmの追加依存はありません。
 
 管理画面でこの端末専用のキーを発行し、`%LOCALAPPDATA%/TSG Codex MTG/worker.config.json` に安全に保存します。実際のキーをChat、コマンド引数、Git、ログへ貼り付けないでください。必須項目は `url`（`https://v0-line-blush.vercel.app`）、`token`（発行した接続キー）、`pcName`（登録PC名）です。任意で `codexPath`、`codexHome`、`workspaceRoot`、`repositories:[{name,url}]` を設定できます。repoは管理者が確認した `https://github.com/hajiox/...` に限定され、既定はTSGです。依頼本文からrepo URLや起動コマンドを受け付けません。

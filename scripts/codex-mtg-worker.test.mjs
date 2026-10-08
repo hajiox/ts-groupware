@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { API_ORIGIN, FALLBACK_MS, GROUP_ID, MACHINE_HEARTBEAT_MS, Worker, buildCodexArgs, buildPrompt, canChangeCode, childEnvironment, configuredModel, configuredWindowsSandbox, contextEvidence, createApi, loadConfig, monitorState, probe, readScopedSkill, runCodex, subscribeWake } from './codex-mtg-worker.mjs'
+import { API_ORIGIN, FALLBACK_MS, GROUP_ID, MACHINE_HEARTBEAT_MS, Worker, buildCodexArgs, buildPrompt, canChangeCode, childEnvironment, codexEnvironment, configuredModel, configuredWindowsSandbox, contextEvidence, createApi, loadConfig, monitorState, probe, readScopedSkill, runCodex, subscribeWake } from './codex-mtg-worker.mjs'
 
 const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const postId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -39,6 +39,19 @@ test('configuration is fixed-origin, owner checks fail closed, secrets are exclu
     const env = childEnvironment({ Path: 'synthetic-path', CODEX_HOME: 'synthetic-home', TSG_CODEX_MTG_TOKEN: token, TSA_CODEX_BRIDGE_TOKEN: token, OPENAI_API_KEY: token, SUPABASE_SERVICE_ROLE_KEY: token, GH_TOKEN: token, NODE_OPTIONS: '--require untrusted' })
     assert.deepEqual(env, { Path: 'synthetic-path', CODEX_HOME: 'synthetic-home' })
   } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('Windows CLI runtime is isolated per job while authentication, sandbox and secret exclusion are preserved', () => {
+  const root = join(tmpdir(), 'tsg-mtg-isolation')
+  const inherited = { Path: 'verified-path', LocalAppData: 'shared-desktop-cache', codex_home: 'wrong-home', TSG_CODEX_MTG_TOKEN: token, NODE_OPTIONS: '--require untrusted' }
+  const windows = codexEnvironment({ codexHome: 'verified-auth-home' }, root, inherited, 'win32')
+  assert.deepEqual(windows, { Path: 'verified-path', CODEX_HOME: 'verified-auth-home', LOCALAPPDATA: join(root, '.codex-localappdata') })
+  assert.notEqual(codexEnvironment(config, join(root, 'other-job'), inherited, 'win32').LOCALAPPDATA, windows.LOCALAPPDATA)
+  assert.equal(inherited.LocalAppData, 'shared-desktop-cache')
+  const other = codexEnvironment({ codexHome: 'verified-auth-home' }, root, inherited, 'linux')
+  assert.equal(other.LocalAppData, 'shared-desktop-cache')
+  assert.equal(other.CODEX_HOME, 'verified-auth-home')
+  assert.equal(other.TSG_CODEX_MTG_TOKEN, undefined)
 })
 
 test('CLI arguments preserve the configured model while ignoring incompatible user runtime config', () => {

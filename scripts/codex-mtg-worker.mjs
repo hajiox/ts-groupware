@@ -55,6 +55,18 @@ export function childEnvironment(env = process.env) {
   return Object.fromEntries(Object.entries(env).filter(([key]) => allowed.test(key)))
 }
 
+export function codexEnvironment(config, workDir, env = process.env, platform = process.platform) {
+  const child = childEnvironment(env)
+  for (const key of Object.keys(child)) {
+    if (key.toUpperCase() === 'CODEX_HOME' || (platform === 'win32' && key.toUpperCase() === 'LOCALAPPDATA')) delete child[key]
+  }
+  child.CODEX_HOME = config.codexHome
+  // The Windows sandbox refreshes runtime ACLs. A shared desktop runtime may be
+  // locked by another Codex session, so only this child's runtime cache is local.
+  if (platform === 'win32') child.LOCALAPPDATA = join(resolve(workDir), '.codex-localappdata')
+  return child
+}
+
 export function configuredModel(codexHome) {
   let text
   try { text = readFileSync(join(codexHome, 'config.toml'), 'utf8') } catch { throw fault('MODEL_CONFIG_UNREADABLE') }
@@ -279,7 +291,9 @@ export async function runCodex(config, job, workDir, allowCodeChange, signal, on
     writeFileSync(skillPath, readScopedSkill(config), 'utf8')
   }
   atomicJson(schemaPath, RESULT_SCHEMA)
-  const child = spawnImpl(findCodex(config), args, { cwd: workDir, env: { ...childEnvironment(), CODEX_HOME: config.codexHome }, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] })
+  const environment = codexEnvironment(config, workDir)
+  if (process.platform === 'win32') mkdirSync(environment.LOCALAPPDATA, { recursive: true })
+  const child = spawnImpl(findCodex(config), args, { cwd: workDir, env: environment, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] })
   const abort = () => terminate(child)
   signal.addEventListener('abort', abort, { once: true })
   if (signal.aborted) abort()
