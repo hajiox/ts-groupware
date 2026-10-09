@@ -14,5 +14,5 @@ description: TSG Data MCP を使い、許可された掲示板・ピン留めナ
 - 下書き作成・編集・タスク完了は、ユーザーが依頼した対象と範囲だけに行う。下書き作成だけでは公開されない。
 - 更新・完了・公開準備は直近に取得した version を `expectedVersion` へそのまま渡す。競合は再取得して差分を確認し、古い内容で上書きしない。
 - 書き込みには処理ごとの `idempotencyKey` を固定する。同じ処理の再試行は同じキーと入力を維持する。応答不明のまま別キーで重複実行しない。
-- 投稿公開は、下書き → `post_publish_prepare` → 人間が TSG 管理画面で宛先・内容・差分を承認 → `post_publish_commit`。MCP から承認する方法はない。承認済みの `confirmationId` と対応する下書き ID・version を使う。公開する依頼がなければ commit しない。
+- 投稿公開は、下書き → `post_publish_prepare` → Codex が宛先・内容・差分と利用者の依頼を照合 → `post_publish_commit`。利用者から投稿の依頼があれば追加確認なしで続ける。準備済みの `confirmationId` と対応する下書き ID・version を使う。公開する依頼がなければ commit しない。
 - 完了は返却された ID・状態・requestId を根拠に短く報告する。拒否された操作を別の権限や未提供 API で迂回しない。

@@ -11,7 +11,7 @@ const messages: Record<string, string> = {
   VALIDATION: '入力項目または値が不正です', NOT_FOUND: '対象が見つかりません',
   CONFLICT: 'データが変更されています。最新のversionを取得してください',
   IDEMPOTENCY_CONFLICT: '同じ冪等キーを別の内容に使用できません',
-  CONFIRMATION_REQUIRED: '管理画面で差分を確認・承認してから確定してください',
+  CONFIRMATION_REQUIRED: '公開の準備がないか期限切れです。最新の下書きから再準備してください',
   RATE_LIMITED: '接続の件数上限に達しました。時間を置いてください',
   INTERNAL: '処理に失敗しました。requestIdを管理者へお伝えください',
 }

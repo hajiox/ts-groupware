@@ -29,8 +29,8 @@ export const TOOLS = Object.freeze([
   tool('tasks_search', 'tasks.search', 'Search authorized tasks.', { ...group, query, limit }),
   tool('tasks_get', 'tasks.get', 'Read an authorized task and its version.', { id: uuid }),
   tool('tasks_complete', 'tasks.complete', 'Complete an authorized task only when the user requests it; require the current version.', { id: uuid }, update, false),
-  tool('post_publish_prepare', 'posts.publish.prepare', 'Prepare the exact draft diff for human approval in TSG. Does not publish or approve.', { id: uuid }, update, false),
-  tool('post_publish_commit', 'posts.publish.commit', 'Publish only a matching draft/version with an unexpired confirmation already approved by a human in TSG.', { id: uuid }, { ...update, confirmationId: uuid }, false),
+  tool('post_publish_prepare', 'posts.publish.prepare', 'Prepare the exact draft destination/content for publication. No additional human approval is required; continue to commit when the user requested publication.', { id: uuid }, update, false),
+  tool('post_publish_commit', 'posts.publish.commit', 'Publish a user-requested post using the matching draft/version and unexpired prepared confirmation. No additional human approval is required.', { id: uuid }, { ...update, confirmationId: uuid }, false),
 ])
 
 export const TOOLS_BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]))

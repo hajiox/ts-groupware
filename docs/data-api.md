@@ -41,11 +41,11 @@ knowledgeは独立したナレッジDBではなく、許可掲示板の固定投
 ## 下書きと公開
 
 1. `drafts.create/update` で下書きを保存する。この時点で掲示板へ投稿しない。
-2. 最新versionを取得し、`posts.publish.prepare` で承認依頼を作る。
-3. 人間が管理画面で投稿先・本文・差分を確認し、その内容を承認する。
+2. 最新versionを取得し、`posts.publish.prepare` で公開内容を準備する（`requiresApproval: false`）。
+3. Codex が投稿先・本文・差分を利用者の依頼と照合する。利用者への追加確認や管理画面での承認は不要。
 4. 接続元が同じ下書きID・version・confirmationIdで `posts.publish.commit` を呼ぶ。
 
-承認は10分間。接続・掲示板・本文・version・承認者に結び付ける。差分変更、期限切れ、所属・権限取消、キー失効をサーバーで再検証する。MCP・外部APIに承認操作はない。公開は新規投稿のみで、Push・メンション・FAX・メールを暗黙に送信しない。画像等の添付も扱わない。
+準備した内容は10分間有効。接続・掲示板・本文・versionに結び付ける。既存の未承認・承認済み準備も期限内なら確定できる。承認者の記録は捏造しない。差分変更、期限切れ、所属・権限取消、キー失効をサーバーで再検証する。MCP・外部APIに承認操作はない。公開は新規投稿のみで、Push・メンション・FAX・メールを暗黙に送信しない。画像等の添付も扱わない。
 
 更新は同じ処理に同じ冪等キーと入力を使う。別内容でキーを再利用すると409。CAS不一致も409で、再取得して差分確認が必要。アダプターは自動再送しない。不明な応答の後に新しいキーで同じ更新を重複実行しない。
 
@@ -53,13 +53,13 @@ knowledgeは独立したナレッジDBではなく、許可掲示板の固定投
 
 接続は操作名ごとのscopeと許可掲示板を持つ。毎回、現在の役員権限・承認状態・所属をDBトランザクション内で確認する。失効と更新を同じ接続の行ロックで直列化する。SQL、テーブル、列名、シェル、任意ファイルパスを入力として受け付けない。
 
-管理画面と管理APIは署名付き本人セッション・保存されたexecutive role・同一Originを必須とする。接続作成、失効、公開承認はその接続の発行者本人だけが行う。監査は接続ID、本人ID、requestId、操作、時刻、変更前後の実際の対象値を保存する。秘密・トークンハッシュは履歴表示へ出さない。読取の検索文字列や本文全体を操作ログへ複製しない。DB拒否の生例外を外部へ返さない。
+管理画面と管理APIは署名付き本人セッション・保存されたexecutive role・同一Originを必須とする。接続作成、失効（旧公開承認APIは互換性のため残すが不要）はその接続の発行者本人だけが行う。監査は接続ID、本人ID、requestId、操作、時刻、変更前後の実際の対象値を保存する。秘密・トークンハッシュは履歴表示へ出さない。読取の検索文字列や本文全体を操作ログへ複製しない。DB拒否の生例外を外部へ返さない。
 
 `gw_data_*` テーブルとRPCはservice_role専用。対象既存テーブルの匿名アクセス、および匿名公開されていた強更新RPCも閉じる。通常画面は認証APIからservice_roleで動作し、既存TSG君・DocScanner・TSA連携は既存の正当な認証経路を維持する。添付削除等の旧APIを新MCPへ追加する場合は、別途その対象所有権を検証すること。
 
 ## 導入・検証
 
-- migration: `supabase/migrations/202610070001_scoped_data_api.sql`
+- migrations: `supabase/migrations/202610070001_scoped_data_api.sql`, `supabase/migrations/202610090001_data_publish_no_approval.sql`
 - HTTP: `pnpm test:data-api-http`
 - 認証: `pnpm test:session-security`, `pnpm test:user-role-security`, `pnpm test:reaction-access`
 - DB: migration適用済みDBに `scripts/test-data-api.sql` を実行（合成fixtureのみ、全てROLLBACK）

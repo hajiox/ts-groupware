@@ -169,7 +169,7 @@ BEGIN
   IF r #>> '{data,diff,after,group_id}'<>fake_board::text OR r #>> '{data,diff,after,content}'<>'Synthetic draft v2'
     OR r #>> '{data,diff,after,group_name}' NOT LIKE 'Data API fixture board %' THEN
     RAISE EXCEPTION 'Immutable approval preview did not include exact destination / content'; END IF;
-  PERFORM pg_temp.expect_data_error('CONFIRMATION_REQUIRED',token_value,'posts.publish.commit',jsonb_build_object('id',draft_id),'commit-unapproved','2',old_confirmation);
+  IF r #>> '{data,requiresApproval}' IS DISTINCT FROM 'false' THEN RAISE EXCEPTION 'Redundant approval is still required'; END IF;
   PERFORM pg_temp.expect_admin_error('FORBIDDEN',outsider,'approve_confirmation',jsonb_build_object('id',old_confirmation,'digest',digest_value));
   PERFORM pg_temp.expect_admin_error('CONFLICT',actor,'approve_confirmation',jsonb_build_object('id',old_confirmation,'digest',repeat('0',64)));
   PERFORM public.gw_data_connection_admin(actor,'approve_confirmation',jsonb_build_object('id',old_confirmation,'digest',digest_value));
@@ -189,9 +189,10 @@ BEGIN
   confirmation_id := (r #>> '{data,confirmation_id}')::uuid;
   digest_value := r #>> '{data,digest}';
   DELETE FROM public.gw_group_members WHERE group_id=fake_board AND user_id=actor;
+  PERFORM pg_temp.expect_data_error('FORBIDDEN',token_value,'posts.publish.commit',jsonb_build_object('id',draft_id),'commit-without-membership','3',confirmation_id);
   PERFORM pg_temp.expect_admin_error('FORBIDDEN',actor,'approve_confirmation',jsonb_build_object('id',confirmation_id,'digest',digest_value));
   INSERT INTO public.gw_group_members(group_id,user_id) VALUES(fake_board,actor);
-  PERFORM public.gw_data_connection_admin(actor,'approve_confirmation',jsonb_build_object('id',confirmation_id,'digest',digest_value));
+  -- Leave the current preview pending: publication must succeed without human approval.
   SELECT name INTO group_name_value FROM public.gw_groups WHERE id=fake_board;
   UPDATE public.gw_groups SET name='Changed destination preview' WHERE id=fake_board;
   PERFORM pg_temp.expect_data_error('CONFLICT',token_value,'posts.publish.commit',jsonb_build_object('id',draft_id),'commit-changed-destination','3',confirmation_id);
@@ -207,7 +208,8 @@ BEGIN
   again := public.gw_data_api_execute(token_value,'posts.publish.commit',jsonb_build_object('id',draft_id),'commit-draft-1','3',confirmation_id,gen_random_uuid());
   IF r<>again OR r #>> '{data,status}'<>'published' OR (SELECT count(*) FROM public.gw_posts WHERE group_id=fake_board AND content='Synthetic draft v3')<>1
     OR (SELECT status FROM public.gw_data_confirmations WHERE id=confirmation_id)<>'committed' THEN
-    RAISE EXCEPTION 'Approved publication / retry / immutable confirmation failed'; END IF;
+    RAISE EXCEPTION 'Approval-free publication / retry / immutable confirmation failed'; END IF;
+  IF EXISTS(SELECT 1 FROM public.gw_data_confirmations WHERE id=confirmation_id AND (approved_by IS NOT NULL OR approved_at IS NOT NULL)) THEN RAISE EXCEPTION 'Fabricated human approval'; END IF;
   PERFORM pg_temp.expect_data_error('CONFLICT',token_value,'drafts.update',jsonb_build_object('id',draft_id,'content','published edit'),'update-published','4');
 
   -- Replays must still respect current membership and account state.
@@ -278,4 +280,4 @@ BEGIN
 END;
 $$;
 ROLLBACK;
-SELECT 'Data API SQL regression passed: strict schema, credential/scoped board isolation, pinned knowledge, drafts/CAS/idempotency, assigned tasks, exact approved publication, dynamic revocation and private audit; all fixtures rolled back' AS result;
+SELECT 'Data API SQL regression passed: strict schema, credential/scoped board isolation, pinned knowledge, drafts/CAS/idempotency, assigned tasks, exact approval-free publication, dynamic revocation and private audit; all fixtures rolled back' AS result;

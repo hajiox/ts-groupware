@@ -18,12 +18,12 @@ const labels: Record<DataOperation, string> = {
   'drafts.get': 'この接続の下書き詳細', 'drafts.list': 'この接続の下書き一覧',
   'tasks.search': '自分のタスク検索', 'tasks.get': '自分のタスク詳細',
   'drafts.create': '下書き作成', 'drafts.update': '下書き編集', 'tasks.complete': '自分のタスク完了',
-  'posts.publish.prepare': '公開内容を承認依頼', 'posts.publish.commit': '承認された投稿を公開',
+  'posts.publish.prepare': '公開内容を準備', 'posts.publish.commit': '準備した投稿を公開',
 }
 const groups = [
   { title: '読み取り', scopes: DATA_READ_SCOPES },
   { title: '限定した更新', scopes: DATA_WRITE_SCOPES },
-  { title: '管理画面で承認してから公開', scopes: DATA_PUBLISH_SCOPES },
+  { title: '投稿の公開', scopes: DATA_PUBLISH_SCOPES },
 ]
 const endpoint = '/api/admin/data-connections'
 async function call<T>(view = 'list', body?: Record<string, unknown>): Promise<T> {
@@ -46,7 +46,6 @@ export function DataConnectionsPanel() {
   const [scopes, setScopes] = useState<DataOperation[]>([...DATA_READ_SCOPES])
   const [boards, setBoards] = useState<string[]>([])
   const [token, setToken] = useState('')
-  const [checked, setChecked] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -54,7 +53,7 @@ export function DataConnectionsPanel() {
     const [next, confirmations, history] = await Promise.all([
       call<Snapshot>(), call<{ confirmations: Proposal[] }>('list_confirmations'), call<{ audit: Audit[] }>('list_audit'),
     ])
-    setSnapshot(next); setProposals(confirmations.confirmations); setAudit(history.audit); setChecked([])
+    setSnapshot(next); setProposals(confirmations.confirmations); setAudit(history.audit)
   }, [])
   useEffect(() => { void load().catch(e => setError(e.message)) }, [load])
 
@@ -76,7 +75,7 @@ export function DataConnectionsPanel() {
   return <section className={styles.panel} aria-label="外部Codex接続">
     <h2>外部Codex接続</h2>
     <p>必要な掲示板と操作を選んで接続キーを発行します。{snapshot?.principal.name}の権限内で動作します。</p>
-    <p>投稿の公開は、この画面で投稿先と本文を承認した後に行えます。</p>
+    <p>依頼した投稿は、接続元のCodexから追加承認なしで公開できます。</p>
     {error && <p role="alert" className={styles.error}>{error}</p>}
     {notice && <p role="status">{notice}</p>}
     <button type="button" disabled={busy} onClick={() => void action(load)}>再読込</button>
@@ -126,22 +125,17 @@ export function DataConnectionsPanel() {
         })
       }}>失効する</button></div>}
     </article>)}
-    <h3>投稿の公開承認</h3>
-    {!proposals.length && <p>承認依頼はありません。</p>}
+    <h3>投稿の公開履歴</h3>
+    {!proposals.length && <p>公開の準備・履歴はありません。</p>}
     {proposals.map(proposal => {
-      const pending = proposal.status === 'pending' && Date.parse(proposal.expires_at) > Date.now()
-      const status = proposal.status === 'committed' ? '公開済み' : proposal.status === 'approved' ? '承認済み・公開待ち' : pending ? '承認待ち' : '期限切れ'
+      const pending = ['pending', 'approved'].includes(proposal.status) && Date.parse(proposal.expires_at) > Date.now()
+      const status = proposal.status === 'committed' ? '公開済み' : pending ? '準備済み・公開待ち' : '期限切れ'
       return <article key={proposal.id} className={styles.card}>
         <strong>{proposal.connection_label} — {status}</strong>
         <p>投稿先：<a href={`/board/${proposal.diff.after.group_id}`} target="_blank" rel="noopener noreferrer">{proposal.diff.after.group_name}（{proposal.diff.after.group_id.slice(0, 8)}）</a> ／ 期限：{time(proposal.expires_at)}</p>
         <p>新規投稿する本文</p><pre>{proposal.diff.after.content}</pre>
         <details><summary>変更前の状態</summary><pre>{JSON.stringify(proposal.diff.before, null, 2)}</pre></details>
-        {pending && <>
-          <label className={styles.review}><input type="checkbox" checked={checked.includes(proposal.id)} onChange={e => setChecked(current => e.target.checked ? [...current, proposal.id] : current.filter(id => id !== proposal.id))} />投稿先と本文を確認しました</label>
-          <button type="button" disabled={busy || !checked.includes(proposal.id)} onClick={() => void action(async () => {
-            await call('list', { action: 'approve_confirmation', id: proposal.id, digest: proposal.digest }); await load(); setNotice('承認しました。接続元で公開を確定できます。')
-          })}>この内容で公開を承認</button>
-        </>}
+
       </article>
     })}
     <details className={styles.card}><summary>操作履歴（直近20件）</summary>

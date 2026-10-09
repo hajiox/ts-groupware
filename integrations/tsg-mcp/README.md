@@ -37,13 +37,13 @@ MCP ホストから `node <インストール先>/src/server.mjs` を STDIO 起�
 | `post_publish_prepare` | `posts.publish.prepare` | `id`, `idempotencyKey`, `expectedVersion` |
 | `post_publish_commit` | `posts.publish.commit` | `id`, `confirmationId`, `idempotencyKey`, `expectedVersion` |
 
-`knowledge_*` はピン留め投稿です。接続に許可された操作・掲示板と、TSG 側の現在の所属・権限の範囲で読み書きします。接続発行・失効・公開差分の承認は人間が TSG 管理画面で行い、MCP ツールには含めません。
+`knowledge_*` はピン留め投稿です。接続に許可された操作・掲示板と、TSG 側の現在の所属・権限の範囲で読み書きします。接続発行・失効は人間が TSG 管理画面で行い、MCP ツールには含めません。
 
 `id`・`group_id`・`confirmationId` は UUID。`limit` は 1〜20、`query` は 256 文字以内で NUL 不可、`content` は空白だけでない 4000 文字以内で NUL 不可です。`idempotencyKey` は `[A-Za-z0-9:_-]` の 8〜128 文字、`expectedVersion` は空白を含まない ASCII 1〜80 文字です。更新時の version は読み取り結果の文字列をそのまま使います。未知のフィールド、任意 operation、SQL、テーブル名、列指定、シェル、ファイル操作は受け付けません。
 
 ## 公開と再試行
 
-下書きの作成・更新では公開されません。公開は下書き取得 → `post_publish_prepare` → 人間が TSG 管理画面で宛先・内容・差分を確認して承認 → `post_publish_commit` の順です。commit は承認済み confirmation と同じ下書き・version を指定します。未承認・期限切れ・変更後の差分は TSG 側で拒否されます。
+下書きの作成・更新では公開されません。公開は下書き取得 → `post_publish_prepare` → Codex が宛先・内容・差分を依頼と照合 → `post_publish_commit` の順です。利用者が投稿を依頼した場合、追加の承認質問や管理画面操作は不要です。commit は準備済み confirmation と同じ下書き・version を指定します。未準備・期限切れ・変更後の差分は TSG 側で拒否されます。
 
 書き込みごとに安定した `idempotencyKey` を用意し、同じ処理を再試行する場合は同じキーと入力を使います。変更内容が異なる処理には別のキーを使います。アダプターは自動再送しません。応答が不明なときは、新しいキーで重複実行せず現在の状態を確認します。version 競合時は再取得して差分を確認します。
 
