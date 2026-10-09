@@ -109,13 +109,14 @@ export function buildPayrollMailReport(monthValue: string, attendanceValue: stri
   const period = monthValue ? `${monthValue.replace('-','年')}月給与${attendanceValue ? `（${Number(attendanceValue.slice(5))}月勤務分）` : ''}` : '給与計算のメール'
   if (review) return `${period}を受け取りましたが、自動取込を完了できませんでした。\n既存の給与データは変更していません。ZIPの内容・対象月・登録済みデータの確認が必要です。\n給与・勤務の検証結果: ${SITE}/admin/payroll-mail`
   const labels:Record<string,string>={calculation_settings_missing:'自社の計算設定なし',hourly_rate_missing:'時給設定不足',
-    monthly_base_missing:'月給設定不足',deduction_settings_missing:'控除設定不足',attendance_missing:'比較用の打刻なし',
-    attendance_incomplete:'出退勤の打刻不足',paid_leave_conflict:'有給と打刻の重複',paid_leave_wage_missing:'有給の支払設定不足',
-    overtime_settings_missing:'残業設定不足',invalid_calculation:'計算値の確認不可'}
+    monthly_base_missing:'月給設定不足',deduction_settings_missing:'控除設定不足',labor_attendance_missing:'労務士資料の勤怠入力不足',
+    labor_rate_missing:'労務士資料の単価不明',declared_rate_missing:'計算に必要な時給不明',deduction_items_missing:'当月の控除内訳不明',
+    deduction_items_mismatch:'当月の控除内訳合計と総額の差',
+    overtime_settings_missing:'残業設定不足',invalid_calculation:'計算値の確認不可',earning_items_difference:'基本給・残業明細の差'}
   const details=Object.entries(reasons).filter(([reason])=>reason!=='attendance_difference')
     .map(([reason,count])=>`${labels[reason]||'内容の確認が必要'} ${count}人`).join('、')
-  const attendanceNote=reasons.attendance_difference?`\n差がある人のうち ${reasons.attendance_difference}人は、社労士資料と打刻の勤務日数・時間の違いを含みます。`:''
-  return `${period}をTSGの給与・勤務に取り込みました。\n対象 ${counts.employees}人、比較できた人数 ${counts.compared}人、差があった人数 ${counts.mismatches}人、確認できなかった人数 ${counts.unverified}人。${attendanceNote}${details?`\n未確認の理由: ${details}。`:''}\n差は打刻や自社設定の違いを含む試算の差です。社労士の計算ミスと判定したものではありません。\n比較は取込前の自社設定と打刻・承認済み有給による試算です。税金・保険料等の控除は保存済み設定との比較です。確認できない項目は一致に含めていません。\n${counts.mismatches || counts.unverified ? '差異や未確認の内容を給与・勤務の検証結果で確認してください。' : '比較できた範囲では差はありませんでした。'}\n給与・勤務の検証結果: ${SITE}/admin/payroll-mail`
+  const attendanceNote=reasons.attendance_difference?`\n参考: ${reasons.attendance_difference}人に労務士資料と実打刻の勤怠差があります。`:''
+  return `${period}をTSGの給与・勤務に取り込みました。\n労務士資料の勤怠・記載単価を使った給与式比較: 対象 ${counts.employees}人、比較できた人数 ${counts.compared}人、給与式・控除内訳に差があった人数 ${counts.mismatches}人、確認できなかった人数 ${counts.unverified}人。${details?`\n確認が必要な内容: ${details}。`:''}${attendanceNote}\n実打刻による試算と勤怠差は参考欄に表示し、上の給与式比較の差異人数には含めません。\n固定給は保存済みの適用設定と照合し、設定がない場合は資料から補完します。手当は当月資料の内訳を使います。控除は当月資料の内訳合計と控除総額の照合で、税金・保険料の法定額を再計算した結果ではありません。入力を確認できない項目は一致に含めていません。\n${counts.mismatches || counts.unverified ? '差異や未確認の内容を給与・勤務の検証結果で確認してください。' : '比較できた範囲では差はありませんでした。'}\n給与・勤務の検証結果: ${SITE}/admin/payroll-mail`
 }
 
 async function recipientReady() {
@@ -277,7 +278,8 @@ export async function processPayrollMail(input: PayrollMailInput) {
   const job=await receive({...base,payDate:archive.payDate,summary,documents,totals:analysis.totals,
     results:matches.map(({result,employee})=>({...result,employeeId:employee.id,
       rawPayload:{source:'payroll_mail',employeeCode:result.employeeCode,sourceSheet:result.sourceSheet,verifiedAgainstWorkbookTotal:true}})),
-    comparison:{counts,rows,reasons,archiveDriveFileId:drive.id,calculatedAt:new Date().toISOString(),basis:'pre_import_settings_and_physical_punches',deductions:'stored_settings_estimate'},
+    comparison:{counts,rows,reasons,archiveDriveFileId:drive.id,calculatedAt:new Date().toISOString(),version:2,
+      basis:'labor_attendance_and_declared_rates',deductions:'labor_item_sum_not_tax_recalculation'},
     reportContent:buildPayrollMailReport(input.payrollMonth,input.attendanceMonth,counts,false,reasons),
   })
   return payrollMailReceipt(await reportPendingJob(job),input.sourceKey,input.messageId)

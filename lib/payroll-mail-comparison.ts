@@ -1,5 +1,5 @@
 import {
-  analyzePunchConsistency, calculatePayroll, hasCompleteAttendancePair,
+  analyzePunchConsistency, calculatePayroll, calculatePayrollFromLabor, hasCompleteAttendancePair,
   summarizeAttendance, summarizePaidLeavePayments,
   type AttendanceCalculationPolicy, type PaidLeavePaymentLike,
   type PayrollProfile, type PunchLike,
@@ -21,6 +21,10 @@ export type MailComparisonRow = {
   netDelta: number | null
   deductionDelta: number | null
   attendanceDifference?: boolean
+  profileSource?: 'stored' | 'labor_declared'
+  calculationBasis?: 'labor_attendance_and_declared_rates'
+  deductionBasis?: 'labor_item_sum' | 'unverified'
+  operational?: { status: 'matched' | 'mismatch' | 'unverified'; reason: string | null; paymentDelta: number | null; netDelta: number | null; deductionDelta: number | null }
 }
 
 // A current-period labor-derived profile would compare the ZIP to itself.
@@ -35,7 +39,7 @@ export function selectIndependentProfile(profiles: MailComparisonProfile[], empl
   }).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0] || null
 }
 
-export function comparePayrollMailEmployee(input: {
+function comparePhysicalPunchEmployee(input: {
   employeeId: string
   labor: ParsedPayrollResult
   profile: MailComparisonProfile | null
@@ -79,6 +83,26 @@ export function comparePayrollMailEmployee(input: {
     status: attendanceDifference || [paymentDelta, netDelta, deductionDelta].some(value => Math.abs(value) >= 1) ? 'mismatch' : 'matched',
     reason: attendanceDifference?'attendance_difference':null, paymentDelta, netDelta, deductionDelta,attendanceDifference,
   }
+}
+
+export function comparePayrollMailEmployee(input: {
+  employeeId: string; labor: ParsedPayrollResult; profile: MailComparisonProfile | null
+  punches: PunchLike[]; paidLeave: PaidLeavePaymentLike[]; policy: AttendanceCalculationPolicy
+}): MailComparisonRow {
+  const physical = comparePhysicalPunchEmployee(input)
+  const operational = { status: physical.status, reason: physical.reason, paymentDelta: physical.paymentDelta, netDelta: physical.netDelta, deductionDelta: physical.deductionDelta }
+  const reconstruction = calculatePayrollFromLabor(input.profile,input.labor)
+  const base = { employeeId: input.employeeId, profileId: input.profile?.id || null,
+    profileSource: reconstruction.profileSource, calculationBasis: 'labor_attendance_and_declared_rates' as const,
+    attendanceDifference: physical.attendanceDifference, operational }
+  if (!reconstruction.calculated) return { ...base, status: 'unverified', reason: reconstruction.reason,
+    paymentDelta: null, netDelta: null, deductionDelta: null, deductionBasis: 'unverified' }
+  const calculated = reconstruction.calculated
+  const paymentDelta = calculated.paymentTotal-input.labor.paymentTotal
+  const netDelta = calculated.netPayment-input.labor.netPayment
+  const deductionDelta = calculated.deductionTotal-input.labor.deductionTotal
+  return { ...base, status: reconstruction.componentDifference || [paymentDelta,netDelta,deductionDelta].some(value=>Math.abs(value)>=1) ? 'mismatch' : 'matched',
+    reason: reconstruction.reason, paymentDelta, netDelta, deductionDelta, deductionBasis: 'labor_item_sum' }
 }
 
 export function payrollMailComparisonCounts(rows: MailComparisonRow[]) {

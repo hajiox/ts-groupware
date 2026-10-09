@@ -104,6 +104,16 @@ export type PayrollCalculationResult = {
   attendance: AttendanceSummary
 }
 
+export type PayrollLaborItem = {
+  code: string; itemType: string; taxable: boolean | null
+  amount: number; minutes: number | null; days: number | null; rate: number | null
+}
+export type PayrollLaborInput = {
+  paymentTotal: number; netPayment: number; deductionTotal: number
+  nonTaxablePaymentTotal: number; items: PayrollLaborItem[]
+}
+export type LaborCalculationOptions = { basis: 'labor'; nonTaxableAmount: number }
+
 function numberValue(value: unknown): number {
   const next = typeof value === 'number' ? value : Number(value || 0)
   return Number.isFinite(next) ? next : 0
@@ -387,6 +397,7 @@ export function calculatePayroll(
   profile: PayrollProfile,
   attendance: AttendanceSummary,
   paidLeave: PaidLeavePaymentSummary = { days: 0, minutes: 0, amount: 0 },
+  options?: LaborCalculationOptions,
 ): PayrollCalculationResult {
   const monthlyBase = numberValue(profile.monthly_base_amount)
   const hourlyRate = numberValue(profile.hourly_rate)
@@ -405,10 +416,12 @@ export function calculatePayroll(
     const source = profile.source_snapshot || {}
     const sourceBaseAmount = numberValue(source.base_payment_amount ?? source.base_salary)
     const sourceWorkMinutes = numberValue(source.work_minutes)
-    const effectiveHourlyRate = sourceBaseAmount > 0 && sourceWorkMinutes > 0
+    const effectiveHourlyRate = options?.basis === 'labor' && hourlyRate > 0
+      ? hourlyRate
+      : sourceBaseAmount > 0 && sourceWorkMinutes > 0
       ? sourceBaseAmount / (sourceWorkMinutes / 60)
       : hourlyRate
-    baseAmount = yen((attendance.workMinutes / 60) * effectiveHourlyRate) + paidLeaveAmount
+    baseAmount = yen((attendance.workMinutes * effectiveHourlyRate) / 60) + paidLeaveAmount
   } else if (profile.calculation_type === 'monthly_with_overtime') {
     baseAmount = yen(monthlyBase)
     const source = profile.source_snapshot || {}
@@ -423,23 +436,25 @@ export function calculatePayroll(
         ? numberValue(source.sunday_overtime_amount) / (sourceSundayMinutes / 60)
         : 0)
     if (learnedWeekdayRate > 0) {
-      overtimeAmount += yen(learnedWeekdayRate * (attendance.weekdaySaturdayOvertimeMinutes / 60))
+      overtimeAmount += yen((options?.basis === 'labor' ? yen(learnedWeekdayRate) : learnedWeekdayRate) * attendance.weekdaySaturdayOvertimeMinutes / 60)
     } else if (divisor > 0) {
-      overtimeAmount += yen((monthlyBase / divisor) * weekdayMultiplier * (attendance.weekdaySaturdayOvertimeMinutes / 60))
+      const rate = (monthlyBase / divisor) * weekdayMultiplier
+      overtimeAmount += yen((options?.basis === 'labor' ? yen(rate) : rate) * attendance.weekdaySaturdayOvertimeMinutes / 60)
     }
     if (learnedSundayRate > 0) {
-      overtimeAmount += yen(learnedSundayRate * (attendance.sundayOvertimeMinutes / 60))
+      overtimeAmount += yen((options?.basis === 'labor' ? yen(learnedSundayRate) : learnedSundayRate) * attendance.sundayOvertimeMinutes / 60)
     } else if (divisor > 0) {
-      overtimeAmount += yen((monthlyBase / divisor) * sundayMultiplier * (attendance.sundayOvertimeMinutes / 60))
+      const rate = (monthlyBase / divisor) * sundayMultiplier
+      overtimeAmount += yen((options?.basis === 'labor' ? yen(rate) : rate) * attendance.sundayOvertimeMinutes / 60)
     }
   } else if (profile.calculation_type === 'monthly_fixed' || profile.calculation_type === 'officer_fixed') {
     baseAmount = yen(monthlyBase)
   }
 
   const taxablePaymentTotal = yen(baseAmount + overtimeAmount + taxableAdditions)
-  const nonTaxablePaymentTotal = scaledCommuteAmount(profile, attendance)
+  const nonTaxablePaymentTotal = options ? yen(options.nonTaxableAmount) : scaledCommuteAmount(profile, attendance)
   const paymentTotal = taxablePaymentTotal + nonTaxablePaymentTotal
-  const deductions = calculatedDeductions(profile, paymentTotal)
+  const deductions = options ? deductionSnapshot(profile) : calculatedDeductions(profile, paymentTotal)
   const deductionTotal = yen(Object.values(deductions).reduce((sum, value) => sum + value, 0))
 
   return {
@@ -457,4 +472,68 @@ export function calculatePayroll(
     deductionSnapshot: deductions,
     attendance,
   }
+}
+
+// Reconstruct the accountant's formula with their attendance categories and
+// declared inputs. Target base/OT totals are never used to reverse-fit rates.
+// Current allowance/deduction amounts are external inputs, not tax calculations.
+export function calculatePayrollFromLabor(profile: PayrollProfile | null, labor: PayrollLaborInput): {
+  calculated: PayrollCalculationResult | null; reason: string | null; profileSource: 'stored' | 'labor_declared'; componentDifference?: boolean
+} {
+  const failure = (reason: string) => ({ calculated: null, reason, profileSource: 'stored' as const })
+  if ([labor.paymentTotal, labor.netPayment, labor.deductionTotal, labor.nonTaxablePaymentTotal].some(value => !Number.isFinite(value))) return failure('invalid_calculation')
+  const items = labor.items
+  if (items.some(item => !Number.isFinite(item.amount) || [item.minutes,item.days,item.rate].some(value => value != null && !Number.isFinite(value)))) return failure('invalid_calculation')
+  const item = (codes: string[]) => items.find(row => codes.includes(row.code))
+  const base = item(['base_salary'])
+  const statedRate = numberValue(item(['regular_salary'])?.rate)
+  const knownType = profile?.calculation_type
+  const calculationType: PayrollCalculationType = statedRate > 0 ? 'hourly'
+    : knownType && knownType !== 'unknown' ? knownType
+      : base && base.amount > 0 && !item(['work_minutes']) ? (items.some(row => ['weekday_saturday_overtime','sunday_overtime','regular_overtime','overtime_allowance','holiday_work_allowance'].includes(row.code) && row.amount !== 0) ? 'monthly_with_overtime' : 'monthly_fixed') : 'unknown'
+  if (calculationType === 'unknown') return failure('calculation_settings_missing')
+  const work = item(['work_minutes'])
+  if (calculationType === 'hourly' && work?.minutes == null) return failure('labor_attendance_missing')
+  const hourlyRate = statedRate || numberValue(profile?.hourly_rate)
+  if (calculationType === 'hourly' && !(hourlyRate > 0)) return failure('declared_rate_missing')
+  const weekday = item(['weekday_saturday_overtime_minutes','regular_overtime_minutes'])
+  const sunday = item(['sunday_overtime_minutes'])
+  if (calculationType === 'monthly_with_overtime' &&
+      ((items.some(row => ['weekday_saturday_overtime','regular_overtime','overtime_allowance'].includes(row.code) && row.amount !== 0) && weekday?.minutes == null) ||
+       (items.some(row => ['sunday_overtime','holiday_work_allowance'].includes(row.code) && row.amount !== 0) && sunday?.minutes == null))) return failure('labor_attendance_missing')
+  const source = profile?.source_snapshot || {}
+  const divisor = numberValue(profile?.overtime_divisor)
+  if ((numberValue(weekday?.minutes) > 0 && !(numberValue(source.weekday_saturday_overtime_hourly_rate) > 0) && !(divisor > 0)) ||
+      (numberValue(sunday?.minutes) > 0 && !(numberValue(source.sunday_overtime_hourly_rate) > 0) && !(divisor > 0))) return failure('overtime_settings_missing')
+  const monthlyBase = profile?.monthly_base_amount ?? base?.amount
+  if (calculationType !== 'hourly' && (monthlyBase == null || Number(monthlyBase) < 0)) return failure('monthly_base_missing')
+  const deductionItems = items.filter(row => row.itemType === 'deduction')
+  if (!deductionItems.length && labor.deductionTotal !== 0) return failure('deduction_items_missing')
+  const earningInputs = items.filter(row => row.itemType === 'earning')
+  const nonTaxable = earningInputs.filter(row => row.taxable === false).reduce((sum,row) => sum+row.amount,0)
+  if (!earningInputs.length || (nonTaxable === 0 && labor.nonTaxablePaymentTotal !== 0 && !earningInputs.some(row => row.taxable === false))) return failure('invalid_calculation')
+  const excluded = ['base_salary','regular_salary','weekday_saturday_overtime','regular_overtime','overtime_allowance','sunday_overtime','holiday_work_allowance']
+  const working: PayrollProfile = {
+    ...profile, calculation_type: calculationType, monthly_base_amount: monthlyBase, hourly_rate: hourlyRate,
+    taxable_additions: Object.fromEntries(earningInputs.filter(row => row.taxable && !excluded.includes(row.code)).map(row => [row.code,row.amount])),
+    deduction_snapshot: Object.fromEntries(deductionItems.map(row => [row.code,row.amount])),
+    // Only use already-known unit rates; do not carry source payment/deduction
+    // totals that would shortcut the target-period calculation.
+    source_snapshot: {
+      weekday_saturday_overtime_hourly_rate: source.weekday_saturday_overtime_hourly_rate,
+      sunday_overtime_hourly_rate: source.sunday_overtime_hourly_rate,
+    },
+  }
+  const attendance: AttendanceSummary = {
+    workDays: numberValue(item(['attendance_days'])?.days), workMinutes: numberValue(work?.minutes),
+    weekdaySaturdayOvertimeMinutes: numberValue(weekday?.minutes), sundayOvertimeMinutes: numberValue(sunday?.minutes), daily: [],
+  }
+  const calculated = calculatePayroll(working,attendance,undefined,{basis:'labor',nonTaxableAmount:nonTaxable})
+  if ([calculated.paymentTotal,calculated.netPayment,calculated.deductionTotal].some(value => !Number.isFinite(value))) return failure('invalid_calculation')
+  const weekdayAmount = items.filter(row => ['weekday_saturday_overtime','regular_overtime','overtime_allowance'].includes(row.code)).reduce((sum,row) => sum+row.amount,0)
+  const sundayAmount = items.filter(row => ['sunday_overtime','holiday_work_allowance'].includes(row.code)).reduce((sum,row) => sum+row.amount,0)
+  const calculatedWeekday = calculatePayroll(working,{...attendance,sundayOvertimeMinutes:0},undefined,{basis:'labor',nonTaxableAmount:0}).overtimeAmount
+  const calculatedSunday = calculatePayroll(working,{...attendance,weekdaySaturdayOvertimeMinutes:0},undefined,{basis:'labor',nonTaxableAmount:0}).overtimeAmount
+  const componentDifference = (base != null && calculated.baseAmount !== base.amount) || calculatedWeekday !== weekdayAmount || calculatedSunday !== sundayAmount
+  return { calculated, reason: componentDifference ? 'earning_items_difference' : null, profileSource: profile ? 'stored' : 'labor_declared', componentDifference }
 }

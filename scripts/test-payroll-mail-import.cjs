@@ -23,16 +23,16 @@ const punches=[{employee_id:employee.id,is_voided:false,punch_type:'clock_in',wo
   {employee_id:employee.id,is_voided:false,punch_type:'clock_out',work_date:'2026-09-01',punched_at:'2026-09-01T08:00:00Z'}]
 const labor={employeeCode:'901',employeeName:'検証社員',taxablePaymentTotal:8000,nonTaxablePaymentTotal:0,paymentTotal:8000,
   socialInsuranceTotal:0,deductionTotal:0,taxableIncome:8000,netPayment:8000,cashPayment:0,transferPayment:8000,
-  dependentsCount:0,taxTableCategory:'甲',sourceSheet:'検証',items:[{code:'base_salary',name:'基本給',itemType:'earning',taxable:true,amount:8000,minutes:null,days:null,rate:null,sortOrder:10,rawValue:8000}]}
+  dependentsCount:0,taxTableCategory:'甲',sourceSheet:'検証',items:[{code:'work_minutes',minutes:480,days:null,rate:null,amount:0,itemType:'attendance',taxable:false},{code:'attendance_days',days:1,minutes:null,rate:null,amount:0,itemType:'attendance',taxable:false},{code:'base_salary',name:'基本給',itemType:'earning',taxable:true,amount:8000,minutes:null,days:null,rate:null,sortOrder:10,rawValue:8000}]}
 function compare(extra={}){return comparison.comparePayrollMailEmployee({employeeId:employee.id,labor,profile,punches,paidLeave:[],policy,...extra})}
 assert.equal(compare().status,'matched')
 assert.equal(compare({profile:{...profile,hourly_rate:1200}}).status,'mismatch')
-assert.equal(compare({punches:[]}).reason,'attendance_missing')
-assert.equal(compare({punches:[punches[0]]}).reason,'attendance_incomplete')
+assert.equal(compare({punches:[]}).operational.reason,'attendance_missing')
+assert.equal(compare({punches:[punches[0]]}).operational.reason,'attendance_incomplete')
 assert.equal(compare({profile:null}).status,'unverified')
-assert.equal(compare({profile:{...profile,source_snapshot:{}}}).reason,'deduction_settings_missing')
-assert.equal(compare({paidLeave:[{leave_date:'2026-09-01',leave_unit:'full_day',requested_days:1,payable_minutes_snapshot:480,paid_wage_amount:8000}]}).reason,'paid_leave_conflict')
-assert.equal(compare({labor:{...labor,items:[{code:'work_minutes',minutes:450}]}}).reason,'attendance_difference')
+assert.equal(compare({profile:{...profile,source_snapshot:{}}}).status,'matched')
+assert.equal(compare({paidLeave:[{leave_date:'2026-09-01',leave_unit:'full_day',requested_days:1,payable_minutes_snapshot:480,paid_wage_amount:8000}]}).operational.reason,'paid_leave_conflict')
+assert.equal(compare({labor:{...labor,items: labor.items.map(item=>item.code==='work_minutes'?{...item,minutes:450}:item)}}).operational.reason,'attendance_difference')
 const current={...profile,id:'profile-current',effective_from:'2026-10-01',hourly_rate:1200,source_snapshot:{source:'labor_payroll_zip',payroll_month:'2026-10-01'}}
 assert.equal(comparison.selectIndependentProfile([current,profile],employee.id,'2026-10-01').id,'profile-old')
 assert.equal(comparison.selectIndependentProfile([current],employee.id,'2026-10-01'),null)

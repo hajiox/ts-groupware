@@ -4,6 +4,7 @@ import { getUserSession } from '@/lib/session'
 import { loadAttendanceCalculationPolicy } from '@/lib/payroll-attendance-policy-data'
 import {
   calculatePayroll,
+  calculatePayrollFromLabor,
   hasCompleteAttendancePair,
   summarizeAttendance,
   summarizePaidLeavePayments,
@@ -15,6 +16,7 @@ import {
 import { adminClient } from '@/lib/supabase/admin'
 import { isEmployeePayrollEligibleForRange } from '@/lib/workforce-employment'
 import { comparisonPaidLeave, payrollAmountDelta } from '@/lib/payroll-comparison'
+import { selectIndependentProfile } from '@/lib/payroll-mail-comparison'
 
 type PeriodRow = {
   id: string
@@ -62,6 +64,7 @@ type ResultRow = {
   deduction_total: number | string | null
   taxable_income: number | string | null
   net_payment: number | string | null
+  raw_payload: Record<string, unknown> | null
 }
 
 type PayrollItemRow = {
@@ -137,6 +140,7 @@ type DiffReviewRow = {
   calculatedBreakdown: PayrollBreakdown | null
   hasOperationalAttendanceDifference: boolean
   operationalPaymentDelta: number | null
+  componentDifference?: boolean
   delta: {
     paymentTotal: number | null
     netPayment: number | null
@@ -151,6 +155,7 @@ type ReviewChangePointId =
   | 'attendance_input'
   | 'operational_attendance'
   | 'source_detail'
+  | 'earning_components'
   | 'base_amount'
   | 'overtime'
   | 'taxable_additions'
@@ -208,6 +213,13 @@ const REVIEW_CHANGE_POINT_DEFINITIONS: Record<ReviewChangePointId, ReviewChangeP
     diagnosis: '支給合計だけが入り、基本給・手当・控除の明細が抽出されていません。',
     action: '支給控除一覧・賃金台帳のExcel/CSVを優先して取り込み、項目単位で比較可能にします。',
     target: '労務データ / ZIP解析',
+  },
+  earning_components: {
+    label: '基本給・残業の項目別照合',
+    priority: 'high',
+    diagnosis: '基本給または平日・日曜残業の項目別金額に差があります。合計が一致していても確認が必要です。',
+    action: '基本給、平日残業、日曜残業を項目ごとに確認し、時間・単価・円単位の丸めを照合します。',
+    target: '給与計算プロフィール / 労務士明細',
   },
   base_amount: {
     label: '基本給・本給',
@@ -384,6 +396,7 @@ function buildDifferenceHints(params: {
   laborCandidates: LaborResultMatch[]
   profile: PayrollProfile | null
   calculationUnavailableReason: string | null
+  componentDifference?: boolean
 }) {
   const hints: string[] = []
   if (!params.labor) {
@@ -404,6 +417,9 @@ function buildDifferenceHints(params: {
   if (params.laborMatch && params.laborMatch.matchedBy !== 'direct') {
     hints.push(`労務士結果は ${matchLabel(params.laborMatch.matchedBy)} で突合しています。名前違い・旧姓・補足文字列の確認対象です。`)
   }
+  if (params.componentDifference) {
+    hints.push('基本給または平日・日曜残業の項目別金額に差があります。合計で相殺されていても確認が必要です。')
+  }
 
   const laborBreakdown = params.laborBreakdown
   const calculatedBreakdown = params.calculatedBreakdown
@@ -416,6 +432,10 @@ function buildDifferenceHints(params: {
   }
   if (hints.length === 0) hints.push('主要内訳は一致しています。差異が残る場合は端数処理・未分類項目を確認してください。')
   return hints
+}
+
+function hasPayrollFormulaDifference(row: Pick<DiffReviewRow, 'componentDifference' | 'delta'>) {
+  return Boolean(row.componentDifference || Math.abs(row.delta.paymentTotal || 0) >= 1 || Math.abs(row.delta.netPayment || 0) >= 1)
 }
 
 function buildPayrollReview(rows: DiffReviewRow[]) {
@@ -448,6 +468,9 @@ function buildPayrollReview(rows: DiffReviewRow[]) {
     }
     if (row.hasLaborResult && row.laborBreakdown && !row.laborBreakdown.hasItemDetails) {
       record('source_detail', row.employeeName)
+    }
+    if (row.componentDifference) {
+      record('earning_components', row.employeeName)
     }
 
     if (!row.laborBreakdown || !row.calculatedBreakdown) continue
@@ -495,10 +518,7 @@ function buildPayrollReview(rows: DiffReviewRow[]) {
     })
 
   const comparable = rows.filter((row) => row.hasLaborResult && row.hasProfile && !row.calculationUnavailableReason)
-  const exactMatches = comparable.filter((row) => (
-    Math.abs(row.delta.paymentTotal || 0) < 1
-    && Math.abs(row.delta.netPayment || 0) < 1
-  )).length
+  const exactMatches = comparable.filter((row) => !hasPayrollFormulaDifference(row)).length
   const attendanceDifferenceEmployees = rows.filter((row) => row.hasOperationalAttendanceDifference).length
   const blockers = changePoints.filter((changePoint) => changePoint.priority === 'blocker')
   const monetaryChanges = changePoints.filter((changePoint) => (
@@ -859,7 +879,7 @@ export async function GET(request: NextRequest) {
       .select('id, employee_id, effective_from, effective_to, calculation_type, monthly_base_amount, hourly_rate, overtime_divisor, weekday_saturday_overtime_multiplier, sunday_overtime_multiplier, scheduled_minutes, taxable_additions, deduction_snapshot, source_snapshot'),
     adminClient
       .from('gw_payroll_employee_results')
-      .select('id, payroll_period_id, employee_id, taxable_payment_total, non_taxable_payment_total, payment_total, social_insurance_total, deduction_total, taxable_income, net_payment')
+      .select('id, payroll_period_id, employee_id, taxable_payment_total, non_taxable_payment_total, payment_total, social_insurance_total, deduction_total, taxable_income, net_payment, raw_payload')
       .eq('payroll_period_id', selectedPeriod.id),
     adminClient
       .from('gw_attendance_punches')
@@ -1026,10 +1046,13 @@ export async function GET(request: NextRequest) {
         ? profilesByEmployee.get(laborMatch.sourceEmployee.id) || null
         : null
       const profile = sourceProfile || storedProfile || learnedProfileFromLaborResult(employee, labor, laborItemRows)
+      const formulaProfile = selectIndependentProfile((profiles || []) as ProfileRow[], laborMatch?.sourceEmployee?.id || employeeId, profileMonth)
+      const mailResult = labor?.raw_payload?.source === 'payroll_mail'
+      const operationalProfile = mailResult ? formulaProfile : profile
       const punchRows = punchesByEmployee.get(employeeId) || []
       const hasPunches = hasCompleteAttendancePair(punchRows)
-      const punchAttendance = profile && hasPunches
-        ? summarizeAttendance(punchRows, profile, attendancePolicy)
+      const punchAttendance = operationalProfile && hasPunches
+        ? summarizeAttendance(punchRows, operationalProfile, attendancePolicy)
         : null
       const laborAttendance = profile ? attendanceFromLaborItems(laborItemRows) : null
       const sourceAttendance = profile && !laborAttendance ? attendanceFromSourceSnapshot(profile) : null
@@ -1049,7 +1072,13 @@ export async function GET(request: NextRequest) {
         ? `有給（全休）と実打刻が重複しています（${paidLeave.conflicts.map((row) => row.leaveDate).join('、')}）。有給取消または打刻修正後に再計算してください`
         : null
       const canCalculateWithoutPunches = profile?.calculation_type === 'monthly_fixed' || profile?.calculation_type === 'officer_fixed'
-      const calculated = profile && !paidLeaveConflictReason && (attendance || canCalculateWithoutPunches)
+      // Historical manual imports retain their recorded month-specific rules.
+      // Mail imports use the same formula reconstruction as the mail review.
+      const accountantCalculation = mailResult && labor ? calculatePayrollFromLabor(formulaProfile, {
+        paymentTotal: amount(labor.payment_total), netPayment: amount(labor.net_payment), deductionTotal: amount(labor.deduction_total),
+        nonTaxablePaymentTotal: amount(labor.non_taxable_payment_total), items: laborItemRows,
+      }) : null
+      const calculated = accountantCalculation ? accountantCalculation.calculated : profile && !paidLeaveConflictReason && (attendance || canCalculateWithoutPunches)
         ? calculatePayroll(
           profile,
           attendance || {
@@ -1062,10 +1091,12 @@ export async function GET(request: NextRequest) {
           comparisonPaidLeave(attendanceSource, paidLeave.summary),
         )
         : null
-      const punchCalculated = profile && punchAttendance && !paidLeaveConflictReason && attendanceSource !== 'punch'
-        ? calculatePayroll(profile, punchAttendance, paidLeave.summary)
+      const punchCalculated = operationalProfile && punchAttendance && !paidLeaveConflictReason && attendanceSource !== 'punch'
+        ? calculatePayroll(operationalProfile, punchAttendance, paidLeave.summary)
         : null
-      const calculationUnavailableReason = profile && !calculated
+      const calculationUnavailableReason = !calculated && accountantCalculation
+        ? '労務士資料の勤務時間・単価、または過去の残業設定が不足しています'
+        : profile && !calculated
         ? paidLeaveConflictReason || '打刻または労務士取込勤怠がないため時給・残業計算不可'
         : null
 
@@ -1075,6 +1106,7 @@ export async function GET(request: NextRequest) {
       const calculatedNetPayment = calculated?.netPayment ?? 0
       const paymentDelta = payrollAmountDelta(calculated?.paymentTotal, labor ? laborPaymentTotal : null)
       const netDelta = payrollAmountDelta(calculated?.netPayment, labor ? laborNetPayment : null)
+      const componentDifference = Boolean(accountantCalculation?.componentDifference)
       const operationalPaymentDelta = payrollAmountDelta(punchCalculated?.paymentTotal, labor ? laborPaymentTotal : null)
       const operationalNetDelta = payrollAmountDelta(punchCalculated?.netPayment, labor ? laborNetPayment : null)
       const hasOperationalAttendanceDifference = Boolean(
@@ -1105,6 +1137,7 @@ export async function GET(request: NextRequest) {
         laborCandidates: laborMatchResult.candidates,
         profile,
         calculationUnavailableReason,
+        componentDifference,
       })
 
       return {
@@ -1168,6 +1201,7 @@ export async function GET(request: NextRequest) {
           netDelta: operationalNetDelta,
         } : null,
         hasOperationalAttendanceDifference,
+        componentDifference,
         operationalPaymentDelta,
         attendanceDifferenceHints,
         laborBreakdown,
@@ -1189,7 +1223,7 @@ export async function GET(request: NextRequest) {
                 ? '明細未取込'
               : laborMatch?.matchedBy !== 'direct' && laborMatch?.matchedBy !== 'registered_alias'
                 ? '突合補正'
-            : Math.abs(paymentDelta || 0) >= 1 || Math.abs(netDelta || 0) >= 1
+            : hasPayrollFormulaDifference({componentDifference,delta:{paymentTotal:paymentDelta,netPayment:netDelta}})
               ? '要確認'
               : hasOperationalAttendanceDifference
                 ? '勤怠差'
@@ -1217,7 +1251,7 @@ export async function GET(request: NextRequest) {
     })
 
   const comparableRows = rows.filter((row) => row.hasLaborResult && row.hasProfile && row.calculated)
-  const mismatches = comparableRows.filter((row) => Math.abs(row.delta.paymentTotal || 0) >= 1 || Math.abs(row.delta.netPayment || 0) >= 1)
+  const mismatches = comparableRows.filter(hasPayrollFormulaDifference)
   const review = buildPayrollReview(rows)
 
   return NextResponse.json({
