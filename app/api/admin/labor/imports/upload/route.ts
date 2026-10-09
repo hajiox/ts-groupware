@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { NextResponse } from 'next/server'
-import { uploadFileToDrive } from '@/lib/drive'
+import { uploadPayrollArchiveToDrive } from '@/lib/drive'
 import { analyzeLaborImportBatch } from '@/lib/labor-payroll-zip'
 import { getManagementPermissions } from '@/lib/management-permissions'
 import { getUserSession } from '@/lib/session'
@@ -201,7 +201,7 @@ export async function POST(request: Request) {
   let drive: { id?: string | null; webViewLink?: string | null; webContentLink?: string | null } | null = null
   let driveUploadError: string | null = null
   try {
-    drive = await uploadFileToDrive(buffer, `労務ZIP_${payrollMonth.slice(0, 7)}_${file.name}`, 'application/zip')
+    drive = await uploadPayrollArchiveToDrive(buffer, `労務ZIP_${payrollMonth.slice(0, 7)}_${file.name}`)
   } catch (error) {
     driveUploadError = error instanceof Error ? error.message : 'Drive upload failed'
   }

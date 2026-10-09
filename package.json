@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test:payroll-mail": "node scripts/test-payroll-mail-archive.cjs && node scripts/test-payroll-mail-import.cjs && node scripts/test-payroll-mail-drive.cjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

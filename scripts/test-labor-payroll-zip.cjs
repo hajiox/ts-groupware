@@ -22,12 +22,13 @@ function workbook(rows, name) {
   return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' })
 }
 async function fixture(revision = '', options = {}) {
-  const rows = [['支給一覧'], ['対象月'], ['会社'], ['部署'], ['区分'], ['', '検証社員', '', '', '', '1名'],
+  const employeeName = options.employeeName || '検証社員'
+  const rows = [['支給一覧'], ['対象月'], ['会社'], ['部署'], ['区分'], ['', employeeName, '', '', '', '1名'],
     ['基本給', 100], ['支給合計', 100, '', '', '', options.wrongTotal ? 101 : 100],
     ['控除合計', 10, '', '', '', 10], ['差引支給額', 90, '', '', '', 90]]
   const zip = new JSZip()
   const statement = workbook(rows, '支給一覧')
-  const ledger = workbook([['社員台帳']], '(901)検証社員')
+  const ledger = workbook([['社員台帳']], `(901)${employeeName}`)
   zip.file(`エクセル/2026.9支給控除一覧表${revision}.xlsx`, statement)
   if (!options.noLedger) zip.file(`エクセル/2026年賃金台帳${revision}.xlsx`, ledger)
   zip.file(`エクセル/2026年賃金台帳(全社計)${revision}.xlsx`, ledger)
@@ -63,6 +64,14 @@ async function main() {
   }
   await assert.rejects(parseLaborPayrollZip(await fixture('_rev1', { noLedger: true })), /社員別の賃金台帳/)
   await assert.rejects(parseLaborPayrollZip(await fixture('_rev1', { wrongTotal: true })), /全社計と一致しません/)
+  const zeroZip = new JSZip()
+  zeroZip.file('支給控除一覧表.xlsx',workbook([['支給一覧'],['対象月'],['会社'],['部署'],['区分'],['','検証社員','','','','1名'],
+    ['基本給',null],['支給合計',null,'','','',0],['控除合計',null,'','','',0],['差引支給額',null,'','','',0]],'支給一覧'))
+  zeroZip.file('賃金台帳.xlsx',workbook([['社員台帳']],'(901)検証社員'))
+  const zeroResult = await parseLaborPayrollZip(await zeroZip.generateAsync({type:'nodebuffer'}))
+  assert.equal(zeroResult.results.length,1,'Named zero-pay employees remain in verified headcount')
+  assert.equal(zeroResult.results[0].paymentTotal,0)
+  assert.equal((await parseLaborPayrollZip(await fixture('',{employeeName:'検証 花名'}))).results.length,1,'A name ending in 名 is not a headcount cell')
   assert.equal(payrollAmountDelta(100, null), null)
   assert.equal(payrollAmountDelta(null, 100), null)
   assert.equal(payrollAmountDelta(undefined, undefined), null)

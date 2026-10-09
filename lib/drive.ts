@@ -114,6 +114,52 @@ export async function downloadFileFromDrive(fileId: string) {
   return Buffer.from(response.data as ArrayBuffer)
 }
 
+// Payroll archives never inherit the ordinary attachment folder's sharing.
+// A dedicated My Drive folder may be owned by one account and shared only
+// with this API's authenticated account (for service-account access).
+async function payrollArchiveStore() {
+  const drive = getDriveClient()
+  const folderId = process.env.GOOGLE_PAYROLL_FOLDER_ID?.trim()
+  if (!folderId) throw new Error('Private payroll archive folder is not configured')
+  const account = await drive.about.get({ fields: 'user(emailAddress)' })
+  const actor = account.data.user?.emailAddress?.toLowerCase()
+  if (!actor) throw new Error('Payroll archive account could not be verified')
+  const validatePermissions = async (fileId: string) => {
+    const permissions = await drive.permissions.list({ fileId, fields: 'nextPageToken,permissions(type,role,emailAddress,deleted)', pageSize: 100, supportsAllDrives: true })
+    const rows = permissions.data.permissions || []
+    if (permissions.data.nextPageToken || !rows.some(permission => !permission.deleted && permission.type === 'user' && permission.role === 'owner') || rows.some(permission => (
+      !permission.deleted && (permission.type !== 'user' || (permission.role !== 'owner' && permission.emailAddress?.toLowerCase() !== actor))
+    ))) throw new Error('Payroll archive folder must be private')
+  }
+  const folder = await drive.files.get({ fileId: folderId, fields: 'mimeType,trashed,driveId,capabilities(canAddChildren)', supportsAllDrives: true })
+  if (folder.data.mimeType !== 'application/vnd.google-apps.folder' || folder.data.trashed || folder.data.driveId || folder.data.capabilities?.canAddChildren !== true) {
+    throw new Error('Payroll archive folder must be a private My Drive folder')
+  }
+  await validatePermissions(folderId)
+  return { drive, folderId, validatePermissions }
+}
+
+export async function checkPayrollArchiveStorage() {
+  await payrollArchiveStore()
+  return true
+}
+
+export async function uploadPayrollArchiveToDrive(fileBuffer: Buffer, fileName: string) {
+  const { drive, folderId, validatePermissions } = await payrollArchiveStore()
+  const response = await drive.files.create({
+    requestBody: { name: fileName, parents: [folderId] },
+    media: { mimeType: 'application/zip', body: Readable.from(fileBuffer) },
+    fields: 'id', supportsAllDrives: true,
+  })
+  if (!response.data.id) throw new Error('Payroll archive could not be saved')
+  try { await validatePermissions(response.data.id) }
+  catch (error) {
+    await drive.files.update({ fileId: response.data.id, requestBody: { trashed: true }, supportsAllDrives: true }).catch(() => undefined)
+    throw error
+  }
+  return { id: response.data.id }
+}
+
 export async function deleteFileFromDrive(fileId: string) {
   const drive = getDriveClient()
 

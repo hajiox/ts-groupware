@@ -5,7 +5,7 @@ import { adminClient } from '@/lib/supabase/admin'
 
 type PayrollCell = string | number | boolean | Date | null | undefined
 
-type ParsedPayrollItem = {
+export type ParsedPayrollItem = {
   code: string
   name: string
   itemType: 'earning' | 'deduction' | 'attendance'
@@ -18,7 +18,7 @@ type ParsedPayrollItem = {
   rawValue: PayrollCell
 }
 
-type ParsedPayrollResult = {
+export type ParsedPayrollResult = {
   employeeCode: string | null
   employeeName: string
   taxablePaymentTotal: number
@@ -57,7 +57,7 @@ export type LaborPayrollZipAnalysis = {
   }
 }
 
-type EmployeeRow = {
+export type EmployeeRow = {
   id: string
   user_id: string | null
   employee_code: string | null
@@ -104,6 +104,7 @@ type ItemDefinition = {
 }
 
 const ITEM_DEFINITIONS: Record<string, ItemDefinition> = {
+  '供託金': { code: 'deposit_money', name: '供託金', itemType: 'deduction', taxable: false, sortOrder: 420, valueKind: 'amount' },
   '出勤日数': { code: 'attendance_days', name: '出勤日数', itemType: 'attendance', taxable: false, sortOrder: 1, valueKind: 'days' },
   '休日出勤日数': { code: 'holiday_work_days', name: '休日出勤日数', itemType: 'attendance', taxable: false, sortOrder: 2, valueKind: 'days' },
   '代休日数': { code: 'substitute_holiday_days', name: '代休日数', itemType: 'attendance', taxable: false, sortOrder: 3, valueKind: 'days' },
@@ -421,10 +422,11 @@ export async function parseLaborPayrollZip(buffer: Buffer): Promise<LaborPayroll
     const rows = sheetRows(payrollWorkbook, sheetName)
     for (let column = 1; column < Math.min(6, rows[5]?.length || 0); column += 1) {
       const employeeName = String(rows[5]?.[column] || '').trim()
-      if (!employeeName || !normalizedName(employeeName) || /名$/.test(employeeName)) continue
+      if (!employeeName || !normalizedName(employeeName) || /^\d+\s*名$/.test(employeeName.normalize('NFKC'))) continue
       const paymentTotal = numberValue(rowValue(rows, '支給合計', column))
       const netPayment = numberValue(rowValue(rows, '差引支給額', column))
-      if (!paymentTotal && !netPayment) continue
+      // A named ledger employee with zero pay still belongs to the provider's
+      // headcount. Dropping them makes the verified company total impossible.
       results.push({
         employeeCode: employeeCodeByName.get(normalizedName(employeeName)) || null,
         employeeName,
