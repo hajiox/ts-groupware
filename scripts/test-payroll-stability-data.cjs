@@ -33,6 +33,14 @@ async function main(){
   assert.equal((await loadPayrollRuleStability()).totals.engineChanges,1,'same-input prior output differences propagate into live audit')
   fixtures.gw_payroll_mail_jobs.length=0
   assert.equal(JSON.stringify(fixtures),before,'read-only analysis preserves source data')
+  const configured={id:'profile',employee_id:'employee',effective_from:'2026-09-01',effective_to:null,calculation_type:'hourly',hourly_rate:1000,source_snapshot:{z:1,a:{y:2,b:3}}}
+  fixtures.gw_payroll_calculation_profiles.push(configured)
+  const orderedProfile=await loadPayrollRuleStability()
+  fixtures.gw_payroll_calculation_profiles[0]={...Object.fromEntries(Object.entries(configured).reverse()),source_snapshot:{a:{b:3,y:2},z:1}}
+  const reorderedProfile=await loadPayrollRuleStability()
+  assert.equal(orderedProfile.sourceFingerprint,reorderedProfile.sourceFingerprint,'transport key ordering is not a payroll input change')
+  assert.deepEqual(orderedProfile.engineChecks,reorderedProfile.engineChecks,'nested JSON key order is canonical')
+  fixtures.gw_payroll_calculation_profiles.length=0
   fixtures.gw_payroll_employee_results.push({...fixtures.gw_payroll_employee_results[0],id:'duplicate'})
   await assert.rejects(()=>loadPayrollRuleStability(),/Duplicate/);fixtures.gw_payroll_employee_results.pop()
   fail=true;await assert.rejects(()=>loadPayrollRuleStability(),/unavailable/);fail=false

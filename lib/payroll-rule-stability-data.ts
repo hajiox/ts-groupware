@@ -13,7 +13,12 @@ type Item = { id: string; payroll_result_id: string; payroll_item_id: string; am
 type SavedAudit = { created_at: string; stability: { version: string; engineChecks?: PayrollEngineCheck[] } | null }
 
 function fingerprint(value: unknown) {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+  // PostgREST and JSONB exports may emit identical object keys in different
+  // orders. Hash the values, rather than that transport-level key ordering.
+  const canonical = (input: unknown): unknown => Array.isArray(input) ? input.map(canonical)
+    : input !== null && typeof input === 'object' ? Object.fromEntries(Object.entries(input)
+      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, next]) => [key, canonical(next)])) : input
+  return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex')
 }
 function nullableNumber(value: unknown) { return value == null ? null : Number(value) }
 function requiredNumber(value: unknown) { return value == null ? Number.NaN : Number(value) }
@@ -103,7 +108,7 @@ export async function loadPayrollRuleStability(options: {
   const savedInputKeys = new Set(snapshots.flatMap(snapshot => snapshot.engineChecks.map(check => `${check.month}:${check.employeeId}:${check.inputFingerprint}`)))
   const auditMonths = new Map(audit.months.map(month => [month.month, month]))
   return {
-    ...audit, status: 'completed' as const, calculatedAt: new Date().toISOString(),
+    ...audit, status: 'completed' as const, fingerprintVersion: 'canonical-json-v1', calculatedAt: new Date().toISOString(),
     sourceFingerprint: fingerprint(ordered), historyFrom: periods.at(-1)?.payroll_month || null, historyTo: periods[0]?.payroll_month || null,
     periodCount: periods.length, snapshotCount: snapshots.length,
     baselineComparedChecks: engineChecks.filter(check => savedInputKeys.has(`${check.month}:${check.employeeId}:${check.inputFingerprint}`)).length,
