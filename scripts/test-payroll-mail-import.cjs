@@ -41,7 +41,7 @@ compare()
 assert.equal(JSON.stringify(profile),profileBefore)
 
 const jobs=new Map(),sources=new Map(),events=[]
-let driveCalls=0,parserCalls=0,dmCalls=0,dmFails=true,archiveFails=false
+let driveCalls=0,parserCalls=0,dmCalls=0,dmFails=true,archiveFails=false,stabilityFails=false
 const forceReview=false
 const recipient={id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',real_name:'佐藤 正彦',display_name:'検証役員',role:'executive'}
 class Query{
@@ -101,6 +101,11 @@ const mocks={
   '@/lib/supabase-pagination':{loadAllRows:async callback=>(await callback(0,999)).data},
   '@/lib/payroll-attendance-policy-data':{loadAttendanceCalculationPolicy:async date=>{assert.equal(date,'2026-09-30');return policy}},
   '@/lib/payroll-mail-comparison':comparison,
+  '@/lib/payroll-rule-stability-data':{loadPayrollRuleStability:async input=>{
+    assert.equal(input.month,'2026-10-01');assert.equal(input.pending.length,1);assert.equal(input.pending[0].employeeId,employee.id)
+    if(stabilityFails)throw new Error('synthetic history failure')
+    return {status:'completed',version:'fixture',totals:{ruleChanges:1,ruleReversals:0,engineChanges:0,engineReversals:0}}
+  }},
   '@/lib/user-roles':load('lib/user-roles.ts'),
 }
 const imported=load('lib/payroll-mail-import.ts',mocks)
@@ -122,6 +127,8 @@ async function main(){
   process.env.PAYROLL_MAIL_RECIPIENT_NAME='佐藤 正彦'
   let result=await imported.processPayrollMail(imported.parsePayrollMailInput(raw))
   assert.equal(result.status,'imported');assert.equal(result.report.status,'pending');assert.equal(result.counts.compared,1)
+  assert.equal([...jobs.values()][0].comparison.stability.status,'completed')
+  assert.match([...jobs.values()][0].report_content,/方式変更候補 1件/)
   assert.equal(driveCalls,1);assert.equal(parserCalls,1)
   dmFails=false
   result=await imported.processPayrollMail({mode:'retry_report',sourceKey:raw.sourceKey})
@@ -137,6 +144,14 @@ async function main(){
   const other=Buffer.from('PK invalid fixture')
   result=await imported.processPayrollMail(imported.parsePayrollMailInput({...raw,sourceKey:'bad-archive',sha256:crypto.createHash('sha256').update(other).digest('hex'),zipBase64:other.toString('base64')}))
   assert.equal(result.status,'needs_review');assert.equal(result.batchId,null);assert.equal(driveCalls,1)
+  archiveFails=false;stabilityFails=true
+  const historyUnavailable=Buffer.from('PK valid synthetic history outage')
+  result=await imported.processPayrollMail(imported.parsePayrollMailInput({...raw,sourceKey:'history-unavailable',messageId:'history-unavailable',sha256:crypto.createHash('sha256').update(historyUnavailable).digest('hex'),zipBase64:historyUnavailable.toString('base64')}))
+  assert.equal(result.status,'imported','history failure must not discard valid payroll')
+  const historyJob=[...jobs.values()].find(job=>job.original_source_key==='history-unavailable')||[...jobs.values()].at(-1)
+  assert.equal(historyJob.comparison.stability.status,'unavailable')
+  assert.match(historyJob.report_content,/履歴を取得できず未確認/)
+  stabilityFails=false
   assert.equal(JSON.stringify(profile),profileBefore)
   const route=load('app/api/integrations/doc-scanner/payroll-mail/route.ts',{'@/lib/payroll-mail-import':imported})
   process.env.TSG_PAYROLL_MAIL_SECRET='synthetic-dedicated-secret'

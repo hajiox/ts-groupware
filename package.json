@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test:payroll-mail": "node scripts/test-payroll-labor-alignment.cjs && node scripts/test-payroll-diff-summary.cjs && node scripts/test-payroll-mail-archive.cjs && node scripts/test-payroll-mail-import.cjs && node scripts/test-payroll-mail-drive.cjs",
+    "test:payroll-mail": "node scripts/test-payroll-rule-stability.cjs && node scripts/test-payroll-engine-drift.cjs && node scripts/test-payroll-stability-data.cjs && node scripts/test-payroll-labor-alignment.cjs && node scripts/test-payroll-diff-summary.cjs && node scripts/test-payroll-mail-archive.cjs && node scripts/test-payroll-mail-import.cjs && node scripts/test-payroll-mail-drive.cjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

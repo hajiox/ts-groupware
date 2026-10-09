@@ -1,0 +1,38 @@
+const assert = require('node:assert/strict'), fs = require('node:fs'), ts = require('typescript')
+const moduleObject = { exports: {} }
+new Function('module', 'exports', 'require', ts.transpileModule(fs.readFileSync('lib/payroll-rule-stability.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)(moduleObject, moduleObject.exports, require)
+const { auditPayrollRuleStability: audit, selectStabilityProfile } = moduleObject.exports
+const item = (code, itemType, extra) => ({ code, itemType, taxable: itemType === 'earning', amount: 0, minutes: null, days: null, rate: null, ...extra })
+const hourly = (month, minutes, amount, rate = 1001) => ({ month, employeeId: 'fixture', profile: null, labor: { paymentTotal: amount, netPayment: amount, deductionTotal: 0, nonTaxablePaymentTotal: 0, items: [item('regular_salary', 'earning', { rate }), item('work_minutes', 'attendance', { minutes }), item('base_salary', 'earning', { amount })] } })
+const sequence = [hourly('2026-01-01', 1, 16), hourly('2026-02-01', 2, 34), hourly('2026-03-01', 1, 16)]
+const original = JSON.stringify(sequence)
+assert.equal(audit(sequence).totals.ruleChanges, 2, 'disjoint rounding candidates across adjacent months')
+assert.equal(audit(sequence).totals.ruleReversals, 1, 'same condition A to B to A')
+assert.equal(audit([sequence[0], { ...sequence[1], month: '2026-03-01' }, { ...sequence[2], month: '2026-04-01' }]).totals.ruleReversals, 0, 'missing calendar month breaks evidence chain')
+assert.equal(audit([sequence[0], hourly('2026-02-01', 60, 1001), sequence[2]]).totals.ruleReversals, 0, 'ambiguous month cannot prove a reversal')
+assert.equal(audit([sequence[0], hourly('2026-02-01', 0, 0), sequence[2]]).totals.ruleReversals, 0, 'zero hours provide no rounding evidence')
+assert.equal(audit([sequence[0], hourly('2026-02-01', 2, 34, 1002), sequence[2]]).totals.settingsChanges, 2, 'declared wage changes reset rule comparison')
+assert.equal(audit([sequence[0], hourly('2026-02-01', 2, 34, 1002), sequence[2]]).totals.ruleChanges, 0)
+assert.equal(audit([hourly('2026-01-01', 60, 1001)]).totals.ambiguousComponents, 1, 'equal candidate outcomes remain ambiguous')
+assert.equal(audit([hourly('2026-01-01', 60, 1002)]).totals.mismatchedComponents, 1, 'a one-yen change is not fitted by learning the target rate')
+assert.equal(audit([hourly('2026-01-01', NaN, 1001)]).totals.unverifiedComponents, 1, 'invalid finite input')
+assert.equal(audit([sequence[0], sequence[0]]).totals.checkedComponents, 0, 'duplicate period results cannot establish consistency')
+const currentLearned = { id: 'current', employee_id: 'fixture', effective_from: '2026-01-01', calculation_type: 'monthly_with_overtime', monthly_base_amount: 100000, overtime_divisor: 168, source_snapshot: { work_minutes: 480, base_payment_amount: 100000 } }
+const prior = { ...currentLearned, id: 'prior', effective_from: '2025-12-01' }
+assert.equal(selectStabilityProfile([currentLearned, prior], 'fixture', '2026-01-01').id, 'prior', 'untagged same-period learned snapshot excluded')
+assert.equal(selectStabilityProfile([{ ...prior, source_snapshot: { source: 'labor_payroll_zip', payroll_month: '2026-02-01' } }], 'fixture', '2026-01-01'), null, 'future source cannot backdate itself')
+assert.equal(selectStabilityProfile([{ ...currentLearned, source_snapshot: { source: 'hr_employment_terms' } }], 'fixture', '2026-01-01').id, 'current', 'independent manual settings effective this month allowed')
+const overtime = (month, minutes, amount, profile = { calculation_type: 'monthly_with_overtime', monthly_base_amount: 100000, overtime_divisor: 168, source_snapshot: {} }) => ({ month, employeeId: 'monthly', profile, labor: { paymentTotal: 100000 + amount, netPayment: 100000 + amount, deductionTotal: 0, nonTaxablePaymentTotal: 0, items: [item('base_salary', 'earning', { amount: 100000 }), item('weekday_saturday_overtime_minutes', 'attendance', { minutes }), item('weekday_saturday_overtime', 'earning', { amount })] } })
+assert.ok(audit([overtime('2026-01-01', 60, 744)]).observations.find(row => row.component === 'weekday_overtime').compatibleRules.includes('unit_nearest_amount_nearest'), 'configured divisor, round unit before extension candidate')
+assert.equal(audit([overtime('2026-01-01', 60, 745)]).observations.find(row => row.component === 'weekday_overtime').compatibleRules.includes('amount_ceil'), true, 'unrounded unit candidate remains independent')
+assert.equal(audit([overtime('2026-01-01', 60, 746)]).totals.mismatchedComponents, 1, 'OT amount is never used to reverse-fit a rate')
+const samePeriod = audit([overtime('2026-01-01', 60, 744, currentLearned)])
+assert.equal(samePeriod.totals.checkedComponents, 0, 'direct audit also rejects current learned snapshot')
+const changedFixed = overtime('2026-01-01', 60, 744)
+changedFixed.labor.items[0].amount = 100001
+assert.ok(audit([changedFixed]).issues.some(row => row.component === 'monthly_base' && row.kind === 'formula_mismatch'), 'fixed salary discrepancy is not rounding oscillation')
+const noRates = overtime('2026-01-01', 60, 744, { calculation_type: 'monthly_with_overtime', monthly_base_amount: 100000, source_snapshot: {} })
+assert.equal(audit([noRates]).observations.find(row => row.component === 'weekday_overtime').status, 'unverified')
+assert.equal(JSON.stringify(sequence), original, 'audit does not mutate payroll input or settings')
+assert.ok(!JSON.stringify(audit(sequence).issues).includes('1001'), 'issue messages contain no wage amounts')
+console.log('Payroll stability: immutable input, independent settings, finite values, limited rounding candidates, ambiguity, gaps/zero/duplicates, wage changes, A-B-A, fixed salary and one-yen mismatch passed.')

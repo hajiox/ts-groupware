@@ -46,6 +46,7 @@ export default async function PayrollMailPage() {
   return <main style={{maxWidth:1100,margin:'24px auto',padding:20}}>
     <Link href="/admin">← 給与・勤務へ戻る</Link>
     <h1>給与メールの取込・検証</h1>
+    <p><Link href="/admin/payroll-stability">給与計算ルールの月次検証を見る</Link></p>
     <p>労務士資料の勤怠・記載単価を使い、TSGの給与式による金額と照合します。実打刻からの試算は別に表示します。</p>
     <p>固定給は保存済みの適用設定と照合し、設定がない場合は資料から補完します。手当は当月資料の内訳を使います。</p>
     <p>金額差は「TSGの計算 − 労務士」です。控除差は当月資料の控除内訳合計と控除総額の照合で、税金・保険料の法定額を再計算した結果ではありません。必要な入力を確認できない項目は「未確認」です。</p>

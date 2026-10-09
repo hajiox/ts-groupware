@@ -13,6 +13,7 @@ import {
   type MailComparisonProfile,
 } from '@/lib/payroll-mail-comparison'
 import { getEffectiveUserRole, normalizeUserName } from '@/lib/user-roles'
+import { loadPayrollRuleStability } from '@/lib/payroll-rule-stability-data'
 
 export const PAYROLL_MAIL_MAX_ZIP_BYTES = 3 * 1024 * 1024
 export const PAYROLL_MAIL_MAX_JSON_BYTES = 4_300_000
@@ -250,6 +251,16 @@ export async function processPayrollMail(input: PayrollMailInput) {
     punches:punches.filter(row=>row.employee_id===employee.id),paidLeave:leaves.filter(row=>row.employee_id===employee.id),policy,
   }))
   const counts=payrollMailComparisonCounts(rows)
+  let stability: Awaited<ReturnType<typeof loadPayrollRuleStability>> | {status:'unavailable';reason:string}
+  try {
+    stability=await loadPayrollRuleStability({month:`${input.payrollMonth}-01`,pending:matches.map(({result,employee})=>({employeeId:employee.id,labor:result}))})
+  } catch {
+    // A history-read failure must not lose a valid ZIP or masquerade as no drift.
+    stability={status:'unavailable',reason:'history_unavailable'}
+  }
+  const stabilityNote=stability.status==='completed'
+    ? `\n月次ロジック検証: 往復候補 ${stability.totals.ruleReversals}件、方式変更候補 ${stability.totals.ruleChanges}件、同一入力でのTSG計算結果変化 ${stability.totals.engineChanges+stability.totals.engineReversals}件。判別不能・資料不足は安定と断定していません。`
+    : '\n月次ロジック検証: 履歴を取得できず未確認です。'
   const reasons=rows.reduce<Record<string,number>>((all,row)=>{
     if(row.reason) all[row.reason]=(all[row.reason]||0)+1
     return all
@@ -279,8 +290,8 @@ export async function processPayrollMail(input: PayrollMailInput) {
     results:matches.map(({result,employee})=>({...result,employeeId:employee.id,
       rawPayload:{source:'payroll_mail',employeeCode:result.employeeCode,sourceSheet:result.sourceSheet,verifiedAgainstWorkbookTotal:true}})),
     comparison:{counts,rows,reasons,archiveDriveFileId:drive.id,calculatedAt:new Date().toISOString(),version:2,
-      basis:'labor_attendance_and_declared_rates',deductions:'labor_item_sum_not_tax_recalculation'},
-    reportContent:buildPayrollMailReport(input.payrollMonth,input.attendanceMonth,counts,false,reasons),
+      basis:'labor_attendance_and_declared_rates',deductions:'labor_item_sum_not_tax_recalculation',stability},
+    reportContent:buildPayrollMailReport(input.payrollMonth,input.attendanceMonth,counts,false,reasons)+stabilityNote+`\n月次ロジック検証: ${SITE}/admin/payroll-stability`,
   })
   return payrollMailReceipt(await reportPendingJob(job),input.sourceKey,input.messageId)
 }

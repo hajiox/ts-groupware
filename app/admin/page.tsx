@@ -3387,6 +3387,7 @@ function PayrollLaborAdminTab() {
   return (
     <div className="admin-payroll-hub">
       <p><a href="/admin/payroll-mail">給与メールの自動取込・独立検証結果を確認</a></p>
+      <p><a href="/admin/payroll-stability">給与計算ルールの月次検証を確認</a></p>
       <div className="admin-payroll-hub__switch" role="tablist" aria-label="給与・労務の表示切替">
         <button
           type="button"
