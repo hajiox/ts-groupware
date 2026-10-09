@@ -92,7 +92,7 @@ const mocks={
     return NextResponse.json({ok:true,recipient:{id:recipient.id},poster:{displayName:'TSG君'},post:{id:crypto.randomUUID(),content:body.content}},{status:201})
   }},
   '@/lib/supabase/admin':{adminClient},
-  '@/lib/drive':{checkPayrollArchiveStorage:async()=>true,uploadPayrollArchiveToDrive:async(_buffer,name)=>{driveCalls++;assert.match(name,/^給与メール_/);return{id:'private-fixture'}}},
+  '@/lib/drive':{PayrollArchiveStorageError:class extends Error{},initializePayrollArchiveStorage:async()=>({folderId:'fixture-new-folder'}),checkPayrollArchiveStorage:async()=>true,uploadPayrollArchiveToDrive:async(_buffer,name)=>{driveCalls++;assert.match(name,/^給与メール_/);return{id:'private-fixture'}}},
   '@/lib/payroll-mail-archive':{parsePayrollMailArchive:async()=>{if(archiveFails)throw Error('secret employee amount must not escape');return{
     buffer:Buffer.from('validated'),payDate:'2026-10-09',statementWorkbook:'支給控除一覧表.xlsx',ledgerWorkbook:'賃金台帳.xlsx',
     entries:[{path:'支給控除一覧表.xlsx',name:'支給控除一覧表.xlsx',size:100,crc32:'01234567'}]}}},
@@ -114,6 +114,8 @@ for(const change of [{sender:'spoof@example.com'},{unknown:true},{attendanceMont
 }
 assert.throws(()=>imported.parsePayrollMailInput({...raw,zipBase64:Buffer.alloc(3*1024*1024+1).toString('base64')}))
 assert.throws(()=>imported.parsePayrollMailInput({action:'retry_report',sourceKey:'x',recipientName:'someone'}))
+assert.throws(()=>imported.parsePayrollMailInput({action:'initialize_storage',folderId:'untrusted'}))
+assert.deepEqual(imported.parsePayrollMailInput({action:'initialize_storage'}),{mode:'initialize_storage'})
 assert.equal(imported.parsePayrollMailInput({status:'needs_review',sourceKey:'review',messageId:'fixture',sender:raw.sender,errorCode:'source_unavailable',receivedAt:''}).mode,'review')
 async function main(){
   process.env.TSG_INTEGRATION_SECRET='synthetic-dm-secret'
@@ -146,6 +148,8 @@ async function main(){
   assert.equal((await route.POST(request('!!!',{'authorization':'Bearer synthetic-dedicated-secret'}))).status,400)
   assert.equal((await route.POST(request('{}',{'authorization':'Bearer synthetic-dedicated-secret','content-length':'4300001'}))).status,413)
   assert.equal((await route.POST(request(JSON.stringify({action:'retry_report',sourceKey:raw.sourceKey}),{'x-tsg-payroll-mail-secret':'synthetic-dedicated-secret'}))).status,200)
+  const setup=await route.POST(request(JSON.stringify({action:'initialize_storage'}),{'x-tsg-payroll-mail-secret':'synthetic-dedicated-secret'}))
+  assert.equal(setup.status,200);assert.deepEqual(await setup.json(),{ok:true,folderId:'fixture-new-folder'})
   assert.equal((await route.GET(new NextRequest('https://fixture.invalid/api/integrations/doc-scanner/payroll-mail?sourceKey=unknown',{headers:{authorization:'Bearer synthetic-dedicated-secret'}}))).status,404)
   console.log('Payroll independent comparison, strict envelope, auth boundary, stable source/hash, private archive, review, DM-only retry and no profile mutation passed.')
 }

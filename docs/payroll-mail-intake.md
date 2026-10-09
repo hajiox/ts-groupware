@@ -31,6 +31,8 @@ ZIP取得前の要確認は同じURLへ `status: "needs_review"`, `sourceKey`, `
 
 報告だけの再試行は `{ "action": "retry_report", "sourceKey": "..." }`。GETは送信や取込を行わない。
 
+初期設定専用のPOST `{ "action": "initialize_storage" }` は、同じ専用キーで認証したうえで、本番の既存Google OAuthクライアントから空の給与専用フォルダをMy Drive直下に作る。同じクライアントが作成した固定用途のappProperties付き非公開フォルダが1つあれば再利用する。名前・ID・保存先を要求側から指定できず、共有設定が所有者本人のみであることを検証する。返されたフォルダIDを運用者が `GOOGLE_PAYROLL_FOLDER_ID` に設定して再配備する。通常のGETや給与取込がフォルダを作成することはない。APIが返す障害コードは接続・権限・非公開性の分類だけで、Googleの生エラーや秘密値は返さない。
+
 完了証明は `ok`, `status` (`imported` / `duplicate` / `needs_review`), 元の `sourceKey`, `messageId`, `sha256`, 対象年月, `batchId`, `report.status` (`sent` / `pending`), `counts`。取込未完了の要確認は `batchId: null`。比較に差や未確認者があっても、原本取込そのものが完了した場合は取込済みとして区別する。
 
 ## サーバー設定・検証

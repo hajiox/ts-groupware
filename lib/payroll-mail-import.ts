@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { NextRequest } from 'next/server'
 import { POST as sendDirectMessage } from '@/app/api/integrations/tsa/direct-message/route'
 import { adminClient } from '@/lib/supabase/admin'
-import { checkPayrollArchiveStorage, uploadPayrollArchiveToDrive } from '@/lib/drive'
+import { checkPayrollArchiveStorage, initializePayrollArchiveStorage, PayrollArchiveStorageError, uploadPayrollArchiveToDrive } from '@/lib/drive'
 import { parsePayrollMailArchive } from '@/lib/payroll-mail-archive'
 import { parseLaborPayrollZip, matchLaborPayrollEmployees, type EmployeeRow } from '@/lib/labor-payroll-zip'
 import { loadAllRows } from '@/lib/supabase-pagination'
@@ -35,6 +35,7 @@ export type PayrollMailInput =
   | (Metadata & { mode: 'import'; buffer: Buffer })
   | (Metadata & { mode: 'review'; errorCode: string })
   | { mode: 'retry_report'; sourceKey: string }
+  | { mode: 'initialize_storage' }
 type Counts = typeof EMPTY_COUNTS
 type Job = {
   id: string; original_source_key: string; message_id: string; zip_sha256: string;
@@ -58,6 +59,10 @@ function month(value: unknown, optional: boolean) {
 export function parsePayrollMailInput(raw: unknown): PayrollMailInput {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new PayrollMailError('invalid_request',400)
   const body = raw as Record<string,unknown>
+  if(body.action==='initialize_storage') {
+    if(Object.keys(body).length!==1) throw new PayrollMailError('unknown_field',400)
+    return {mode:'initialize_storage'}
+  }
   const retry = body.action === 'retry_report'
   const review = body.status === 'needs_review'
   const keys = retry ? ['action','sourceKey'] : [
@@ -94,7 +99,7 @@ export function parsePayrollMailInput(raw: unknown): PayrollMailInput {
   return { ...metadata,mode:'import',buffer }
 }
 
-function fingerprint(input: Exclude<PayrollMailInput,{mode:'retry_report'}>) {
+function fingerprint(input: Exclude<PayrollMailInput,{mode:'retry_report'}|{mode:'initialize_storage'}>) {
   return sha256(JSON.stringify({mode:input.mode,sourceKey:input.sourceKey,messageId:input.messageId,
     attachmentId:input.attachmentId,fileName:input.fileName,sha256:input.sha256,payrollMonth:input.payrollMonth,
     attendanceMonth:input.attendanceMonth,receivedAt:input.receivedAt,sender:input.sender,
@@ -126,7 +131,9 @@ async function recipientReady() {
 }
 export async function payrollMailReadiness() {
   await recipientReady()
-  try { await checkPayrollArchiveStorage() } catch { throw new PayrollMailError('archive_storage_unavailable',503) }
+  try { await checkPayrollArchiveStorage() } catch(error) {
+    throw new PayrollMailError(error instanceof PayrollArchiveStorageError?error.code:'archive_storage_unavailable',503)
+  }
   const {error}=await adminClient.from('gw_payroll_mail_sources').select('source_key').limit(1)
   if(error) throw new PayrollMailError('storage_unavailable',503)
   return { ok:true, ready:true }
@@ -174,6 +181,11 @@ async function receive(payload: Record<string,unknown>) {
   return data as Job
 }
 export async function processPayrollMail(input: PayrollMailInput) {
+  if(input.mode==='initialize_storage') {
+    await recipientReady()
+    try {return {ok:true,...await initializePayrollArchiveStorage()}}
+    catch(error) {throw new PayrollMailError(error instanceof PayrollArchiveStorageError?error.code:'archive_setup_failed',503)}
+  }
   if(input.mode==='retry_report') {
     const job=await jobForSource(input.sourceKey)
     if(!job) throw new PayrollMailError('not_found',404)

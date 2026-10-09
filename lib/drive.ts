@@ -117,24 +117,37 @@ export async function downloadFileFromDrive(fileId: string) {
 // Payroll archives never inherit the ordinary attachment folder's sharing.
 // A dedicated My Drive folder may be owned by one account and shared only
 // with this API's authenticated account (for service-account access).
-async function payrollArchiveStore() {
-  const drive = getDriveClient()
-  const folderId = process.env.GOOGLE_PAYROLL_FOLDER_ID?.trim()
-  if (!folderId) throw new Error('Private payroll archive folder is not configured')
-  const account = await drive.about.get({ fields: 'user(emailAddress)' })
+export class PayrollArchiveStorageError extends Error {
+  constructor(readonly code: string) { super(code) }
+}
+function payrollStorageFailure(error:unknown, fallback:string) {
+  if(error instanceof PayrollArchiveStorageError) return error
+  const status=error&&typeof error==='object'&&'code' in error?Number(error.code):0
+  return new PayrollArchiveStorageError(status===401?'archive_auth_unavailable':status===403?'archive_access_denied':status===404?'archive_folder_not_accessible':fallback)
+}
+async function payrollArchiveStore(explicitFolderId?:string, ownerOnly=false) {
+  let drive:ReturnType<typeof getDriveClient>
+  try {drive=getDriveClient()} catch {throw new PayrollArchiveStorageError('archive_auth_not_configured')}
+  const folderId = explicitFolderId || process.env.GOOGLE_PAYROLL_FOLDER_ID?.trim()
+  if (!folderId) throw new PayrollArchiveStorageError('archive_folder_not_configured')
+  const account = await drive.about.get({ fields: 'user(emailAddress)' }).catch(error=>{throw payrollStorageFailure(error,'archive_account_unavailable')})
   const actor = account.data.user?.emailAddress?.toLowerCase()
-  if (!actor) throw new Error('Payroll archive account could not be verified')
+  if (!actor) throw new PayrollArchiveStorageError('archive_account_unavailable')
   const validatePermissions = async (fileId: string) => {
     const permissions = await drive.permissions.list({ fileId, fields: 'nextPageToken,permissions(type,role,emailAddress,deleted)', pageSize: 100, supportsAllDrives: true })
+      .catch(error=>{throw payrollStorageFailure(error,'archive_permissions_unavailable')})
     const rows = permissions.data.permissions || []
     if (permissions.data.nextPageToken || !rows.some(permission => !permission.deleted && permission.type === 'user' && permission.role === 'owner') || rows.some(permission => (
       !permission.deleted && (permission.type !== 'user' || (permission.role !== 'owner' && permission.emailAddress?.toLowerCase() !== actor))
-    ))) throw new Error('Payroll archive folder must be private')
+    ))) throw new PayrollArchiveStorageError('archive_folder_not_private')
+    if(ownerOnly&&rows.some(permission=>!permission.deleted&&(permission.role!=='owner'||permission.emailAddress?.toLowerCase()!==actor))) {
+      throw new PayrollArchiveStorageError('archive_folder_not_private')
+    }
   }
   const folder = await drive.files.get({ fileId: folderId, fields: 'mimeType,trashed,driveId,capabilities(canAddChildren)', supportsAllDrives: true })
-  if (folder.data.mimeType !== 'application/vnd.google-apps.folder' || folder.data.trashed || folder.data.driveId || folder.data.capabilities?.canAddChildren !== true) {
-    throw new Error('Payroll archive folder must be a private My Drive folder')
-  }
+    .catch(error=>{throw payrollStorageFailure(error,'archive_folder_unavailable')})
+  if (folder.data.mimeType !== 'application/vnd.google-apps.folder' || folder.data.trashed || folder.data.driveId) throw new PayrollArchiveStorageError('archive_folder_not_private')
+  if(folder.data.capabilities?.canAddChildren !== true) throw new PayrollArchiveStorageError('archive_folder_not_writable')
   await validatePermissions(folderId)
   return { drive, folderId, validatePermissions }
 }
@@ -142,6 +155,32 @@ async function payrollArchiveStore() {
 export async function checkPayrollArchiveStorage() {
   await payrollArchiveStore()
   return true
+}
+
+// Explicit setup only. Neither readiness nor normal intake creates folders.
+// Creating through this OAuth client also makes the folder visible under its
+// existing drive.file grant; a folder created by another app may be invisible.
+export async function initializePayrollArchiveStorage() {
+  try {
+    const drive=getDriveClient()
+    const found=await drive.files.list({
+      q:"trashed = false and mimeType = 'application/vnd.google-apps.folder' and 'root' in parents and appProperties has { key='tsgPurpose' and value='payroll-mail-private-v1' }",
+      fields:'nextPageToken,files(id)',pageSize:100,spaces:'drive',corpora:'user',orderBy:'createdTime',
+    })
+    const folders=found.data.files||[]
+    if(found.data.nextPageToken||folders.length>1) throw new PayrollArchiveStorageError('archive_setup_ambiguous')
+    let folderId=folders[0]?.id
+    if(!folderId) {
+      const created=await drive.files.create({
+        requestBody:{name:'TSG 給与原本（非公開）',mimeType:'application/vnd.google-apps.folder',parents:['root'],
+          appProperties:{tsgPurpose:'payroll-mail-private-v1'}},fields:'id',
+      })
+      folderId=created.data.id
+    }
+    if(!folderId) throw new PayrollArchiveStorageError('archive_setup_failed')
+    await payrollArchiveStore(folderId,true)
+    return {folderId}
+  } catch(error) {throw payrollStorageFailure(error,'archive_setup_failed')}
 }
 
 export async function uploadPayrollArchiveToDrive(fileBuffer: Buffer, fileName: string) {

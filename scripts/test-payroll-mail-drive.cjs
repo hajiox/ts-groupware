@@ -3,7 +3,7 @@ const fs=require('node:fs')
 const ts=require('typescript')
 const owner={type:'user',role:'owner',emailAddress:'fixture-owner@example.invalid'}
 const actor={type:'user',role:'writer',emailAddress:'fixture-api@example.invalid'}
-let folderPermissions,createdPermissions,folderMetadata,nextPageToken,created=0,trashed=0
+let folderPermissions,createdPermissions,folderMetadata,nextPageToken,created=0,trashed=0,setupFolders=[]
 function reset(){
   folderPermissions=[owner,actor];createdPermissions=[owner,actor];nextPageToken=undefined
   folderMetadata={mimeType:'application/vnd.google-apps.folder',trashed:false,capabilities:{canAddChildren:true}}
@@ -13,17 +13,24 @@ const drive={
   about:{get:async()=>({data:{user:{emailAddress:actor.emailAddress}}})},
   permissions:{list:async({fileId,fields})=>{
     assert.ok(fields.includes('nextPageToken'))
-    return{data:{permissions:fileId==='fixture-private-folder'?folderPermissions:createdPermissions,nextPageToken}}
+    return{data:{permissions:fileId==='fixture-private-file'?createdPermissions:folderPermissions,nextPageToken}}
   }},
   files:{get:async({fields})=>{assert.ok(fields.includes('capabilities'));return{data:folderMetadata}},
-    create:async({requestBody,fields})=>{assert.deepEqual(requestBody.parents,['fixture-private-folder']);assert.equal(fields,'id');created++;return{data:{id:'fixture-private-file'}}},
+    list:async({q,fields})=>{assert.match(q,/appProperties has/);assert.match(q,/'root' in parents/);assert.equal(fields,'nextPageToken,files(id)');return{data:{files:setupFolders}}},
+    create:async({requestBody,fields})=>{
+      if(requestBody.mimeType==='application/vnd.google-apps.folder'){
+        assert.deepEqual(requestBody.parents,['root']);assert.deepEqual(requestBody.appProperties,{tsgPurpose:'payroll-mail-private-v1'})
+        assert.equal(requestBody.name,'TSG 給与原本（非公開）');setupFolders=[{id:'fixture-new-folder'}]
+        return{data:{id:'fixture-new-folder'}}
+      }
+      assert.deepEqual(requestBody.parents,['fixture-private-folder']);assert.equal(fields,'id');created++;return{data:{id:'fixture-private-file'}}},
     update:async({fileId,requestBody})=>{assert.equal(fileId,'fixture-private-file');assert.equal(requestBody.trashed,true);trashed++;return{data:{}}}},
 }
 const google={auth:{OAuth2:class{setCredentials(){}}},drive:()=>drive}
 const output=ts.transpileModule(fs.readFileSync('lib/drive.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText
 const loaded={exports:{}}
 new Function('module','exports','require',output)(loaded,loaded.exports,name=>name==='googleapis'?{google}:require(name))
-const {checkPayrollArchiveStorage,uploadPayrollArchiveToDrive}=loaded.exports
+const {checkPayrollArchiveStorage,initializePayrollArchiveStorage,uploadPayrollArchiveToDrive}=loaded.exports
 process.env.GOOGLE_CLIENT_ID='fixture-client'
 process.env.GOOGLE_CLIENT_SECRET='fixture-secret'
 process.env.GOOGLE_DRIVE_REFRESH_TOKEN='fixture-refresh'
@@ -34,23 +41,31 @@ async function main(){
   for(const permission of [{type:'anyone',role:'reader'},{type:'domain',role:'reader'},{type:'group',role:'reader'},
     {type:'user',role:'reader',emailAddress:'unrelated@example.invalid'}]){
     reset();folderPermissions.push(permission);const before=created
-    await assert.rejects(()=>uploadPayrollArchiveToDrive(Buffer.from('fixture'),'fixture.zip'),/must be private/)
+    await assert.rejects(()=>uploadPayrollArchiveToDrive(Buffer.from('fixture'),'fixture.zip'),/archive_folder_not_private/)
     assert.equal(created,before,'Unsafe folder must fail before upload')
   }
   reset();nextPageToken='more-sharing'
-  await assert.rejects(()=>checkPayrollArchiveStorage(),/must be private/)
+  await assert.rejects(()=>checkPayrollArchiveStorage(),/archive_folder_not_private/)
   reset();folderMetadata.capabilities.canAddChildren=false
-  await assert.rejects(()=>checkPayrollArchiveStorage(),/private My Drive/)
+  await assert.rejects(()=>checkPayrollArchiveStorage(),/archive_folder_not_writable/)
   reset();folderMetadata.driveId='shared-drive'
-  await assert.rejects(()=>checkPayrollArchiveStorage(),/private My Drive/)
+  await assert.rejects(()=>checkPayrollArchiveStorage(),/archive_folder_not_private/)
   reset();folderMetadata.trashed=true
-  await assert.rejects(()=>checkPayrollArchiveStorage(),/private My Drive/)
+  await assert.rejects(()=>checkPayrollArchiveStorage(),/archive_folder_not_private/)
   reset();createdPermissions.push({type:'anyone',role:'reader'})
   const before=trashed
-  await assert.rejects(()=>uploadPayrollArchiveToDrive(Buffer.from('fixture'),'fixture.zip'),/must be private/)
+  await assert.rejects(()=>uploadPayrollArchiveToDrive(Buffer.from('fixture'),'fixture.zip'),/archive_folder_not_private/)
   assert.equal(trashed,before+1,'A permission race must remove the newly-created archive')
   reset();delete process.env.GOOGLE_PAYROLL_FOLDER_ID
-  await assert.rejects(()=>checkPayrollArchiveStorage(),/not configured/)
+  await assert.rejects(()=>checkPayrollArchiveStorage(),/archive_folder_not_configured/)
+  reset();folderPermissions=[{...owner,emailAddress:actor.emailAddress}]
+  assert.deepEqual(await initializePayrollArchiveStorage(),{folderId:'fixture-new-folder'})
+  assert.deepEqual(await initializePayrollArchiveStorage(),{folderId:'fixture-new-folder'})
+  assert.equal(setupFolders.length,1,'Setup reuses its fixed app-marked private folder')
+  setupFolders=[{id:'one'},{id:'two'}]
+  await assert.rejects(()=>initializePayrollArchiveStorage(),/archive_setup_ambiguous/)
+  setupFolders=[{id:'one'}];folderPermissions.push({type:'anyone',role:'reader'})
+  await assert.rejects(()=>initializePayrollArchiveStorage(),/archive_folder_not_private/)
   console.log('Payroll dedicated Drive folder, inherited/public/domain/group sharing rejection, write capability, pagination and post-upload verification passed.')
 }
 main().catch(error=>{console.error(error);process.exitCode=1})
