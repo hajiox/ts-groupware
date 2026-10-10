@@ -4257,6 +4257,78 @@ img {
   flex-shrink: 0;
 }
 
+/* Keep Chat navigation inside the visible screen, including the iOS keyboard. */
+body:has(.app-shell--chat) {
+  overflow: hidden;
+}
+
+.app-shell.app-shell--chat {
+  position: fixed;
+  top: var(--chat-viewport-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--chat-viewport-height, 100dvh);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell--chat > main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell--chat .app-shell__alerts {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 25%;
+  overflow-y: auto;
+}
+
+.app-shell--chat .app-shell__alerts:has(> section) {
+  padding-top: var(--safe-top);
+}
+
+.app-shell--chat .chat-page {
+  flex: 1;
+  height: auto;
+  max-height: none;
+}
+
+.app-shell--chat .chat-messages {
+  flex-basis: 0;
+}
+
+.app-shell--chat > .bottom-nav {
+  position: static;
+  transform: none;
+  margin-inline: auto;
+}
+
+.chat-tools {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 45%;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+.codex-mtg-status {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.app-shell--chat .chat-footer {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 45%;
+  overflow-y: auto;
+}
+
 .page-file-drop-indicator {
   position: absolute;
   inset: 10px;

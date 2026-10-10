@@ -679,23 +679,25 @@ export default function ChatPage() {
         )}
       </header>
 
-      {isCodexMtgGroup(id) && isManagementRole(currentUser?.role) && (
-        <CodexMtgStatus canManageMachines={currentUser?.role === "executive"} />
-      )}
-
-      <div className="thread-search thread-search--chat" role="search">
-        <input
-          type="search"
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Chatを検索"
-          aria-label="Chatを検索"
-        />
-        {searchQuery && (
-          <button type="button" onClick={() => setSearchQuery("")} aria-label="検索をクリア">
-            クリア
-          </button>
+      <div className="chat-tools">
+        {isCodexMtgGroup(id) && isManagementRole(currentUser?.role) && (
+          <CodexMtgStatus canManageMachines={currentUser?.role === "executive"} />
         )}
+
+        <div className="thread-search thread-search--chat" role="search">
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Chatを検索"
+            aria-label="Chatを検索"
+          />
+          {searchQuery && (
+            <button type="button" onClick={() => setSearchQuery("")} aria-label="検索をクリア">
+              クリア
+            </button>
+          )}
+        </div>
       </div>
 
       <section ref={messagesRef} className="chat-messages" aria-label="チャットメッセージ" role="log" aria-live="polite">

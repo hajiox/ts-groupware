@@ -20,6 +20,7 @@
     "test:codex-mtg-access": "node scripts/test-codex-mtg-access.cjs",
     "test:codex-mtg-list": "node scripts/test-codex-mtg-list.cjs",
     "test:codex-mtg-worker": "node --test scripts/codex-mtg-worker.test.mjs",
+    "test:chat-navigation": "node scripts/test-chat-navigation-layout.cjs",
     "test:drive-access-boundary": "node scripts/test-drive-access-boundary.cjs",
     "test:recipe-price-notification": "node scripts/test-recipe-price-notification.cjs",
     "test:recipe-product-name-notification": "node scripts/test-recipe-product-name-notification.cjs",

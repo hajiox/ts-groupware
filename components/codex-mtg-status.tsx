@@ -119,7 +119,7 @@ export function CodexMtgStatus({ canManageMachines }: { canManageMachines: boole
   const status = data?.status;
   const owner = status?.ownerPcName || "TSA";
   return (
-    <aside aria-label="CodexMTGの担当PCと連携状況" style={{ padding: "8px 16px", fontSize: 12, lineHeight: 1.6, borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+    <aside className="codex-mtg-status" aria-label="CodexMTGの担当PCと連携状況" style={{ padding: "8px 16px", fontSize: 12, lineHeight: 1.6, borderBottom: "1px solid var(--border)" }}>
       <details>
         <summary style={{ cursor: "pointer", color: "var(--text-sub)" }}>
           Codex連携
