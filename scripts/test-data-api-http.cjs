@@ -133,6 +133,19 @@ async function main() {
     assert.ok(!JSON.stringify(call.args).includes(token), 'Only a credential hash reaches the RPC')
   }
 
+  for (const operation of ['boards.list','posts.search','knowledge.search','drafts.list','tasks.search']) {
+    for (const offset of [0, 20, 10000]) {
+      const response = await execute.POST(request({ operation, input: { offset } }));
+      assert.equal(response.status, 200);
+      assert.deepEqual(rpcCalls.at(-1).args.p_args, { offset });
+    }
+    for (const offset of [-1, 1.5, 10001, '20', null]) {
+      const count = rpcCalls.length;
+      await failure(await execute.POST(request({ operation, input: { offset } })), 400, 'VALIDATION');
+      assert.equal(rpcCalls.length, count);
+    }
+  }
+
   const invalidBodies = [null, [], {}, { operation: 'sql.execute', input: { query: 'select 1' } },
     { operation: '__proto__' }, { operation: 'posts.delete', input: { id: itemId } },
     { operation: 'boards.list', user_id: actorId }, { operation: 'posts.search', input: { sql: 'select 1' } },
@@ -233,6 +246,17 @@ async function main() {
     await failure(await admin.POST(adminRequest(createBody(), { headers: origin ? { origin } : {} })), 403, 'FORBIDDEN')
     assert.equal(rpcCalls.length, before)
   }
+  const permissions = { action: 'permissions', id: itemId, scopes: [...policy.DATA_OPERATIONS], allowedGroupIds: [], allBoards: true, pcName: 'CEO_S' };
+  const changed = await admin.POST(adminRequest(permissions));
+  assert.equal(changed.status, 200);
+  assert.equal((await changed.json()).data.token, undefined);
+  assert.deepEqual(rpcCalls.at(-1), { name: 'gw_data_connection_admin', args: { p_actor_id: actorId, p_action: 'permissions', p_args: { id: itemId, scopes: [...policy.DATA_OPERATIONS], allowed_group_ids: [], all_boards: true, pc_name: 'CEO_S' } } });
+  for (const extra of [{ token_hash: 'a'.repeat(64) }, { expiresAt: new Date(now+86400000).toISOString() }, { principal_user_id: itemId }, { pcName: 'other/host' }, { allBoards: true, allowedGroupIds: [groupId] }, { allBoards: false }]) {
+    const count = rpcCalls.length;
+    await failure(await admin.POST(adminRequest({ ...permissions, ...extra })), 400, 'VALIDATION');
+    assert.equal(rpcCalls.length, count);
+  }
+
   const invalidAdminBodies = [
     { ...createBody(), principal_user_id: itemId }, { ...createBody(), actorId: itemId },
     { ...createBody(), token: 'client-provided-token' }, { ...createBody(), token_hash: 'f'.repeat(64) },

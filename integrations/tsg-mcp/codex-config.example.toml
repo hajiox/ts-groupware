@@ -1,4 +1,5 @@
-# Merge this section only. Replace the installation path; keep credentials out.
+# TSG Data MCP v1.1.0. Merge this section only. Keep the protected-key launcher
+# and existing token unchanged when upgrading; replace only the adapter path.
 [mcp_servers.tsg_data]
 command = "node"
 args = ["C:/tools/tsg-mcp/src/server.mjs"]

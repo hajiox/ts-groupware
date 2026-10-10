@@ -39,7 +39,7 @@ test('all 14 tools match the actual application HTTP policy', (context) => {
   for (const tool of TOOLS) {
     const args = {}
     for (const key of tool.inputKeys) {
-      args[key] = key === 'id' || key === 'group_id' ? uuid : key === 'limit' ? 20 : key === 'content' ? '正常な本文' : '検索語'
+      args[key] = key === 'id' || key === 'group_id' ? uuid : key === 'limit' ? 20 : key === 'offset' ? 10000 : key === 'content' ? '正常な本文' : '検索語'
     }
     if (!tool.readOnly) args.idempotencyKey = 'contract_test_01'
     if (['drafts.update', 'tasks.complete', 'posts.publish.prepare', 'posts.publish.commit'].includes(tool.operation)) args.expectedVersion = '1'
@@ -49,6 +49,7 @@ test('all 14 tools match the actual application HTTP policy', (context) => {
     agrees(tool, { ...args, sql: 'select 1' })
     agrees(tool, { ...args, token: 'not-an-argument' })
     agrees(tool, { ...args, table: 'gw_users' })
+    agrees(tool, { ...args, pcName: 'TSA' })
     if ('id' in args) agrees(tool, { ...args, id: 'invalid' })
     if ('group_id' in args) agrees(tool, { ...args, group_id: 'invalid' })
     if ('query' in args) {
@@ -56,6 +57,16 @@ test('all 14 tools match the actual application HTTP policy', (context) => {
       agrees(tool, { ...args, query: 'bad\0query' })
     }
     if ('limit' in args) for (const limit of [0, 21, 1.5, '20']) agrees(tool, { ...args, limit })
+    if ('offset' in args) {
+      for (const offset of [-1, 10001, 1.5, '20', null]) agrees(tool, { ...args, offset })
+      for (const offset of [0, 20, 10000]) {
+        const paged = { ...args, offset }
+        assert.equal(tool.schema.safeParse(paged).success, true, tool.name)
+        agrees(tool, paged)
+      }
+      const noOffset = { ...args }; delete noOffset.offset
+      agrees(tool, noOffset)
+    }
     if ('content' in args) for (const content of ['', ' \n ', 'a'.repeat(4001), 'bad\0content']) agrees(tool, { ...args, content })
     if (!tool.readOnly) {
       const noKey = { ...args }; delete noKey.idempotencyKey

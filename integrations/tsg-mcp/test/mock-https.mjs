@@ -18,5 +18,7 @@ globalThis.fetch = async (url, options) => {
     data: { authorization: `Bearer ${token}`, nested: { token, description: `Unexpected echo ${token}`, [token]: 'key must also be redacted' } },
     requestId: 'synthetic-request',
   })
-  return Response.json({ ok: true, data: { request, callCount }, requestId: 'synthetic-request' })
+  const paged = ['boards.list', 'posts.search', 'knowledge.search', 'drafts.list', 'tasks.search'].includes(request.operation)
+  const nextOffset = (request.input.offset ?? 0) + (request.input.limit ?? 10)
+  return Response.json({ ok: true, data: { request, callCount, ...(paged ? { nextOffset: nextOffset > 10000 ? null : nextOffset } : {}) }, requestId: 'synthetic-request' })
 }

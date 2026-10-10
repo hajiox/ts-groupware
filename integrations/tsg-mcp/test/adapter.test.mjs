@@ -39,6 +39,10 @@ test('fixed tool schemas reject unknown fields and unsafe writes', () => {
   assert.equal(TOOLS_BY_NAME.get('posts_search').schema.safeParse({ query: 'a'.repeat(257) }).success, false)
   assert.equal(TOOLS_BY_NAME.get('posts_search').schema.safeParse({ query: 'bad\0query' }).success, false)
   assert.equal(TOOLS_BY_NAME.get('drafts_list').schema.safeParse({ query: 'unsupported' }).success, false)
+  for (const name of ['boards_list', 'posts_search', 'knowledge_search', 'drafts_list', 'tasks_search']) {
+    for (const offset of [0, 20, 10000]) assert.equal(TOOLS_BY_NAME.get(name).schema.safeParse({ offset }).success, true, name)
+    for (const offset of [-1, 10001, 1.5, '20', null]) assert.equal(TOOLS_BY_NAME.get(name).schema.safeParse({ offset }).success, false, name)
+  }
   for (const content of ['', ' \n ', 'a'.repeat(4001), 'bad\0text']) {
     assert.equal(TOOLS_BY_NAME.get('drafts_create').schema.safeParse({ group_id: id, content, idempotencyKey: 'test_create_01' }).success, false)
   }
@@ -68,19 +72,27 @@ test('actual spawned STDIO MCP initializes, lists fixed tools, and calls mocked 
   const client = new Client({ name: 'tsg-adapter-test', version: '1.0.0' }, { capabilities: {} })
   try {
     await client.connect(transport)
+    assert.equal(client.getServerVersion().version, '1.1.0')
     const listed = await client.listTools()
     assert.equal(listed.tools.length, 14)
     assert.deepEqual(new Set(listed.tools.map((tool) => tool.name)), new Set(TOOLS.map((tool) => tool.name)))
     for (const tool of listed.tools) assert.equal(tool.inputSchema.additionalProperties, false)
-    const first = resultBody(await client.callTool({ name: 'boards_list', arguments: { limit: 2 } }))
-    assert.deepEqual(first.data.request, { operation: 'boards.list', input: { limit: 2 } })
+    const first = resultBody(await client.callTool({ name: 'boards_list', arguments: { limit: 2, offset: 20 } }))
+    assert.deepEqual(first.data.request, { operation: 'boards.list', input: { limit: 2, offset: 20 } })
+    assert.equal(first.data.nextOffset, 22)
 
     for (const call of [
       { name: 'sql_execute', arguments: { sql: 'select 1' } },
       { name: token, arguments: {} },
       { name: 'posts_search', arguments: { table: 'gw_users', limit: 1 } },
       { name: 'posts_search', arguments: { limit: 21 } },
+      { name: 'boards_list', arguments: { offset: -1 } },
+      { name: 'posts_search', arguments: { offset: 10001 } },
+      { name: 'knowledge_search', arguments: { offset: 0.5 } },
+      { name: 'drafts_list', arguments: { offset: '20' } },
+      { name: 'tasks_search', arguments: { offset: null } },
       { name: 'posts_search', arguments: { token } },
+      { name: 'drafts_create', arguments: { group_id: id, content: 'No identity override', idempotencyKey: 'test_identity_01', pcName: 'TSA' } },
       { name: 'drafts_create', arguments: { group_id: id, content: 'Draft only' } },
       { name: 'post_publish_commit', arguments: { id, expectedVersion: '1', idempotencyKey: 'test_publish_01' } },
       { name: 'posts_search', arguments: { query: token } },
@@ -93,15 +105,15 @@ test('actual spawned STDIO MCP initializes, lists fixed tools, and calls mocked 
     assert.equal(afterRefusals.data.callCount, first.data.callCount + 1, 'Rejected inputs never reach HTTPS')
 
     const cases = [
-      ['posts_search', { group_id: id, query: 'Japanese 日本語', limit: 3 }, 'posts.search'],
+      ['posts_search', { group_id: id, query: 'Japanese 日本語', limit: 3, offset: 40 }, 'posts.search'],
       ['posts_get', { id }, 'posts.get'],
-      ['knowledge_search', { query: 'manual' }, 'knowledge.search'],
+      ['knowledge_search', { query: 'manual', offset: 10000 }, 'knowledge.search'],
       ['knowledge_get', { id }, 'knowledge.get'],
       ['drafts_create', { group_id: id, content: '日本語の下書き\n二行目', idempotencyKey: 'test_create_01' }, 'drafts.create'],
       ['drafts_update', { id, content: 'Updated draft', idempotencyKey: 'test_update_01', expectedVersion: '1' }, 'drafts.update'],
       ['drafts_get', { id }, 'drafts.get'],
-      ['drafts_list', { group_id: id, limit: 5 }, 'drafts.list'],
-      ['tasks_search', { query: 'assigned', limit: 10 }, 'tasks.search'],
+      ['drafts_list', { group_id: id, limit: 5, offset: 15 }, 'drafts.list'],
+      ['tasks_search', { query: 'assigned', limit: 10, offset: 90 }, 'tasks.search'],
       ['tasks_get', { id }, 'tasks.get'],
       ['tasks_complete', { id, idempotencyKey: 'test_complete_01', expectedVersion: '2026-10-07T01:00:00.123456Z' }, 'tasks.complete'],
       ['post_publish_prepare', { id, idempotencyKey: 'test_prepare_01', expectedVersion: '2' }, 'posts.publish.prepare'],
@@ -111,6 +123,10 @@ test('actual spawned STDIO MCP initializes, lists fixed tools, and calls mocked 
       const result = resultBody(await client.callTool({ name, arguments: args }))
       assert.equal(result.ok, true)
       assert.equal(result.data.request.operation, operation)
+      if (args.offset !== undefined) {
+        assert.equal(result.data.request.input.offset, args.offset)
+        assert.equal(result.data.nextOffset, args.offset === 10000 ? null : args.offset + (args.limit ?? 10))
+      }
       for (const field of ['idempotencyKey', 'expectedVersion', 'confirmationId']) {
         assert.equal(result.data.request[field], args[field])
         assert.equal(Object.hasOwn(result.data.request.input, field), false)

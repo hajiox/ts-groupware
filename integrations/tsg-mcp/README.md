@@ -1,6 +1,8 @@
-# TSG Data MCP
+# TSG Data MCP v1.1.0
 
 TSG の限定データ API を MCP ツールとして使う、独立した STDIO アダプターです。このフォルダーだけを配布できます。TSG 本体のソース、Supabase/DB の鍵、既存 Bridge の認証情報は不要です。待受ポートは開きません。
+
+全掲示板接続では、未所属の掲示板や後から作成された掲示板も操作できます。限定接続は指定掲示板と現在の所属の範囲を維持します。登録PC名がある接続は TSG君として公開し、サーバーが本文の先頭へ `【PC: CEO_S】` のように登録名を付けます。PC名未設定の既存接続は従来の本人名義を維持します。DM・グループChat・アプリコード・認証情報は対象外です。
 
 ## セットアップ
 
@@ -18,32 +20,38 @@ MCP ホストから `node <インストール先>/src/server.mjs` を STDIO 起�
 
 任意で [skills/tsg-data-mcp/SKILL.md](skills/tsg-data-mcp/SKILL.md) を利用側のスキルとして配置できます。Skill に認証情報は含めません。
 
+旧版から更新する場合、保護保存済みキーとキーを読み出すランチャーは維持し、アダプターと同梱Skillを更新して MCP 接続を再起動します。管理画面から既存接続の権限を変更できるため、権限拡張だけでキーの再発行や手入力は不要です。
+
 ## ツールと固定入力
 
 | ツール | 操作 | 入力 |
 | --- | --- | --- |
-| `boards_list` | `boards.list` | `query?`, `limit?` |
-| `posts_search` | `posts.search` | `group_id?`, `query?`, `limit?` |
+| `boards_list` | `boards.list` | `query?`, `limit?`, `offset?` |
+| `posts_search` | `posts.search` | `group_id?`, `query?`, `limit?`, `offset?` |
 | `posts_get` | `posts.get` | `id` |
-| `knowledge_search` | `knowledge.search` | `group_id?`, `query?`, `limit?` |
+| `knowledge_search` | `knowledge.search` | `group_id?`, `query?`, `limit?`, `offset?` |
 | `knowledge_get` | `knowledge.get` | `id` |
 | `drafts_create` | `drafts.create` | `group_id`, `content`, `idempotencyKey` |
 | `drafts_update` | `drafts.update` | `id`, `content`, `idempotencyKey`, `expectedVersion` |
 | `drafts_get` | `drafts.get` | `id` |
-| `drafts_list` | `drafts.list` | `group_id?`, `limit?` |
-| `tasks_search` | `tasks.search` | `group_id?`, `query?`, `limit?` |
+| `drafts_list` | `drafts.list` | `group_id?`, `limit?`, `offset?` |
+| `tasks_search` | `tasks.search` | `group_id?`, `query?`, `limit?`, `offset?` |
 | `tasks_get` | `tasks.get` | `id` |
 | `tasks_complete` | `tasks.complete` | `id`, `idempotencyKey`, `expectedVersion` |
 | `post_publish_prepare` | `posts.publish.prepare` | `id`, `idempotencyKey`, `expectedVersion` |
 | `post_publish_commit` | `posts.publish.commit` | `id`, `confirmationId`, `idempotencyKey`, `expectedVersion` |
 
-`knowledge_*` はピン留め投稿です。接続に許可された操作・掲示板と、TSG 側の現在の所属・権限の範囲で読み書きします。接続発行・失効は人間が TSG 管理画面で行い、MCP ツールには含めません。
+`knowledge_*` はピン留め投稿です。タスクは接続発行者の担当だけ、下書きは接続ごとに分離します。接続に許可された操作と掲示板モードをサーバーが毎回確認します。接続発行・権限変更・失効は役員が TSG 管理画面で行い、MCP ツールには含めません。
 
-`id`・`group_id`・`confirmationId` は UUID。`limit` は 1〜20、`query` は 256 文字以内で NUL 不可、`content` は空白だけでない 4000 文字以内で NUL 不可です。`idempotencyKey` は `[A-Za-z0-9:_-]` の 8〜128 文字、`expectedVersion` は空白を含まない ASCII 1〜80 文字です。更新時の version は読み取り結果の文字列をそのまま使います。未知のフィールド、任意 operation、SQL、テーブル名、列指定、シェル、ファイル操作は受け付けません。
+`id`・`group_id`・`confirmationId` は UUID。`limit` は 1〜20、`offset` は 0〜10000 の整数（省略時0）です。5つの一覧・検索は `data.nextOffset` を返します。続きがある場合は返された値を次の `offset` に渡し、`null` で終了します。検索条件は同じまま使います。
+
+`query` は 256 文字以内で NUL 不可、`content` は空白だけでない 4000 文字以内で NUL 不可です。`idempotencyKey` は `[A-Za-z0-9:_-]` の 8〜128 文字、`expectedVersion` は空白を含まない ASCII 1〜80 文字です。更新時の version は読み取り結果の文字列をそのまま使います。未知のフィールド、投稿者・PC名の差し替え、任意 operation、SQL、テーブル名、列指定、シェル、ファイル操作は受け付けません。
 
 ## 公開と再試行
 
 下書きの作成・更新では公開されません。公開は下書き取得 → `post_publish_prepare` → Codex が宛先・内容・差分を依頼と照合 → `post_publish_commit` の順です。利用者が投稿を依頼した場合、追加の承認質問や管理画面操作は不要です。commit は準備済み confirmation と同じ下書き・version を指定します。未準備・期限切れ・変更後の差分は TSG 側で拒否されます。
+
+本文のPC名は接続の登録名からサーバーが付けるため、下書きへPC名の接頭辞を重ねて書く必要はありません。公開後の投稿者やPC名をツールの引数で変更することはできません。
 
 書き込みごとに安定した `idempotencyKey` を用意し、同じ処理を再試行する場合は同じキーと入力を使います。変更内容が異なる処理には別のキーを使います。アダプターは自動再送しません。応答が不明なときは、新しいキーで重複実行せず現在の状態を確認します。version 競合時は再取得して差分を確認します。
 
@@ -56,6 +64,6 @@ npm ci --ignore-scripts
 npm test
 ```
 
-テストは実際の子プロセスで MCP の接続、一覧、14 ツールの呼出を確認します。HTTPS はテスト専用 preload でモックし、本番への読取・書込・公開・通知を行いません。不正スキーマ、公開確認不足、固定ホスト、秘密の伏字、JSON/サイズ/通信エラー、同一キーの保持も検証します。
+テストは実際の子プロセスで MCP の接続、一覧、14 ツールの呼出と5一覧のページ送りを確認します。HTTPS はテスト専用 preload でモックし、本番への読取・書込・公開・通知を行いません。不正スキーマ、PC名の差し替え拒否、公開確認不足、固定ホスト、秘密の伏字、JSON/サイズ/通信エラー、同一キーの保持も検証します。アプリのソースがある場合は実際のHTTP入力検証との一致も確認します。
 
 2026-10-07 に公式 npm registry と [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) を確認し、公式 SDK `@modelcontextprotocol/server` / `client` 2.3.1 と Zod 4.6.5 を固定しました。利用者向け実行時依存は server と Zod のみです。

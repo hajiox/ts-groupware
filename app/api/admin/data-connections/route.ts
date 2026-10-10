@@ -43,7 +43,9 @@ export async function POST(request: NextRequest) {
       token = `tsg_data_${randomBytes(32).toString('base64url')}`
       args = { label: body.label, token_hash: createHash('sha256').update(token).digest('hex'),
         principal_user_id: user.id, scopes: [...new Set(body.scopes)],
-        allowed_group_ids: [...new Set(body.allowedGroupIds)], expires_at: body.expiresAt, max_limit: body.maxLimit }
+        allowed_group_ids: [...new Set(body.allowedGroupIds)], all_boards: body.allBoards, pc_name: body.pcName ?? null, expires_at: body.expiresAt, max_limit: body.maxLimit }
+    } else if (body.action === 'permissions') {
+      args = { id: body.id, scopes: [...new Set(body.scopes)], allowed_group_ids: [...new Set(body.allowedGroupIds)], all_boards: body.allBoards, pc_name: body.pcName ?? null }
     } else {
       args = { id: body.id, ...(body.action === 'approve_confirmation' ? { digest: body.digest } : {}) }
     }

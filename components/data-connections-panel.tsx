@@ -5,7 +5,7 @@ import { DATA_READ_SCOPES, DATA_WRITE_SCOPES, DATA_PUBLISH_SCOPES, type DataOper
 import styles from './data-connections-panel.module.css'
 
 type Board = { id: string; name: string }
-type Connection = { id: string; label: string; scopes: DataOperation[]; allowed_group_ids: string[]; expires_at: string; revoked_at: string | null }
+type Connection = { id: string; label: string; scopes: DataOperation[]; allowed_group_ids: string[]; all_boards: boolean; pc_name: string | null; expires_at: string; revoked_at: string | null }
 type Proposal = {
   id: string; connection_label: string; connection_id: string; digest: string; status: string; expires_at: string
   diff: { before: Record<string, unknown>; after: { group_id: string; group_name: string; content: string } }
@@ -45,6 +45,9 @@ export function DataConnectionsPanel() {
   const [days, setDays] = useState(7)
   const [scopes, setScopes] = useState<DataOperation[]>([...DATA_READ_SCOPES])
   const [boards, setBoards] = useState<string[]>([])
+  const [allBoards, setAllBoards] = useState(false)
+  const [pcName, setPcName] = useState('')
+  const [editing, setEditing] = useState<string | null>(null)
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -65,7 +68,7 @@ export function DataConnectionsPanel() {
   async function create() {
     setToken('')
     const result = await call<{ token: string }>('list', {
-      action: 'create', label, scopes, allowedGroupIds: boards,
+      action: 'create', label, scopes, allowedGroupIds: allBoards ? [] : boards, allBoards, pcName: pcName || null,
       expiresAt: new Date(Date.now() + days * 86400000).toISOString(), maxLimit: 20,
     })
     setToken(result.token); setLabel(''); await load(); setNotice('接続キーを発行しました。表示は今回限りです。')
@@ -74,7 +77,7 @@ export function DataConnectionsPanel() {
 
   return <section className={styles.panel} aria-label="外部Codex接続">
     <h2>外部Codex接続</h2>
-    <p>必要な掲示板と操作を選んで接続キーを発行します。{snapshot?.principal.name}の権限内で動作します。</p>
+    <p>接続ごとに、特定の掲示板または全掲示板を許可できます。全掲示板には今後追加する掲示板も含まれます。</p>
     <p>依頼した投稿は、接続元のCodexから追加承認なしで公開できます。</p>
     {error && <p role="alert" className={styles.error}>{error}</p>}
     {notice && <p role="status">{notice}</p>}
@@ -95,7 +98,9 @@ export function DataConnectionsPanel() {
         <label className={styles.field}>有効期間<select value={days} onChange={e => setDays(Number(e.target.value))}>
           {[1, 7, 30, 90].map(value => <option key={value} value={value}>{value}日</option>)}
         </select></label>
-        <fieldset><legend>利用できる掲示板（20件まで）</legend>
+        <label className={styles.field}>登録PC名（TSG君として投稿する場合）<input value={pcName} maxLength={64} onChange={e => setPcName(e.target.value)} placeholder="例：CEO_S" /></label>
+        <label><input type="checkbox" checked={allBoards} onChange={e => setAllBoards(e.target.checked)} />全掲示板を許可（新しく作る掲示板も含む）</label>
+        <fieldset disabled={allBoards}><legend>利用できる掲示板（限定接続は20件まで）</legend>
           <div className={styles.checks}>{snapshot?.boards.map(board => <label key={board.id}>
             <input type="checkbox" checked={boards.includes(board.id)} disabled={!boards.includes(board.id) && boards.length >= 20}
               onChange={e => setBoards(current => e.target.checked ? [...current, board.id] : current.filter(id => id !== board.id))} />{board.name}（{board.id.slice(0, 8)}）
@@ -107,7 +112,7 @@ export function DataConnectionsPanel() {
           </label>)}</div>
         </fieldset>)}
         <p>固定投稿は、掲示板で固定されている投稿です。タスクは本人が担当するものに限ります。</p>
-        <button type="submit" disabled={busy || !label.trim() || !boards.length || !scopes.length}>選択した範囲でキーを発行</button>
+        <button type="submit" disabled={busy || !label.trim() || (!allBoards && !boards.length) || !scopes.length}>選択した範囲でキーを発行</button>
       </form>
     </details>
     <h3>発行した接続</h3>
@@ -116,9 +121,22 @@ export function DataConnectionsPanel() {
     {snapshot?.connections.map(connection => <article key={connection.id} className={styles.card}>
       <strong>{connection.label}</strong>
       <p>{connection.revoked_at ? `失効済み：${time(connection.revoked_at)}` : `有効期限：${time(connection.expires_at)}`}</p>
-      <p>掲示板：{connection.allowed_group_ids.map(id => snapshot.boards.find(b => b.id === id)?.name || id).join('、')}</p>
+      <p>掲示板：{connection.all_boards ? '全掲示板（今後の追加も含む）' : connection.allowed_group_ids.map(id => snapshot.boards.find(b => b.id === id)?.name || id).join('、')}</p>
+      {connection.pc_name && <p>投稿名義：TSG君 ／ PC：{connection.pc_name}</p>}
       <p>操作：{connection.scopes.map(scope => labels[scope]).join('、')}</p>
       <small>接続ID：{connection.id}</small>
+      {!connection.revoked_at && Date.parse(connection.expires_at) > Date.now() && <button type="button" disabled={busy} onClick={() => { setEditing(editing === connection.id ? null : connection.id); setAllBoards(connection.all_boards); setBoards(connection.allowed_group_ids); setScopes(connection.scopes); setPcName(connection.pc_name || '') }}>権限を変更</button>}
+      {editing === connection.id && <form onSubmit={event => { event.preventDefault(); void action(async () => {
+        await call('list', { action: 'permissions', id: connection.id, scopes, allowedGroupIds: allBoards ? [] : boards, allBoards, pcName: pcName || null }); await load(); setEditing(null); setNotice('キーと有効期限を維持して権限を更新しました')
+      }) }}>
+        <label><input type="checkbox" checked={allBoards} onChange={e => setAllBoards(e.target.checked)} />全掲示板（今後の追加も含む）</label>
+        <label className={styles.field}>登録PC名<input value={pcName} maxLength={64} onChange={e => setPcName(e.target.value)} placeholder="例：CEO_S" /></label>
+        <fieldset disabled={allBoards}><legend>限定する掲示板</legend><div className={styles.checks}>{snapshot.boards.map(board => <label key={board.id}><input type="checkbox" checked={boards.includes(board.id)} disabled={!boards.includes(board.id) && boards.length >= 20} onChange={e => setBoards(current => e.target.checked ? [...current, board.id] : current.filter(id => id !== board.id))} />{board.name}</label>)}</div></fieldset>
+        <button type="button" onClick={() => setScopes([...DATA_READ_SCOPES, ...DATA_WRITE_SCOPES, ...DATA_PUBLISH_SCOPES])}>全操作を選択</button>
+        {groups.map(group => <fieldset key={group.title}><legend>{group.title}</legend><div className={styles.checks}>{group.scopes.map(scope => <label key={scope}><input type="checkbox" checked={scopes.includes(scope)} onChange={() => toggleScope(scope)} />{labels[scope]}</label>)}</div></fieldset>)}
+        <button type="submit" disabled={busy || !scopes.length || (!allBoards && !boards.length)}>権限を保存</button>
+        <button type="button" onClick={() => setEditing(null)}>閉じる</button>
+      </form>}
       {!connection.revoked_at && <div className={styles.actions}><button type="button" disabled={busy} onClick={() => {
         if (window.confirm(`「${connection.label}」を失効します。以後このキーは利用できません。`)) void action(async () => {
           await call('list', { action: 'revoke', id: connection.id }); await load(); setNotice('接続を失効しました')
