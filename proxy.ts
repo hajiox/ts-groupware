@@ -54,6 +54,7 @@ export function proxy(request: NextRequest) {
     '/api/integrations/codex-mtg', // Uses a dedicated machine token verified by the route.
     '/api/integrations/meeting-transcriber/summary',
     '/api/integrations/meeting-transcriber/self-dm',
+    '/api/integrations/oem/consultation-received', // Uses an independent OEM service Bearer secret.
   ]
 
   if (publicPaths.some(p => pathname.startsWith(p)) || publicExactPaths.includes(pathname) || pathname === '/') {
