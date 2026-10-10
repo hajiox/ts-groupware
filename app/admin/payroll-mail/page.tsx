@@ -35,15 +35,15 @@ type JobRow={id:string;payroll_month:string;attendance_month:string;status:strin
 export default async function PayrollMailPage() {
   const user=await getUserSession()
   if(!user) redirect('/login?next=%2Fadmin%2Fpayroll-mail')
-  if(!getManagementPermissions(user).canViewPayroll) return <main><h1>給与の閲覧権限が必要です</h1><Link href="/groups">戻る</Link></main>
+  if(!getManagementPermissions(user).canViewPayroll) return <main className="safe-area-page"><h1>給与の閲覧権限が必要です</h1><Link href="/groups">戻る</Link></main>
   const {data,error}=await adminClient.from('gw_payroll_mail_jobs')
     .select('id,payroll_month,attendance_month,status,reason,created_at,report_status,comparison').order('created_at',{ascending:false}).limit(24)
-  if(error) return <main><h1>給与メールの取込・検証</h1><p>結果を読み込めませんでした。時間をおいて再度開いてください。</p><Link href="/admin">給与・勤務へ戻る</Link></main>
+  if(error) return <main className="safe-area-page"><h1>給与メールの取込・検証</h1><p>結果を読み込めませんでした。時間をおいて再度開いてください。</p><Link href="/admin">給与・勤務へ戻る</Link></main>
   const jobs=(data||[]) as JobRow[]
   const ids=[...new Set(jobs.flatMap(job=>(job.comparison?.rows||[]).map(row=>row.employeeId)))]
   const employees=ids.length?await adminClient.from('gw_payroll_employees').select('id,real_name,display_name').in('id',ids):{data:[]}
   const names=new Map((employees.data||[]).map(employee=>[employee.id,employee.real_name||employee.display_name]))
-  return <main style={{maxWidth:1100,margin:'24px auto',padding:20}}>
+  return <main className="safe-area-page" style={{maxWidth:1100,margin:'24px auto'}}>
     <Link href="/admin">← 給与・勤務へ戻る</Link>
     <h1>給与メールの取込・検証</h1>
     <p><Link href="/admin/payroll-stability">給与計算ルールの月次検証を見る</Link></p>

@@ -337,9 +337,9 @@ export function AppraisalAdminTab() {
       .appraisal-reviewer-view > div { flex:1 1 360px; } .appraisal-reviewer-view h3,.appraisal-reviewer-view p { margin:0; } .appraisal-reviewer-view p { color:var(--text-sub); }
       .appraisal-readonly { color:#93c5fd; font-size:13px; white-space:nowrap; }
       .appraisal-readonly-note { padding:12px 14px; border:1px solid #3b82f6; border-radius:9px; color:#bfdbfe; background:rgba(59,130,246,.08); }
-      .appraisal-print-root { position:fixed; inset:0; z-index:1000; overflow:auto; padding:24px; background:rgba(2,6,23,.82); }
+      .appraisal-print-root { position:fixed; inset:0; z-index:1000; overflow:auto; padding:calc(24px + var(--safe-top)) 24px 24px; background:rgba(2,6,23,.82); }
       .appraisal-print-dialog { width:min(900px,100%); margin:0 auto; }
-      .appraisal-print-controls { position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-bottom:12px; padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--card,#1e293b); box-shadow:0 8px 30px #0006; }
+      .appraisal-print-controls { position:sticky; top:var(--safe-top); z-index:2; display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-bottom:12px; padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--card,#1e293b); box-shadow:0 8px 30px #0006; }
       .appraisal-print-controls > div { display:flex; flex-direction:column; margin-right:auto; }
       .appraisal-print-controls small { margin-top:3px; }
       .appraisal-print-button { border-color:#2563eb; background:#2563eb; color:#fff; font-weight:700; }
@@ -365,7 +365,7 @@ export function AppraisalAdminTab() {
       .appraisal-print-signature { break-inside:avoid; margin-top:6mm; padding-top:4mm; border-top:1px solid #111827; }
       .appraisal-print-signature p { margin:0 0 5mm; color:#111827; font-size:12px; }
       .appraisal-print-signature div { display:flex; justify-content:space-between; gap:8mm; font-size:12px; }
-      @media(max-width:600px) { .appraisal-item,.appraisal-talk-item { padding:14px; } .appraisal-header { align-items:flex-start; } .appraisal-actions span { flex-basis:100%; } .appraisal-print-root { padding:8px; } .appraisal-print-controls { align-items:flex-end; } .appraisal-print-sheet { width:100%; min-height:auto; padding:18px; } .appraisal-print-meta { grid-template-columns:1fr; } .appraisal-print-signature div { flex-direction:column; } }
+      @media(max-width:600px) { .appraisal-item,.appraisal-talk-item { padding:14px; } .appraisal-header { align-items:flex-start; } .appraisal-actions span { flex-basis:100%; } .appraisal-print-root { padding:calc(8px + var(--safe-top)) 8px 8px; } .appraisal-print-controls { align-items:flex-end; } .appraisal-print-sheet { width:100%; min-height:auto; padding:18px; } .appraisal-print-meta { grid-template-columns:1fr; } .appraisal-print-signature div { flex-direction:column; } }
     `}</style>
     <style jsx global>{`
       @page { size:A4 portrait; margin:10mm; }

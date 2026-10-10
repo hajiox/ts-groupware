@@ -73,7 +73,7 @@ export default async function PayrollStabilityPage() {
   const user = await getUserSession()
   if (!user) redirect('/login?next=%2Fadmin%2Fpayroll-stability')
   if (!getManagementPermissions(user).canViewPayroll) {
-    return <main className="mx-auto max-w-5xl space-y-4 p-5">
+    return <main className="safe-area-page mx-auto max-w-5xl space-y-4 p-5">
       <h1 className="text-xl font-semibold">給与の閲覧権限が必要です</h1>
       <Link className="underline" href="/groups">戻る</Link>
     </main>
@@ -90,7 +90,7 @@ export default async function PayrollStabilityPage() {
     if (employees.error) throw new Error('employee_names_unavailable')
     names = new Map((employees.data || []).map(employee => [employee.id, employee.real_name || employee.display_name || '氏名未登録']))
   } catch {
-    return <main className="mx-auto max-w-5xl space-y-4 p-5">
+    return <main className="safe-area-page mx-auto max-w-5xl space-y-4 p-5">
       <Link className="underline" href="/admin/payroll-mail">← 給与メールの取込・検証へ戻る</Link>
       <h1 className="text-2xl font-semibold">給与計算ルールの月次検証</h1>
       <p role="alert" className="rounded-lg border border-destructive p-4">検証結果を読み込めませんでした。異常の有無は未確認です。時間をおいて再度開いてください。</p>
@@ -106,7 +106,7 @@ export default async function PayrollStabilityPage() {
   const classifiedKinds = new Set(['rule_reversal', 'rule_change', 'settings_change', 'formula_mismatch', 'missing_input', 'engine_change', 'engine_reversal'])
   const otherIssues = report.issues.filter(issue => !classifiedKinds.has(issue.kind))
 
-  return <main className="mx-auto max-w-6xl space-y-5 p-5">
+  return <main className="safe-area-page mx-auto max-w-6xl space-y-5 p-5">
     <nav className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
       <Link className="underline" href="/admin/payroll-mail">← 給与メールの取込・検証</Link>
       <Link className="underline" href="/admin">給与・勤務</Link>

@@ -1907,10 +1907,12 @@ html[data-theme="light"] .leave-request-status--voided {
   --danger:      #ef4444;
   --own-bubble:  #1d4ed8;
   --other-bubble:#334155;
+  --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --nav-bar-height: 56px;
   --nav-height:  calc(var(--nav-bar-height) + var(--safe-bottom));
-  --header-height: 56px;
+  --header-bar-height: 56px;
+  --header-height: calc(var(--header-bar-height) + var(--safe-top));
   --fixed-gap: 12px;
   --composer-bottom: calc(var(--nav-height) + var(--fixed-gap));
   --post-composer-reserve: 168px;
@@ -2009,18 +2011,25 @@ img {
   overflow-x: hidden;
 }
 
+/* Reports without the shared header still need to clear the iOS status bar. */
+.safe-area-page {
+  padding: calc(20px + var(--safe-top)) 20px 20px;
+}
+
 /* 笏笏笏 Top header 笏笏笏 */
 .top-header {
   position: sticky;
   top: 0;
   z-index: 100;
   height: var(--header-height);
+  flex-shrink: 0;
   background: var(--card);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  /* viewport-fit=cover places the iOS status bar inside the viewport. */
+  padding: var(--safe-top) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
   gap: 12px;
 }
 
@@ -2371,7 +2380,7 @@ img {
   align-items: center;
   justify-content: center;
   background: var(--bg);
-  padding: 32px 24px;
+  padding: calc(32px + var(--safe-top)) max(24px, env(safe-area-inset-right, 0px)) calc(32px + var(--safe-bottom)) max(24px, env(safe-area-inset-left, 0px));
 }
 
 .login-logo {
@@ -2441,7 +2450,7 @@ img {
   align-items: center;
   justify-content: center;
   background: var(--bg);
-  padding: 32px 24px;
+  padding: calc(32px + var(--safe-top)) max(24px, env(safe-area-inset-right, 0px)) calc(32px + var(--safe-bottom)) max(24px, env(safe-area-inset-left, 0px));
 }
 .top-panel {
   width: 100%;
@@ -2500,7 +2509,7 @@ img {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: var(--safe-top) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
   height: var(--header-height);
   background: var(--card);
   border-bottom: 1px solid var(--border);
@@ -2703,8 +2712,8 @@ img {
 
 @media (max-width: 420px) {
   .groups-header {
-    padding-right: 10px;
-    padding-left: 10px;
+    padding-right: max(10px, env(safe-area-inset-right, 0px));
+    padding-left: max(10px, env(safe-area-inset-left, 0px));
   }
   .groups-header__logo {
     font-size: 15px;
@@ -3501,8 +3510,8 @@ img {
 }
 .image-preview-close {
   position: fixed;
-  top: 16px;
-  right: 16px;
+  top: calc(16px + var(--safe-top));
+  right: max(16px, env(safe-area-inset-right, 0px));
   z-index: 301;
   width: 40px;
   height: 40px;
@@ -4611,8 +4620,8 @@ img {
 }
 .image-preview__close {
   position: fixed;
-  top: 16px;
-  right: 16px;
+  top: calc(16px + var(--safe-top));
+  right: max(16px, env(safe-area-inset-right, 0px));
   z-index: 301;
   width: 40px;
   height: 40px;
@@ -11368,7 +11377,7 @@ body,
   min-height: 100vh;
   background: #dbe1e8;
   color: #111827;
-  padding: 76px 20px 32px;
+  padding: calc(76px + var(--safe-top)) 20px 32px;
 }
 
 .shift-print-toolbar {
@@ -11381,10 +11390,10 @@ body,
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
-  min-height: 62px;
+  min-height: calc(62px + var(--safe-top));
   border-bottom: 1px solid #cbd5e1;
   background: rgba(255, 255, 255, 0.96);
-  padding: 10px 18px;
+  padding: calc(10px + var(--safe-top)) max(18px, env(safe-area-inset-right, 0px)) 10px max(18px, env(safe-area-inset-left, 0px));
   box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
 }
 
@@ -16557,7 +16566,7 @@ html[data-theme="light"] .shift-unavailable-day small {
 .pledge-paper-print-page {
   min-height: 100dvh;
   background: #e5e7eb;
-  padding: 20px;
+  padding: calc(20px + var(--safe-top)) 20px 20px;
   color: #111827;
 }
 
@@ -16568,7 +16577,7 @@ body:has(.pledge-paper-print-page) .pull-to-refresh {
 
 .pledge-paper-print-toolbar {
   position: sticky;
-  top: 12px;
+  top: calc(12px + var(--safe-top));
   z-index: 2;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
