@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { SHIFT_EC_SALE_OPTIONS, normalizeShiftEcSaleIds, normalizeShiftEcSaleTimes, type ShiftEcSaleOption, type ShiftEcSaleTimes } from './shift-sales'
+import { SHIFT_EC_SALE_OPTIONS, isShiftEcSaleOperational, normalizeShiftEcSaleIds, normalizeShiftEcSaleTimes, type ShiftEcSaleOption, type ShiftEcSaleTimes } from './shift-sales'
 
 export type CalendarSaleEvent = {
   title: string
@@ -22,17 +22,18 @@ export function isCalendarSale(title: string) {
   return /sale|sall|セール|お買い物マラソン|プライムデー|black\s*friday|ブラックフライデー|爆買|超paypay|5の(?:付|つ)く日|プレミアムな日曜日|月末市|真ん中市|販促日/i.test(title)
 }
 
-export function resolveCalendarSale(title: string, options: ShiftEcSaleOption[]): ShiftEcSaleOption | null {
+export function resolveCalendarSale(title: string, options: ShiftEcSaleOption[], date = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10)): ShiftEcSaleOption | null {
   const label = calendarSaleName(title)
+  if (!isShiftEcSaleOperational({ id: '', label }, date)) return null
   const key = calendarSaleKey(label)
   const original = SHIFT_EC_SALE_OPTIONS.find(option => calendarSaleKey(option.label) === key)
   const match = options.find(option => calendarSaleKey(option.label) === key)
     || (original && options.find(option => option.id === original.id))
-  if (match) return match.is_active ? match : null
+  if (match) return match.is_active && isShiftEcSaleOperational(match, date) ? match : null
   if (!isCalendarSale(label)) return null
   const id = `calendar_${createHash('sha256').update(key).digest('hex').slice(0, 24)}`
   const existing = options.find(option => option.id === id)
-  if (existing) return existing.is_active ? existing : null
+  if (existing) return existing.is_active && isShiftEcSaleOperational(existing, date) ? existing : null
   return { id, label, color: /amazon|アマゾン/i.test(label) ? 'green' : /楽天|rakuten|ブランド館/i.test(label) ? 'red' : 'orange', start_time: null, end_time: null, sort_order: 200, is_active: true }
 }
 
@@ -48,7 +49,7 @@ export function calendarSalesByDay(events: CalendarSaleEvent[], options: ShiftEc
     for (const event of events) {
       const from = Date.parse(event.starts_at), to = Date.parse(event.ends_at)
       if (!(from < ms + DAY_MS && to > ms)) continue
-      const option = resolveCalendarSale(event.title, options)
+      const option = resolveCalendarSale(event.title, options, date)
       if (!option) continue
       const time = {
         start_time: !event.all_day && jstDate(from) === date ? jstTime(from) : null,
@@ -69,19 +70,21 @@ function timeAt(times: ShiftEcSaleTimes, id: string) {
   return { start_time: times[id]?.start_time || null, end_time: times[id]?.end_time || null }
 }
 
-export function reconcileCalendarSales(tags: unknown, rawTimes: unknown, rawState: unknown, next: ShiftEcSaleTimes) {
+export function reconcileCalendarSales(tags: unknown, rawTimes: unknown, rawState: unknown, next: ShiftEcSaleTimes, preservedAutomaticIds: string[] = []) {
   const selected = new Set(normalizeShiftEcSaleIds(tags))
   const times = normalizeShiftEcSaleTimes(rawTimes, [...selected])
   const state = rawState && typeof rawState === 'object' ? rawState as Partial<CalendarSaleState> : {}
   const suppressed = new Set(normalizeShiftEcSaleIds(state.suppressed))
   const previous = state.automatic && typeof state.automatic === 'object' ? state.automatic : {}
+  const preserved = new Set(preservedAutomaticIds)
+  const automatic: ShiftEcSaleTimes = {}
   for (const id of Object.keys(previous)) {
     if (!selected.has(id)) { suppressed.add(id); continue }
     if (JSON.stringify(timeAt(times, id)) !== JSON.stringify(timeAt(previous, id))) continue
+    if (preserved.has(id)) { automatic[id] = previous[id]; continue }
     selected.delete(id)
     delete times[id]
   }
-  const automatic: ShiftEcSaleTimes = {}
   for (const [id, time] of Object.entries(next)) {
     if (selected.has(id)) { suppressed.delete(id); continue }
     if (suppressed.has(id)) continue

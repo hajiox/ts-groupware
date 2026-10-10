@@ -85,6 +85,7 @@ type ShiftRequirement = {
   timee_count: number | string | null
   ec_sale_tags: string[]
   ec_sale_times: ShiftEcSaleTimes
+  calendar_sale_state?: { automatic?: ShiftEcSaleTimes }
 }
 
 type ShiftRequestRow = {
@@ -837,7 +838,7 @@ async function loadPeriodDetails(period: ShiftPeriod | null, fallbackDepartment:
     loadPatternPreferences(period.department),
     adminClient
       .from('gw_shift_requirements')
-      .select('id, period_id, work_date, required_count, workplace_label, notes, notes2, notes3, production_plan, timee_count, ec_sale_tags, ec_sale_times')
+      .select('id, period_id, work_date, required_count, workplace_label, notes, notes2, notes3, production_plan, timee_count, ec_sale_tags, ec_sale_times, calendar_sale_state')
       .eq('period_id', period.id)
       .order('work_date', { ascending: true }),
     adminClient

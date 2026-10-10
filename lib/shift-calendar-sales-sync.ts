@@ -2,7 +2,7 @@ import { adminClient } from '@/lib/supabase/admin'
 import { getGoogleCalendarId } from '@/lib/google-calendar'
 import { isAutoGoogleCalendarSyncEnabled, syncGoogleCalendarRange } from '@/lib/google-calendar-import'
 import { calendarSalesByDay, reconcileCalendarSales, resolveCalendarSale, type CalendarSaleEvent } from '@/lib/shift-calendar-sales'
-import type { ShiftEcSaleOption } from '@/lib/shift-sales'
+import { isShiftEcSaleOperational, type ShiftEcSaleOption } from '@/lib/shift-sales'
 import { isDeepStrictEqual } from 'node:util'
 
 type Period = { id: string; department: string; status: string; start_date: string; end_date: string }
@@ -43,7 +43,8 @@ export async function syncFloorShiftSales(period: Period, requestedBy: string, f
   const options = (master.data || []) as ShiftEcSaleOption[]
   const additions = new Map<string, ShiftEcSaleOption>()
   for (const event of events) {
-    const option = resolveCalendarSale(event.title, options)
+    const eventDate = new Date(Date.parse(event.starts_at) + 9 * 3_600_000).toISOString().slice(0, 10)
+    const option = resolveCalendarSale(event.title, options, eventDate < period.start_date ? period.start_date : eventDate)
     if (option && !options.some(existing => existing.id === option.id)) additions.set(option.id, option)
   }
   if (additions.size) {
@@ -59,7 +60,8 @@ export async function syncFloorShiftSales(period: Period, requestedBy: string, f
     .select('work_date,ec_sale_tags,ec_sale_times,calendar_sale_state').eq('period_id', period.id)
   if (requirements.error) throw requirements.error
   const changes = (requirements.data || []).flatMap(row => {
-    const next = reconcileCalendarSales(row.ec_sale_tags, row.ec_sale_times, row.calendar_sale_state, daily[row.work_date] || {})
+    const preserved = options.filter(option => !isShiftEcSaleOperational(option, row.work_date)).map(option => option.id)
+    const next = reconcileCalendarSales(row.ec_sale_tags, row.ec_sale_times, row.calendar_sale_state, daily[row.work_date] || {}, preserved)
     if (isDeepStrictEqual([row.ec_sale_tags, row.ec_sale_times, row.calendar_sale_state], [next.ec_sale_tags, next.ec_sale_times, next.calendar_sale_state])) return []
     return [{ work_date: row.work_date, previous_tags: row.ec_sale_tags, previous_times: row.ec_sale_times, previous_state: row.calendar_sale_state, ...next }]
   })

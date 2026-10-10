@@ -49,6 +49,7 @@ type ShiftRequirement = {
   timee_count: number | string | null
   ec_sale_tags: string[]
   ec_sale_times: ShiftEcSaleTimes
+  calendar_sale_state?: { automatic?: ShiftEcSaleTimes }
 }
 
 type ShiftRequest = {
@@ -253,7 +254,7 @@ function workbookXml(options: {
         ? shiftTimeeHeadcount(requirement?.notes2, requirement?.notes3, requirement?.timee_count)
         : 0)
       const saleLabels = options.period.department === 'フロア'
-        ? shiftEcSaleLabels(requirement?.ec_sale_tags, options.saleOptions, requirement?.ec_sale_times)
+        ? shiftEcSaleLabels(requirement?.ec_sale_tags, options.saleOptions, requirement?.ec_sale_times, date, Object.keys(requirement?.calendar_sale_state?.automatic || {}))
         : []
       const manufacturingNote2 = [...new Set(
         [requirement?.notes2, requirement?.production_plan]
@@ -343,7 +344,7 @@ export async function GET(request: NextRequest) {
       loadShiftEmployees(shiftPeriod.department),
       adminClient
         .from('gw_shift_requirements')
-        .select('work_date, required_count, workplace_label, notes, notes2, notes3, production_plan, timee_count, ec_sale_tags, ec_sale_times')
+        .select('work_date, required_count, workplace_label, notes, notes2, notes3, production_plan, timee_count, ec_sale_tags, ec_sale_times, calendar_sale_state')
         .eq('period_id', shiftPeriod.id)
         .order('work_date', { ascending: true }),
       adminClient

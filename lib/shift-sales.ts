@@ -17,6 +17,34 @@ export type ShiftEcSaleTime = {
 
 export type ShiftEcSaleTimes = Record<string, ShiftEcSaleTime>
 
+export const RETIRED_EC_SALE_FROM = '2026-10-01'
+
+// This policy applies only to EC sale labels, never to general TikTok SNS work.
+export function isShiftEcSaleOperational(option: Pick<ShiftEcSaleOption, 'id' | 'label'>, date: string) {
+  const label = option.label.normalize('NFKC').trim().toLowerCase().replace(/\s+/g, '')
+    .replace(/^(?:ec|ecセール|通販)[：:]/, '')
+  const id = option.id.toLowerCase()
+  if (/^(?:makeshop|メイクショップ)/.test(label) || id === 'makeshop') return false
+  const retired = /^(?:メルカリ|mercari(?:shops)?|qoo10|キューテン|tiktok(?:shop|ショップ)|ティックトックショップ)/.test(label)
+    || ['mercari', 'qoo10', 'tiktok', 'tiktok_shop'].includes(id)
+  return !retired || date < RETIRED_EC_SALE_FROM
+}
+
+export function visibleShiftEcSaleIds(value: unknown, options: ShiftEcSaleOption[], date: string, automaticIds: string[] = []) {
+  const automatic = new Set(automaticIds)
+  const byId = new Map(options.map(option => [option.id, option]))
+  return normalizeShiftEcSaleIds(value).filter(id => {
+    const option = byId.get(id)
+    // Previously saved manual notes remain visible; only retired automatic notes are hidden.
+    return !option || !automatic.has(id) || isShiftEcSaleOperational(option, date)
+  })
+}
+
+export function shiftEcSalePickerOptions(options: ShiftEcSaleOption[], date: string, selectedIds: string[], automaticIds: string[] = []) {
+  const selected = new Set(visibleShiftEcSaleIds(selectedIds, options, date, automaticIds))
+  return options.filter(option => (option.is_active && isShiftEcSaleOperational(option, date)) || selected.has(option.id))
+}
+
 export const SHIFT_EC_SALE_OPTIONS: ShiftEcSaleOption[] = [
   { id: 'brand_hall_store_sale', label: 'ブランド館店舗SALE', color: 'red', start_time: null, end_time: null, sort_order: 5, is_active: true },
   { id: 'rakuten_marathon', label: '楽天お買い物マラソン', color: 'red', start_time: null, end_time: null, sort_order: 10, is_active: true },
@@ -73,7 +101,7 @@ export function normalizeShiftEcSaleIds(value: unknown): string[] {
     .filter(Boolean))]
 }
 
-export function shiftEcSaleLabels(value: unknown, options: ShiftEcSaleOption[] = SHIFT_EC_SALE_OPTIONS, times: unknown = {}) {
+export function shiftEcSaleLabels(value: unknown, options: ShiftEcSaleOption[] = SHIFT_EC_SALE_OPTIONS, times: unknown = {}, date?: string, automaticIds: string[] = []) {
   const occurrenceTimes = normalizeShiftEcSaleTimes(times)
   const labels = new Map(options.map((option) => {
     const occurrence = occurrenceTimes[option.id]
@@ -83,5 +111,6 @@ export function shiftEcSaleLabels(value: unknown, options: ShiftEcSaleOption[] =
       end_time: occurrence?.end_time || null,
     })]
   }))
-  return normalizeShiftEcSaleIds(value).map((id) => labels.get(id) || id)
+  const ids = date ? visibleShiftEcSaleIds(value, options, date, automaticIds) : normalizeShiftEcSaleIds(value)
+  return ids.map((id) => labels.get(id) || id)
 }

@@ -47,7 +47,7 @@ export async function GET() {
     if (master.error) throw master.error
     const options = (master.data || []) as ShiftEcSaleOption[]
     const resolved = new Map(events.flatMap(event => {
-      const sale = resolveCalendarSale(event.title, options)
+      const sale = resolveCalendarSale(event.title, options, date)
       return sale ? [[sale.id, { sale, eventColor: event.color }] as const] : []
     }))
     const daily = calendarSalesByDay(events, options, date, date)[date] || {}

@@ -6,7 +6,7 @@ import { USER_DEPARTMENTS, type UserDepartment } from "@/lib/departments";
 import { SHIFT_COMPANY_OFF_NOTE, isCompanyOffAssignment } from "@/lib/shift-assignments";
 import { canSelectAllShiftPatterns } from "@/lib/shift-pattern-access";
 import { resolveShiftConstraints } from "@/lib/shift-constraints";
-import { shiftEcSaleDisplayLabel, type ShiftEcSaleColor, type ShiftEcSaleOption, type ShiftEcSaleTimes } from "@/lib/shift-sales";
+import { shiftEcSaleDisplayLabel, shiftEcSalePickerOptions, visibleShiftEcSaleIds, type ShiftEcSaleColor, type ShiftEcSaleOption, type ShiftEcSaleTimes } from "@/lib/shift-sales";
 import { buildShiftTimeeRange, parseShiftTimeeRange } from "@/lib/shift-timee";
 
 type ShiftStatus = "draft" | "collecting" | "generated" | "editing" | "confirmed" | "exported" | "archived";
@@ -74,6 +74,7 @@ type ShiftRequirement = {
   timee_count: number | string | null;
   ec_sale_tags: string[];
   ec_sale_times: ShiftEcSaleTimes;
+  calendar_sale_state?: { automatic?: ShiftEcSaleTimes };
 };
 
 type ShiftRequirementUpdate = Partial<ShiftRequirement> | ((current: ShiftRequirement) => Partial<ShiftRequirement>);
@@ -442,6 +443,8 @@ function RoadStationTimeeEditor({
 }
 
 function ShiftEcSalePicker({
+  date,
+  automaticIds,
   options,
   selected,
   times,
@@ -449,6 +452,8 @@ function ShiftEcSalePicker({
   onChange,
   onManage,
 }: {
+  date: string;
+  automaticIds: string[];
   options: ShiftEcSaleOption[];
   selected: string[];
   times: ShiftEcSaleTimes;
@@ -459,10 +464,10 @@ function ShiftEcSalePicker({
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const [draft, setDraft] = useState<string[]>(selected || []);
   const [draftTimes, setDraftTimes] = useState<ShiftEcSaleTimes>(times || {});
-  const selectedSet = new Set(selected || []);
+  const selectedSet = new Set(visibleShiftEcSaleIds(selected, options, date, automaticIds));
   const draftSet = new Set(draft);
   const selectedOptions = options.filter((option) => selectedSet.has(option.id));
-  const activeOptions = options.filter((option) => option.is_active || selectedSet.has(option.id));
+  const activeOptions = shiftEcSalePickerOptions(options, date, selected, automaticIds);
 
   useEffect(() => {
     setDraft(selected || []);
@@ -486,6 +491,10 @@ function ShiftEcSalePicker({
   function collectEnteredTimes() {
     const selectedIds = new Set(draft);
     const enteredTimes: ShiftEcSaleTimes = {};
+    const visibleIds = new Set(activeOptions.map(option => option.id));
+    for (const id of selectedIds) {
+      if (!visibleIds.has(id) && draftTimes[id]) enteredTimes[id] = draftTimes[id];
+    }
     detailsRef.current?.querySelectorAll<HTMLInputElement>("input[data-ec-sale-id][data-ec-sale-time]").forEach((input) => {
       const saleId = input.dataset.ecSaleId || "";
       const field = input.dataset.ecSaleTime;
@@ -3150,6 +3159,8 @@ export function ShiftAdminTab() {
                             />
                             {selectedPeriod.department === "フロア" && (
                               <ShiftEcSalePicker
+                                date={date}
+                                automaticIds={Object.keys(requirement.calendar_sale_state?.automatic || {})}
                                 options={payload?.saleOptions || []}
                                 selected={requirement.ec_sale_tags || []}
                                 times={requirement.ec_sale_times || {}}
@@ -3264,6 +3275,8 @@ export function ShiftAdminTab() {
                           <span>{selectedPeriod.department === "道の駅" ? "備考" : "ECセール / 備考2"}</span>
                           {selectedPeriod.department === "フロア" && (
                             <ShiftEcSalePicker
+                              date={date}
+                              automaticIds={Object.keys(requirement.calendar_sale_state?.automatic || {})}
                               options={payload?.saleOptions || []}
                               selected={requirement.ec_sale_tags || []}
                               times={requirement.ec_sale_times || {}}
