@@ -17,6 +17,48 @@ export const RESULT_SCHEMA = {
 }
 
 function fault(code) { return new Error(code) }
+const RESTART_REASONS = new Set(['authentication_required', 'lease_uncertain', 'completion_uncertain', 'execution_uncertain', 'job_invalid', 'startup_failed', 'intentional_stop', 'crash_limit'])
+/** Fixed metadata only: no job text, lease, credentials, or model configuration. */
+export function writeRestartLatch(root, mode, reason = null) {
+  if (!['ready', 'blocked', 'stopped'].includes(mode) || (mode === 'ready' ? reason !== null : !RESTART_REASONS.has(reason))) throw fault('RESTART_LATCH_INVALID')
+  // A partial write is an unreadable latch and therefore blocks automatic start.
+  writeFileSync(join(root, 'restart-state.json'), JSON.stringify({ version: 1, mode, reason, workerPid: process.pid, updatedAt: new Date().toISOString() }), { mode: 0o600 })
+}
+
+export function restartDecision({ liveWorker = false, heartbeatFresh = true, latch = null, journal = null, unreadable = false } = {}) {
+  if (liveWorker === true) return { decision: 'already_running', reason: heartbeatFresh ? 'worker_alive' : 'worker_alive_stale', exitCode: 10 }
+  const blocked = reason => ({ decision: 'blocked', reason, exitCode: 20 })
+  if (unreadable || liveWorker !== false) return blocked('state_unreadable')
+  if (latch !== null) {
+    if (latch?.version !== 1 || !['ready', 'blocked', 'stopped'].includes(latch.mode) || !Number.isSafeInteger(latch.workerPid) || latch.workerPid <= 0 || !Number.isFinite(Date.parse(latch.updatedAt)) || (latch.mode === 'ready' ? latch.reason !== null : !RESTART_REASONS.has(latch.reason))) return blocked('state_invalid')
+    if (latch.mode !== 'ready') return blocked(latch.reason)
+  }
+  if (journal !== null && (journal?.phase !== 'acknowledged' || !UUID.test(journal.jobId || ''))) return blocked('journal_requires_review')
+  return { decision: 'start', reason: 'safe_idle_restart', exitCode: 0 }
+}
+
+export function inspectRestart(root, isAlive = pid => { try { process.kill(pid, 0); return true } catch (error) { if (error.code === 'ESRCH') return false; throw error } }, monitorFile = join(process.env.LOCALAPPDATA || homedir(), 'Codex Bridge Monitor', 'states', 'tsg-codex-mtg.json')) {
+  const read = (name, max) => { const file = join(root, name); if (!existsSync(file)) return null; if (statSync(file).size > max) throw fault('RESTART_STATE_TOO_LARGE'); return readFileSync(file, 'utf8') }
+  try {
+    const lock = read('worker.lock', 32)
+    if (lock !== null) {
+      if (!/^[1-9]\d{0,9}$/.test(lock)) return restartDecision({ unreadable: true })
+      if (isAlive(Number(lock))) {
+        let heartbeatFresh = false
+        try { if (statSync(monitorFile).size < 16 * 1024) { const state = JSON.parse(readFileSync(monitorFile, 'utf8')); const age = Date.now() - Date.parse(state.heartbeatAt); heartbeatFresh = state.bridgePid === Number(lock) && age >= -30_000 && age <= 90_000 } } catch { /* An alive process is never killed based on monitor state. */ }
+        return restartDecision({ liveWorker: true, heartbeatFresh })
+      }
+    }
+    const latch = read('restart-state.json', 1024), journal = read('job-state.json', 16 * 1024)
+    // During an in-place disk update the old process has no durable latch yet.
+    // Its generic operator wait includes authentication and lease waits, so fail
+    // closed rather than guessing whether a network wait is safe to restart.
+    if (latch === null) {
+      try { if (statSync(monitorFile).size < 16 * 1024 && JSON.parse(readFileSync(monitorFile, 'utf8')).status === 'waiting_for_user') return { decision: 'blocked', reason: 'legacy_operator_wait', exitCode: 20 } } catch { /* No legacy monitor exists on a first installation. */ }
+    }
+    return restartDecision({ latch: latch === null ? null : JSON.parse(latch), journal: journal === null ? null : JSON.parse(journal) })
+  } catch { return restartDecision({ unreadable: true }) }
+}
 export function loadConfig(path = join(DEFAULT_ROOT, 'worker.config.json')) {
   let value
   try { value = JSON.parse(readFileSync(path, 'utf8')) } catch { throw fault('CONFIG_UNREADABLE') }
@@ -185,6 +227,8 @@ export function createApi(config, fetchImpl = fetch) {
       method: action ? 'POST' : 'GET', headers: { Authorization: `Bearer ${config.token}`, ...(action ? { 'Content-Type': 'application/json' } : {}) },
       ...(action ? { body: JSON.stringify({ action, ...fields }) } : {}), redirect: 'error', credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(15_000),
     })
+    // Revocation may be returned as HTML by an upstream proxy.
+    if (response.status === 401 || response.status === 403) { await response.body?.cancel().catch(() => {}); throw Object.assign(fault('MACHINE_UNAUTHORIZED'), { status: response.status }) }
     if (Number(response.headers.get('content-length') || 0) > 1_048_576) throw fault('API_RESPONSE_INVALID')
     const reader = response.body.getReader(); let size = 0; const chunks = []
     try { while (true) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; if (size > 1_048_576) throw fault('API_RESPONSE_INVALID'); chunks.push(value) } }
@@ -324,6 +368,7 @@ export class Worker {
     this.monitor = dependencies.monitor || (state => writeMonitor(config, state)); this.journal = dependencies.journal || (value => atomicJson(join(config.root, 'job-state.json'), value))
     this.busy = false; this.pending = false; this.blocked = false; this.stopped = false; this.authenticationRequired = false; this.state = { status: 'idle' }; this.abort = null
     this.onAuthenticationRequired = dependencies.onAuthenticationRequired
+    this.restartBlock = dependencies.restartBlock || (() => {})
     const api = dependencies.api || createApi(config)
     this.api = async (...args) => {
       if (this.authenticationRequired) throw fault('MACHINE_UNAUTHORIZED')
@@ -344,6 +389,7 @@ export class Worker {
   requireAuthentication() {
     if (this.authenticationRequired) return
     this.authenticationRequired = true; this.pending = false; this.abort?.abort()
+    this.restartBlock('authentication_required')
     this.report({ status: 'waiting_for_user', step: '接続認証が無効です。自動通信を停止しました。登録とキーを確認して手動で再起動してください' })
     this.onAuthenticationRequired?.()
   }
@@ -361,7 +407,7 @@ export class Worker {
         if (!Object.hasOwn(response, 'job')) throw fault('CLAIM_INVALID')
         if (response.job === null) { this.report({ status: 'idle', jobId: null, codexPid: null, progress: 0, step: '次の依頼を待っています' }); break }
         let job
-        try { job = validateJob(response.job) } catch { this.blocked = true; throw fault('JOB_INVALID') }
+        try { job = validateJob(response.job) } catch { this.blocked = true; this.restartBlock('job_invalid'); throw fault('JOB_INVALID') }
         await this.execute({ ...job, context: contextEvidence(this.info.posts, job.postId) })
         this.pending = true
       }
@@ -403,9 +449,9 @@ export class Worker {
     }
     const completion = { ...lease, status: result.status, summary: result.summary }
     this.journal({ phase: 'completion_pending', completion, allowCodeChange })
-    if (leaseLost) { this.blocked = true; this.report({ status: 'waiting_for_user', codexPid: null, step: '実行権が不明です。管理者の確認が必要です' }); return }
+    if (leaseLost) { this.blocked = true; this.restartBlock('lease_uncertain'); this.report({ status: 'waiting_for_user', codexPid: null, step: '実行権が不明です。管理者の確認が必要です' }); return }
     try { validateCompletion(await this.api('complete', completion), completion); this.recordCompletion(completion) }
-    catch { this.blocked = true; this.report({ status: 'waiting_for_user', codexPid: null, step: '結果の記録を確認できません。保存した同じ結果の再送だけが可能です' }) }
+    catch { this.blocked = true; this.restartBlock('completion_uncertain'); this.report({ status: 'waiting_for_user', codexPid: null, step: '結果の記録を確認できません。保存した同じ結果の再送だけが可能です' }) }
   }
   async recover(saved) {
     if (!saved || saved.phase === 'acknowledged') return
@@ -413,6 +459,7 @@ export class Worker {
     if (saved.phase === 'completion_pending' && saved.completion) {
       try { validateCompletion(await this.api('complete', saved.completion), saved.completion); this.recordCompletion(saved.completion); this.blocked = false; return } catch { /* Never restart the AI after uncertain completion. */ }
     }
+    this.restartBlock('execution_uncertain')
     this.report({ status: 'waiting_for_user', jobId: saved.jobId || saved.completion?.jobId, step: '前回作業の状態が不明です。管理者が実行状況を確認してください' })
   }
   stop() { this.stopped = true; this.abort?.abort() }
@@ -451,6 +498,7 @@ async function main() {
   configuredWindowsSandbox(config.codexHome)
   if (!existsSync(join(config.root, 'skill', 'SKILL.md'))) throw fault('SCOPED_SKILL_MISSING')
   if (args.includes('--check')) { process.stdout.write('Configuration and CLI check passed. No API or job was called.\n'); return }
+  if (args.includes('--restart-check')) { const result = inspectRestart(config.root); process.stdout.write(`${JSON.stringify(result)}\n`); process.exitCode = result.exitCode; return }
   if (args.includes('--probe') || args.includes('--probe-wake')) {
     const durationIndex = args.indexOf('--probe-ms')
     const waitForWake = args.includes('--probe-wake')
@@ -460,6 +508,9 @@ async function main() {
     process.stdout.write(`${JSON.stringify(result)}\n`); if (!result.ok) process.exitCode = 1; return
   }
   mkdirSync(config.root, { recursive: true })
+  const restart = inspectRestart(config.root)
+  if (restart.decision === 'already_running') throw fault('WORKER_ALREADY_RUNNING')
+  if (restart.decision !== 'start' && !args.includes('--operator-restart')) throw fault('RESTART_REQUIRES_REVIEW')
   const lock = join(config.root, 'worker.lock')
   if (existsSync(lock)) {
     const previous = Number(readFileSync(lock, 'utf8'))
@@ -468,9 +519,10 @@ async function main() {
     rmSync(lock)
   }
   const descriptor = openSync(lock, 'wx', 0o600); writeFileSync(descriptor, String(process.pid)); closeSync(descriptor)
+  writeRestartLatch(config.root, 'ready')
   let stopRealtime; let fallback; let machineTimer; let refreshing = false
-  const worker = new Worker(config, { onAuthenticationRequired: () => { stopRealtime?.(); stopRealtime = null; clearTimeout(worker.debounce); clearInterval(fallback) } })
-  const shutdown = () => { worker.stop(); stopRealtime?.(); clearInterval(fallback); clearInterval(machineTimer); if (!worker.busy) { rmSync(lock, { force: true }); process.exitCode = 0 } }
+  const worker = new Worker(config, { restartBlock: reason => writeRestartLatch(config.root, 'blocked', reason), onAuthenticationRequired: () => { stopRealtime?.(); stopRealtime = null; clearTimeout(worker.debounce); clearInterval(fallback) } })
+  const shutdown = () => { writeRestartLatch(config.root, 'stopped', 'intentional_stop'); worker.stop(); stopRealtime?.(); clearInterval(fallback); clearInterval(machineTimer); if (!worker.busy) { rmSync(lock, { force: true }); process.exitCode = 0 } }
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown)
   try {
     let saved = null; const statePath = join(config.root, 'job-state.json')
@@ -491,7 +543,7 @@ async function main() {
     await reconcile()
     if (!worker.authenticationRequired) fallback = setInterval(() => void reconcile(), FALLBACK_MS)
     machineTimer = setInterval(() => { worker.report({}); if (!worker.busy && !worker.authenticationRequired) void worker.api('machineHeartbeat').catch(() => {}) }, MACHINE_HEARTBEAT_MS)
-  } catch { shutdown(); throw fault('WORKER_START_FAILED') }
+  } catch { shutdown(); writeRestartLatch(config.root, 'blocked', 'startup_failed'); throw fault('WORKER_START_FAILED') }
   process.once('exit', () => { try { if (Number(readFileSync(lock, 'utf8')) === process.pid) rmSync(lock) } catch { /* Preserve another process's lock. */ } })
 }
 

@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $sourceRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $workerSource = Join-Path $sourceRoot 'scripts\codex-mtg-worker.mjs'
+$launcherSource = Join-Path $sourceRoot 'scripts\start-codex-mtg-worker.ps1'
 $skillSource = Join-Path $sourceRoot 'docs\skills\tsg-codex-mtg\SKILL.md'
 $installPath = [System.IO.Path]::GetFullPath($InstallDir)
 $expectedPath = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'TSG Codex MTG'))
@@ -59,39 +60,7 @@ Protect-PrivatePath $configPath $false
 if ($LASTEXITCODE -ne 0) { throw '設定またはCLI検証に失敗しました。設定の内容は表示しません。' }
 
 $launcherPath = Join-Path $installPath 'start-worker.ps1'
-$launcher = @'
-$ErrorActionPreference = 'Stop'
-$runtimeDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$nodePath = '__TSG_VERIFIED_NODE_PATH__'
-$startupPath = Join-Path $runtimeDir 'startup-status.json'
-function Write-StartupStatus([string]$Step, $NodeExitCode = $null, [string]$CatchType = $null) {
-  $status = @{ step = $Step; nodeExitCode = $NodeExitCode; catchType = $CatchType } | ConvertTo-Json -Compress
-  [System.IO.File]::WriteAllText($startupPath, $status, (New-Object System.Text.UTF8Encoding($false)))
-}
-try {
-  Write-StartupStatus 'launcher_start'
-  if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) { throw (New-Object System.IO.FileNotFoundException) }
-  Write-StartupStatus 'config_check'
-  $ErrorActionPreference = 'Continue'
-  & $nodePath (Join-Path $runtimeDir 'worker.mjs') --config (Join-Path $runtimeDir 'worker.config.json') --check 1>$null 2>$null
-  $nodeExitCode = $LASTEXITCODE
-  $ErrorActionPreference = 'Stop'
-  if ($nodeExitCode -ne 0) { Write-StartupStatus 'config_check_failed' $nodeExitCode; exit $nodeExitCode }
-  while ($true) {
-    Write-StartupStatus 'worker_start' 0
-    $ErrorActionPreference = 'Continue'
-    & $nodePath (Join-Path $runtimeDir 'worker.mjs') --config (Join-Path $runtimeDir 'worker.config.json') 1>$null 2>$null
-    $nodeExitCode = $LASTEXITCODE
-    $ErrorActionPreference = 'Stop'
-    Write-StartupStatus 'worker_exit' $nodeExitCode
-    if ($nodeExitCode -ne 0) { exit $nodeExitCode }
-    Start-Sleep -Seconds 15
-  }
-} catch {
-  try { Write-StartupStatus 'launcher_failed' $null $_.Exception.GetType().Name } catch {}
-  exit 1
-}
-'@
+$launcher = [System.IO.File]::ReadAllText($launcherSource, [System.Text.Encoding]::UTF8)
 $launcher = $launcher.Replace('__TSG_VERIFIED_NODE_PATH__', $nodePath.Replace("'", "''"))
 [System.IO.File]::WriteAllText($launcherPath, $launcher, (New-Object System.Text.UTF8Encoding($false)))
 $powerShellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -113,6 +82,14 @@ try {
   $shortcut.Description = 'TSG Codex MTG worker; unified monitor state only.'
   $shortcut.Save()
 } finally { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shortcutShell) | Out-Null }
-if ($legacyTask) { Unregister-ScheduledTask -TaskName 'TSG Codex MTG Worker' -Confirm:$false -ErrorAction Stop }
+$taskAction = New-ScheduledTaskAction -Execute $powerShellPath -Argument $arguments -WorkingDirectory $env:SystemRoot
+$taskPrincipal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
+$taskTriggers = @(
+  (New-ScheduledTaskTrigger -AtLogOn -User $identity),
+  (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 2))
+)
+$taskSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName 'TSG Codex MTG Worker' -Action $taskAction -Principal $taskPrincipal -Trigger $taskTriggers -Settings $taskSettings -Description 'Current-user MTG keepalive; respects worker lock, restart latch and uncertain journal.' -Force | Out-Null
+if ($NoStart) { Disable-ScheduledTask -TaskName 'TSG Codex MTG Worker' | Out-Null }
 if (-not $NoStart) { Start-Process -FilePath $powerShellPath -ArgumentList $arguments -WindowStyle Hidden | Out-Null }
-Write-Output 'TSG専用workerのStartup登録を完了しました。秘密値は表示していません。既存TSA workerは変更していません。'
+Write-Output 'TSG専用workerのStartup・本人ログイン中のkeepalive登録を完了しました。秘密値は表示していません。既存TSA workerは変更していません。'

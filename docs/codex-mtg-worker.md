@@ -1,5 +1,7 @@
 # Codex MTG 専用worker
 
+2026-10-11: workerとlauncherが予期せず終了しても、本人ログイン中の2分間隔keepaliveから同じ`start-worker.ps1`へ復帰します。実行中のPIDがあれば再起動・終了せず、heartbeatが90秒以上古い場合は`worker_alive_stale`と記録します。launcher自身の二重起動もfile lockで抑止します。通常のidle crashだけ15秒後に再起動し、短時間の連続5回失敗は停止理由を保存して止まります。認証、設定失敗、未確定journalは自動復帰しません。旧workerを稼働したままdisk更新した場合は、そのworkerの`waiting_for_user`も安全側で止めます。
+
 2026-10-08: WindowsではCLI子プロセスの`LOCALAPPDATA`だけを各ジョブの`.codex-localappdata`へ分離します。共用の`node_repl.exe`が使用中でもsandbox準備が同じファイルのACL更新と競合しないためです。既存ログインは同じ`CODEX_HOME`で使用し、elevated sandbox・承認方式・モデル指定は維持します。共通設定や他のCodexプロセスは変更しません。実機で共用環境の読取失敗と、分離環境の読取成功を確認しました。
 
 既存TSA Bridgeを変更せず、Windowsのログイン中に専用workerを動かします。Node.js 22以上、既存Codex CLIログイン、GitHubへのgitアクセスが必要です。npmの追加依存はありません。
@@ -13,13 +15,15 @@ node "$env:LOCALAPPDATA\TSG Codex MTG\worker.mjs" --probe --probe-ms 30000
 & .\scripts\install-codex-mtg-worker.ps1
 ```
 
-`--check` はローカル設定・既存モデル指定・CLI・Skillの存在だけを確認します。`--probe` は機械の認証とRealtime購読だけを確認し、claim・AI起動・投稿を行いません。購読後 `--probe-ms`（0〜60000、既定15000）だけ待ち、接続確認と購読回数・空wake受信回数だけを表示します。本文やキーは表示しません。installerは既存の専用workerが稼働していれば停止・上書きせず終了します。現在ユーザーのStartupフォルダーに `TSG Codex MTG.lnk` を置き、本人ログイン時にWindows PowerShell 5から非表示で起動します。`-NoStart` は配置・検証だけ、通常のインストールは同じ絶対パスを使って直接非表示で起動します。停止中の旧 `TSG Codex MTG Worker` タスクだけを削除し、TSAの既存タスクには触れません。workerの単一プロセスlockを維持します。既存の統合モニタの `states/tsg-codex-mtg.json` を使い、別のモニタウィンドウを作りません。
+`--check` はローカル設定・既存モデル指定・CLI・Skillの存在だけを確認します。`--probe` は機械の認証とRealtime購読だけを確認し、claim・AI起動・投稿を行いません。購読後 `--probe-ms`（0〜60000、既定15000）だけ待ち、接続確認と購読回数・空wake受信回数だけを表示します。本文やキーは表示しません。installerは既存の専用workerが稼働していれば停止・上書きせず終了します。現在ユーザーのStartupショートカットと`TSG Codex MTG Worker`タスクは、同じ非表示launcherを使います。taskは本人のInteractiveToken・Limited、ログオン時と2分間隔、IgnoreNewで登録し、TSAの既存タスクには触れません。`-NoStart`ではkeepalive taskを無効にして配置・検証だけ行い、通常のインストールで有効化・非表示起動します。workerの単一プロセスlockと既存の統合モニタを維持し、別のモニタウィンドウを作りません。
 
 実際の通知確認には `--probe-wake` を使います。既定30秒以内に空wakeを受信すれば直ちに回数だけを返して成功し、届かなければ `ok:false` / `wakeCount:0` と終了コード1を返します。確認中に管理者が明示許可した開設案内を投稿する方法なら、テスト専用投稿を追加する必要はありません。
 
 Realtimeの `codex-mtg-v1` / `wake` は空の通知、またはSupabaseが自動追加するUUIDの `id` だけを持つ通知を受け取ります。それ以外のフィールド・本文・個人情報・ジョブIDは受理しません。通知のidは起床の合図にしか使わず、起動・再接続時と通知時に認証APIからclaimします。通知断に備えて2分ごとに回収し、同時ジョブは1件だけです。サーバーの180秒leaseを30秒ごとに更新します。leaseが不明になったら自分のCodexプロセスを停止し、コード変更を自動再実行しません。
 
-APIが401/403を返した場合は認証対応待ちとし、以後のAPI呼出・Realtime再接続を止めます。モニタは `waiting_for_user` を表示し、登録とキーを確認した管理者による手動再起動が必要です。通常の通信断は2分の回収処理で復旧を試みます。設定・CLIなどのエラーでworkerが非0終了した場合、ランチャーは15秒ごとの再起動を行わず終了します。
+APIが401/403を返した場合は、HTML応答でも認証対応待ちとして以後のAPI呼出・Realtime再接続を止め、`restart-state.json`へ秘密なしの停止理由を保存します。モニタは`waiting_for_user`を表示します。通常の通信断は既存の2分回収で復旧を試みます。`--restart-check`はlocal状態だけを読み、start・already_running・blockedの固定JSONを返し、API・AI・投稿を呼びません。認証/設定/lease/結果不明の停止理由と`running`・`completion_pending`・壊れたjournalを、keepaliveも必ず尊重します。
+
+登録・キー・クラウドの実行状況と作業cloneを確認して復旧する場合は、非表示起動するlauncherへ`-OperatorRestart`を明示します。これは停止理由の確認を一度だけ越える手動入口で、job journalを消したりAIを再実行したりしません。`running`は既存recoverにより再び要確認で停止します。`completion_pending`は自動keepaliveでは再送せず、手動復旧時だけ同じjob/lease/status/summaryの完了通知を既存の冪等APIへ送れます。
 
 Startupのランチャーは、インストール時に検証したNode実行ファイルの絶対パスを使います。起動時の `--check` はAPIやジョブを呼びません。起動に失敗した場合は専用フォルダの `startup-status.json` で固定の処理段階・Node終了コード・例外の型だけを確認できます。設定・秘密・依頼本文・CLI出力は保存せず、前回の状態を上書きします。Nodeの配置が変わった場合は、workerを停止した状態で再インストールしてください。
 
@@ -31,6 +35,6 @@ TSGは入口とし、TSA/DocScannerが固定allowlistに未登録なら対象追
 
 `job-state.json` は秘密leaseを含むため、private設定と同じアクセス制限で扱います。実行途中に再起動した場合は `needs_operator` のまま止まり、同じAI作業を再開しません。送信待ちの完了結果が残る場合だけ、同じjob/lease/status/summaryで完了APIへ再送します。状態不明・期限切れ・CONFLICTは管理者がクラウドのジョブとfreshclone内の変更を確認して処置します。確認前にjournalや作業cloneを消さないでください。
 
-検証は `node --test scripts/codex-mtg-worker.test.mjs`。実ジョブや本番投稿を使わず、PC境界、秘密の除外、Realtime再接続、重複wake、lease不明、完了再送を確認します。
+検証は`node --test scripts/codex-mtg-worker.test.mjs scripts/codex-mtg-recovery.test.mjs`。実ジョブや本番投稿を使わず、PC境界、秘密の除外、Realtime再接続、重複wake、lease不明、完了再送に加え、実Windows PowerShellの合成workerで復帰・停止ラッチ・launcher二重起動を確認します。変更対象は独立したdesktop runtime scriptと文書だけで、Next.jsアプリのbuild/deployは不要です。
 
 起動フラグはこのPCの公式CLI helpで確認しています。Realtimeは[Supabase公式protocol](https://supabase.com/docs/guides/realtime/protocol)のJSON v1.0.0を使います。現在のアプリChatへの自動dispatchや履歴再開には依存しません。
