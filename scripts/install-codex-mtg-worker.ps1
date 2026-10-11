@@ -63,9 +63,17 @@ $launcherPath = Join-Path $installPath 'start-worker.ps1'
 $launcher = [System.IO.File]::ReadAllText($launcherSource, [System.Text.Encoding]::UTF8)
 $launcher = $launcher.Replace('__TSG_VERIFIED_NODE_PATH__', $nodePath.Replace("'", "''"))
 [System.IO.File]::WriteAllText($launcherPath, $launcher, (New-Object System.Text.UTF8Encoding($false)))
+# MSIX may redirect the logical LOCALAPPDATA tree. Task Scheduler and Startup
+# must receive the existing physical file, without copying private runtime data.
+$runtimeLocationJson = & $nodePath -e "const fs = require('node:fs'), path = require('node:path'); const runtimeDir = fs.realpathSync.native(process.argv[1]); const launcherPath = fs.realpathSync.native(path.join(runtimeDir, 'start-worker.ps1')); if (!fs.statSync(runtimeDir).isDirectory() || !fs.statSync(launcherPath).isFile() || path.dirname(launcherPath) !== runtimeDir) process.exit(1); process.stdout.write(JSON.stringify({ runtimeDir, launcherPath }));" $installPath
+if ($LASTEXITCODE -ne 0) { throw 'Runtime physical path verification failed.' }
+$runtimeLocation = $runtimeLocationJson | ConvertFrom-Json -ErrorAction Stop
+$physicalRuntimeDir = [string]$runtimeLocation.runtimeDir
+$physicalLauncherPath = [string]$runtimeLocation.launcherPath
+if (-not [System.IO.Path]::IsPathRooted($physicalRuntimeDir) -or -not [System.IO.Path]::IsPathRooted($physicalLauncherPath) -or [System.IO.Path]::GetDirectoryName($physicalLauncherPath) -ne $physicalRuntimeDir) { throw 'Runtime physical path is invalid.' }
 $powerShellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path -LiteralPath $powerShellPath -PathType Leaf)) { throw 'Windows PowerShell executable is unavailable.' }
-$arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $launcherPath + '"'
+$arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $physicalLauncherPath + '"'
 $startupDir = [System.Environment]::GetFolderPath('Startup')
 if (-not $startupDir -or -not [System.IO.Path]::IsPathRooted($startupDir)) { throw 'Current-user Startup directory is unavailable.' }
 $legacyTask = Get-ScheduledTask -TaskName 'TSG Codex MTG Worker' -ErrorAction SilentlyContinue

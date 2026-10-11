@@ -2,6 +2,8 @@
 
 2026-10-11: workerとlauncherが予期せず終了しても、本人ログイン中の2分間隔keepaliveから同じ`start-worker.ps1`へ復帰します。実行中のPIDがあれば再起動・終了せず、heartbeatが90秒以上古い場合は`worker_alive_stale`と記録します。launcher自身の二重起動もfile lockで抑止します。通常のidle crashだけ15秒後に再起動し、短時間の連続5回失敗は停止理由を保存して止まります。認証、設定失敗、未確定journalは自動復帰しません。旧workerを稼働したままdisk更新した場合は、そのworkerの`waiting_for_user`も安全側で止めます。
 
+MSIX版Codexでは`LOCALAPPDATA`の論理パスがアプリ専用領域へ転送される場合があります。配置先は従来どおりですが、installerは検証済みNodeの`fs.realpathSync.native`でruntime/launcherの実パスを確認し、Startup・taskの起動先に使います。launcherも自身の実フォルダの親をそのprocessの`LOCALAPPDATA`に固定し、設定・lock・Skill・共通monitorを同じ実領域へ揃えます。秘密ファイルのコピーやACLの緩和は行わず、各Codex jobの`.codex-localappdata`隔離も維持します。
+
 2026-10-08: WindowsではCLI子プロセスの`LOCALAPPDATA`だけを各ジョブの`.codex-localappdata`へ分離します。共用の`node_repl.exe`が使用中でもsandbox準備が同じファイルのACL更新と競合しないためです。既存ログインは同じ`CODEX_HOME`で使用し、elevated sandbox・承認方式・モデル指定は維持します。共通設定や他のCodexプロセスは変更しません。実機で共用環境の読取失敗と、分離環境の読取成功を確認しました。
 
 既存TSA Bridgeを変更せず、Windowsのログイン中に専用workerを動かします。Node.js 22以上、既存Codex CLIログイン、GitHubへのgitアクセスが必要です。npmの追加依存はありません。

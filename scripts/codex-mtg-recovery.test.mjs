@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -67,14 +67,17 @@ test('HTML 401 and 403 responses durably stop authentication before any retry', 
 })
 
 function launcherFixture(t, scenario) {
-  const root = fixture(t)
+  const fixtureRoot = fixture(t), root = join(fixtureRoot, 'physical-local', 'TSG Codex MTG')
+  mkdirSync(root, { recursive: true })
+  mkdirSync(join(root, 'skill')); writeFileSync(join(root, 'skill/SKILL.md'), 'Synthetic scoped Skill')
+  writeFileSync(join(root, 'worker.config.json'), '{"synthetic":true}')
   const workerModule = pathToFileURL(join(sourceDir, 'codex-mtg-worker.mjs')).href
   writeFileSync(join(root, 'scenario.json'), JSON.stringify(scenario))
   writeFileSync(join(root, 'worker.mjs'), `
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inspectRestart, restartDecision, writeRestartLatch } from ${JSON.stringify(workerModule)};
+import { inspectRestart, restartDecision, writeMonitor, writeRestartLatch } from ${JSON.stringify(workerModule)};
 const root = dirname(fileURLToPath(import.meta.url));
 const scenario = JSON.parse(readFileSync(join(root, 'scenario.json'), 'utf8'));
 if (process.argv.includes('--check')) { process.exitCode = scenario.badConfig ? 1 : 0; }
@@ -82,6 +85,9 @@ else if (process.argv.includes('--restart-check')) {
   const result = scenario.alive ? restartDecision({liveWorker:true,heartbeatFresh:!scenario.stale}) : inspectRestart(root, () => false, join(root, 'monitor.json'));
   process.stdout.write(JSON.stringify(result)); process.exitCode = result.exitCode;
 } else {
+  const configIndex=process.argv.indexOf('--config');
+  writeFileSync(join(root,'paths.json'), JSON.stringify({runtimeDir:root,localAppData:process.env.LOCALAPPDATA,configPath:process.argv[configIndex+1],configExists:existsSync(process.argv[configIndex+1]),skillExists:existsSync(join(root,'skill','SKILL.md')),launcherLockExists:existsSync(join(root,'launcher.lock'))}));
+  writeMonitor({pcName:'SYNTHETIC'},{status:'idle'});
   const countFile = join(root, 'starts'); const count = existsSync(countFile) ? Number(readFileSync(countFile, 'utf8')) + 1 : 1;
   writeFileSync(countFile, String(count)); writeRestartLatch(root, 'ready');
   if (scenario.auth) writeRestartLatch(root, 'blocked', 'authentication_required');
@@ -97,7 +103,7 @@ else if (process.argv.includes('--restart-check')) {
   const run = () => spawnSync(powerShell, args, { encoding: 'utf8', windowsHide: true, timeout: 15000 })
   const starts = () => existsSync(join(root, 'starts')) ? Number(readFileSync(join(root, 'starts'), 'utf8')) : 0
   const status = () => JSON.parse(readFileSync(join(root, 'startup-status.json'), 'utf8'))
-  return { root, args, run, starts, status }
+  return { fixtureRoot, root, args, run, starts, status }
 }
 
 test('Windows launcher recovers one safe crash, leaves intentional clean exit stopped, and caps repeated crashes', { skip: process.platform !== 'win32' }, t => {
@@ -128,6 +134,35 @@ test('Windows concurrent launcher invocation cannot start a duplicate worker', {
   assert.equal(f.run().status, 0); assert.equal(f.starts(), 1)
   writeFileSync(join(f.root, 'release'), '')
   assert.equal(await finished, 0)
+})
+
+test('Windows logical runtime resolves to one physical task entry and the same private runtime and monitor', { skip: process.platform !== 'win32' }, t => {
+  const f = launcherFixture(t, {}), physicalRoot = realpathSync.native(f.root)
+  const logicalRuntime = join(f.fixtureRoot, 'logical-local', 'TSG Codex MTG')
+  mkdirSync(dirname(logicalRuntime), { recursive: true }); symlinkSync(physicalRoot, logicalRuntime, 'junction')
+  assert.notEqual(logicalRuntime.toLowerCase(), physicalRoot.toLowerCase())
+  const installer = readFileSync(join(sourceDir, 'install-codex-mtg-worker.ps1'), 'utf8')
+  const resolver = installer.slice(installer.indexOf('$runtimeLocationJson ='), installer.indexOf('$powerShellPath ='))
+  const argumentAssignment = installer.split(/\r?\n/).find(line => line.startsWith('$arguments ='))
+  const probe = join(f.fixtureRoot, 'resolve-physical.ps1')
+  const quote = value => "'" + value.replaceAll("'", "''") + "'"
+  writeFileSync(probe, '\ufeff' + `$ErrorActionPreference='Stop'\n$nodePath=${quote(process.execPath)}\n$installPath=${quote(logicalRuntime)}\n${resolver}\n${argumentAssignment}\n@{runtimeDir=$physicalRuntimeDir;launcherPath=$physicalLauncherPath;arguments=$arguments}|ConvertTo-Json -Compress`)
+  const resolution = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', probe], { encoding: 'utf8', windowsHide: true, timeout: 10000 })
+  assert.equal(resolution.status, 0, resolution.stderr)
+  const entry = JSON.parse(resolution.stdout)
+  assert.equal(entry.runtimeDir.toLowerCase(), physicalRoot.toLowerCase())
+  assert.equal(entry.launcherPath.toLowerCase(), join(physicalRoot, 'start-worker.ps1').toLowerCase())
+  assert.equal(entry.arguments.includes('"' + entry.launcherPath + '"'), true)
+  // Invoke the logical spelling too: the launcher itself must canonicalize it.
+  const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(logicalRuntime, 'start-worker.ps1')], { encoding: 'utf8', windowsHide: true, timeout: 10000, env: { ...process.env, LOCALAPPDATA: dirname(logicalRuntime) } })
+  assert.equal(result.status, 0, result.stderr); assert.equal(f.starts(), 1)
+  const observed = JSON.parse(readFileSync(join(f.root, 'paths.json'), 'utf8'))
+  assert.equal(observed.runtimeDir.toLowerCase(), physicalRoot.toLowerCase())
+  assert.equal(observed.localAppData.toLowerCase(), dirname(physicalRoot).toLowerCase())
+  assert.equal(observed.configPath.toLowerCase(), join(physicalRoot, 'worker.config.json').toLowerCase())
+  assert.equal(observed.configExists && observed.skillExists && observed.launcherLockExists, true)
+  const monitor = JSON.parse(readFileSync(join(dirname(physicalRoot), 'Codex Bridge Monitor/states/tsg-codex-mtg.json'), 'utf8'))
+  assert.equal(monitor.workerName, 'SYNTHETIC')
 })
 
 test('explicit operator restart of the actual worker retains an uncertain journal and never claims or runs AI', t => {

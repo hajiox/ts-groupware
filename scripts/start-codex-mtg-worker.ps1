@@ -31,6 +31,18 @@ function Get-RestartCheck {
   } catch { return @{ decision = 'blocked'; reason = 'state_unreadable'; exitCode = 20 } }
 }
 try {
+  if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) { throw (New-Object System.IO.FileNotFoundException) }
+  # Resolve through Node's native Windows namespace, including MSIX redirects.
+  $ErrorActionPreference = 'Continue'
+  $physicalRuntimeDir = & $nodePath -e "process.stdout.write(require('node:fs').realpathSync.native(process.argv[1]));" $runtimeDir 2>$null
+  $physicalPathExitCode = $LASTEXITCODE
+  $ErrorActionPreference = 'Stop'
+  if ($physicalPathExitCode -ne 0 -or -not [System.IO.Path]::IsPathRooted([string]$physicalRuntimeDir)) { throw (New-Object System.IO.DirectoryNotFoundException) }
+  $runtimeDir = [System.IO.Path]::GetFullPath([string]$physicalRuntimeDir)
+  $env:LOCALAPPDATA = Split-Path -Parent $runtimeDir
+  $workerPath = Join-Path $runtimeDir 'worker.mjs'
+  $configPath = Join-Path $runtimeDir 'worker.config.json'
+  $startupPath = Join-Path $runtimeDir 'startup-status.json'
   # Concurrent Startup/task/manual invocations never create a second launcher.
   try { $launcherLock = [System.IO.File]::Open((Join-Path $runtimeDir 'launcher.lock'), [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None) }
   catch [System.IO.IOException] { exit 0 }
@@ -44,7 +56,6 @@ try {
       if ($latch.mode -in @('blocked', 'stopped')) { Write-StartupStatus 'operator_review_required' 20; exit 0 }
     } catch { Write-StartupStatus 'operator_review_required' 20; exit 0 }
   }
-  if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) { throw (New-Object System.IO.FileNotFoundException) }
   while ($true) {
     Write-StartupStatus 'config_check'
     $checkCode = Invoke-LocalWorker @('--check')
