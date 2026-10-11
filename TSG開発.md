@@ -1638,3 +1638,9 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - main 129b02c / aea3090で、Startupと本人ログイン中の2分keepaliveを共通launcherへ統一。Node native-realpathで既存runtimeの実体へそろえ、launcherの監視先も同じ領域に固定する。秘密設定・キー・ACL・CLIモデル・子ジョブの隔離設定は保持した。
 - lock・停止状態・journalを確認し、通常の待機中の異常終了だけ復旧。稼働PIDは終了せず、短時間5回失敗・認証/設定失敗・結果不明は自動再投入しない。明示再開でも不明な業務を再実行しない。
 - worker/launcher合成26件、PowerShell構文・diff検査を通過。実Windowsタスクは成功0、guardはworker_alive、同一workerのfresh idle heartbeatを確認。本人PCのAPI読取・Realtime購読が成功し、実業務の再投入や試験投稿は行っていない。稼働workerは維持し、次回起動は配備済み新版を使用する。Webコード・DBは無変更、GitHub連携のVercelチェックは成功。
+## 2026-10-11 CodexMTGの承認範囲と管理職依頼
+
+- コード変更の承認と調査/通常業務を分離。通常操作は既存MCP/API権限内で直接実行し、ツール未接続をコード承認待ちと混同しない。管理職の軽微な修正は直接実施、大規模/高影響のコード変更は具体案・影響を佐藤正彦に確認する。本人が明示採用した他Codex提案はそのhuman依頼の仕様として実行し、元Codex由来を理由に再承認しない。
+- workerの既存origin/owner PC/code権限とsandboxを保持。現在の認証済みsnapshotの同一投稿user_idと、検証済みcodeApproverUserIdの一致だけで本人承認を毎回判定。名前/引用/job自己申告を使わず、資料欠落は本人照合不足として扱う。後続承認で旧Codexジョブのコード権限を昇格しない。
+- 周辺資料は現在依頼以前に限定し、元提案の明示ID・言及PCを優先して最大10件/12000字を維持。資料欠落/切詰めを明示し、必要な対象だけ確認する。実行用Skill・共有ルールにも同じ運用を反映。
+- worker/peer/recovery 41試験、実CLIの操作/軽微/大規模/本人採用/承認自己申告5ケースに成功。実業務データや本番依頼を試験で変更せず、業務接続キーやMCP設定の追加なし。稼働反映はidleとjournal確認後に行う。

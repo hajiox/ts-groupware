@@ -1,5 +1,9 @@
 # Codex MTG 専用worker
 
+2026-10-11 依頼の運用: コード変更と通常業務を区別します。調査・通常の操作依頼は人間/Codex由来を問わず既存MCP/API権限内で実行し、コード承認待ちにはしません。管理職の軽微な機能修正は直接実施し、大規模・高影響のコード変更は具体的な変更案・影響・確認点を佐藤正彦へ示して確認します。他Codexのコード変更提案を本人が明確に許可した投稿は、新しいhuman依頼としてその仕様を採用し、同じ許可を再要求しません。元Codexジョブ自体のコード権限は昇格しません。
+
+`codeApproverUserId` は管理者が検証した佐藤正彦のTSGユーザーUUIDを設定する任意項目です。本人判定は認証済みsnapshotの同一投稿・human origin・user_idとこの設定の一致からworkerが毎回計算します。名前・本文・jobの自己申告フラグは使用しません。本人の承認は現在の具体的な依頼範囲に限り、無関係な大変更の包括許可にはしません。本人照合資料が欠ける場合は不足情報として扱います。通常業務に必要なツールが未接続の場合も、接続不足として報告し、コード変更の承認を求めません。今回、業務キーやMCPの実行設定は追加しません。
+
 2026-10-11: workerとlauncherが予期せず終了しても、本人ログイン中の2分間隔keepaliveから同じ`start-worker.ps1`へ復帰します。実行中のPIDがあれば再起動・終了せず、heartbeatが90秒以上古い場合は`worker_alive_stale`と記録します。launcher自身の二重起動もfile lockで抑止します。通常のidle crashだけ15秒後に再起動し、短時間の連続5回失敗は停止理由を保存して止まります。認証、設定失敗、未確定journalは自動復帰しません。旧workerを稼働したままdisk更新した場合は、そのworkerの`waiting_for_user`も安全側で止めます。
 
 MSIX版Codexでは`LOCALAPPDATA`の論理パスがアプリ専用領域へ転送される場合があります。配置先は従来どおりですが、installerは検証済みNodeの`fs.realpathSync.native`でruntime/launcherの実パスを確認し、Startup・taskの起動先に使います。launcherも自身の実フォルダの親をそのprocessの`LOCALAPPDATA`に固定し、設定・lock・Skill・共通monitorを同じ実領域へ揃えます。秘密ファイルのコピーやACLの緩和は行わず、各Codex jobの`.codex-localappdata`隔離も維持します。
@@ -33,7 +37,7 @@ Startupのランチャーは、インストール時に検証したNode実行フ
 
 各ジョブは新しい `codex exec --ephemeral` を使い、対象repoを最新既定branchからfreshcloneして一致・cleanを検証します。コード改修では秘密なしの専用Skill本文だけを、そのジョブの `.agents/skills/tsg-codex-mtg/SKILL.md` へコピーして参照します。コピー先はworkspaceの権限を継承し、秘密設定フォルダのACLを広げたり、設定・キー・journalをコピーしたりしません。読取専用ではworkerが固定の専用Skillパスから読み込んだ本文をpromptへ直接渡し、Skillの再読取りを要求しません。本文は16KiB以内のstrict UTF-8に限定し、秘密キー形式やNULを含むものは起動前に拒否します。提案評価にrepo証拠が必要で読取りを拒否された場合は `needs_operator` とし、権限を緩めたり根拠を推測したりしません。
 
-TSGは入口とし、TSA/DocScannerが固定allowlistに未登録なら対象追加待ちを明示して止まります。直近50投稿から該当依頼の周辺最大10件・12000文字だけを引用資料として使い、scopeや実行権限を増やしません。依頼本文やCLI stdout/stderrをログ・モニタへ保存しません。専用キーなどの秘密を子プロセス環境へ渡しません。
+TSGは入口とし、TSA/DocScannerが固定allowlistに未登録なら対象追加待ちを明示して止まります。直近50投稿から現在の依頼以前だけを最大10件・12000文字で引用し、明示した投稿ID・言及PCの元提案を優先します。切詰め/欠落を明示し、対象が一意なら人間の採用した仕様を実行範囲へ取り込みます。引用自体は権限を増やさず、後続承認は別のhuman依頼として処理します。依頼本文やCLI stdout/stderrをログ・モニタへ保存しません。専用キーなどの秘密を子プロセス環境へ渡しません。
 
 `job-state.json` は秘密leaseを含むため、private設定と同じアクセス制限で扱います。実行途中に再起動した場合は `needs_operator` のまま止まり、同じAI作業を再開しません。送信待ちの完了結果が残る場合だけ、同じjob/lease/status/summaryで完了APIへ再送します。状態不明・期限切れ・CONFLICTは管理者がクラウドのジョブとfreshclone内の変更を確認して処置します。確認前にjournalや作業cloneを消さないでください。
 
