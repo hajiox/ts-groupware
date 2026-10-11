@@ -1631,3 +1631,10 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - 投稿/DMはTSG君＋登録PC。新規添付は同じ接続のuploadのみ、MCP投稿削除はDrive実体を保持する。CodexMTGの投稿は専用MCP、編集は通常画面を維持し、汎用経由のDBguard失敗を副作用前403で防ぐ。GET副作用10件も更新扱い。メール提出の出力は同一contextで既存exportを再利用。給与メール画面の保存結果読取APIも追加。
 - HTTP/認証/役割/Drive境界、gateway/投稿/添付/給与メール、カタログ全98操作・90経路棚卸し12試験、実STDIO MCP17tools、TypeScript、lint（既存27警告・0error）、buildを確認。DB新migrationと合成fixtureを一括ROLLBACKで確認後、migrationと履歴を同一transactionで適用。
 - 転送制約はJSON本文3MiB・ファイル合計2MiB/5添付。既存業務の担当/給与閲覧者/本人署名条件は保持。認証/cron/機器/接続管理等36経路は専用契約を維持する。利用側は保護キー/launcherを維持してv1.2.0へ更新する。
+
+## 2026-10-11 CodexMTG受信workerの復旧と自動起動修正
+
+- 停止していた担当workerを既存設定で復旧。最初に終了した理由は記録から断定できないが、WindowsタスクからCodexアプリ内の論理AppDataが見えず起動できないことを実機で確認した。
+- main 129b02c / aea3090で、Startupと本人ログイン中の2分keepaliveを共通launcherへ統一。Node native-realpathで既存runtimeの実体へそろえ、launcherの監視先も同じ領域に固定する。秘密設定・キー・ACL・CLIモデル・子ジョブの隔離設定は保持した。
+- lock・停止状態・journalを確認し、通常の待機中の異常終了だけ復旧。稼働PIDは終了せず、短時間5回失敗・認証/設定失敗・結果不明は自動再投入しない。明示再開でも不明な業務を再実行しない。
+- worker/launcher合成26件、PowerShell構文・diff検査を通過。実Windowsタスクは成功0、guardはworker_alive、同一workerのfresh idle heartbeatを確認。本人PCのAPI読取・Realtime購読が成功し、実業務の再投入や試験投稿は行っていない。稼働workerは維持し、次回起動は配備済み新版を使用する。Webコード・DBは無変更、GitHub連携のVercelチェックは成功。
