@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getUserSession } from '@/lib/session'
-import { uploadFileToDrive } from '@/lib/drive'
+import { uploadFileToDrive, deleteFileFromDrive } from '@/lib/drive'
+import { adminClient } from '@/lib/supabase/admin'
+import { getBusinessContext } from '@/lib/business-api/context'
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 
@@ -33,6 +35,20 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer)
 
     const driveFile = await uploadFileToDrive(buffer, file.name, file.type)
+
+    const context = getBusinessContext()
+    if (context) {
+      if (!driveFile.id) throw new Error('アップロードしたファイルを識別できませんでした')
+      const { error } = await adminClient.from('gw_data_business_uploads').insert({
+        connection_id: context.connectionId,
+        drive_id: driveFile.id,
+      })
+      if (error) {
+        // Never return an untracked file that can bypass the connection boundary.
+        await deleteFileFromDrive(driveFile.id).catch(() => undefined)
+        throw new Error('添付ファイルの所有権を保存できませんでした')
+      }
+    }
 
     const fileUrl = driveFile.id
       ? `https://drive.google.com/uc?export=download&id=${driveFile.id}`

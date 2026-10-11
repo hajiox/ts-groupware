@@ -100,6 +100,7 @@ async function main() {
     return query
   } }
   const session = load('lib/session.ts', {
+    '@/lib/business-api/context': { getBusinessContext: () => undefined },
     'next/headers': { cookies: async () => cookieStore },
     '@/lib/session-cookie': cookie,
     '@/lib/supabase/admin': { adminClient },

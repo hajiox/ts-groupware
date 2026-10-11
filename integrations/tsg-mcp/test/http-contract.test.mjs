@@ -11,7 +11,7 @@ const metaKeys = new Set(['idempotencyKey', 'expectedVersion', 'confirmationId']
 
 // The adapter remains portable. In the application checkout, also test against
 // the actual HTTP policy with its own Zod version instead of a copied contract.
-test('all 14 tools match the actual application HTTP policy', (context) => {
+test('legacy and business tools match the actual application HTTP policies', (context) => {
   if (!fs.existsSync(policyPath)) {
     context.skip('Application policy is unavailable in this standalone distribution')
     return
@@ -23,8 +23,9 @@ test('all 14 tools match the actual application HTTP policy', (context) => {
   }).outputText
   const loaded = { exports: {} }
   new Function('module', 'exports', 'require', compiled)(loaded, loaded.exports, appRequire)
-  const { DATA_OPERATIONS, dataExecuteSchema } = loaded.exports
-  assert.deepEqual(new Set(TOOLS.map((tool) => tool.operation)), new Set(DATA_OPERATIONS))
+  const { DATA_OPERATIONS, BUSINESS_OPERATIONS, dataExecuteSchema, businessExecuteSchema } = loaded.exports
+  assert.deepEqual(new Set(TOOLS.map((tool) => tool.operation)), new Set([...DATA_OPERATIONS, ...BUSINESS_OPERATIONS]))
+  const schemaFor = tool => tool.operation.startsWith('business.') ? businessExecuteSchema : dataExecuteSchema
 
   function envelope(tool, args) {
     return {
@@ -34,9 +35,10 @@ test('all 14 tools match the actual application HTTP policy', (context) => {
     }
   }
   function agrees(tool, args) {
-    assert.equal(tool.schema.safeParse(args).success, dataExecuteSchema.safeParse(envelope(tool, args)).success, tool.name)
+    assert.equal(tool.schema.safeParse(args).success, schemaFor(tool).safeParse(envelope(tool, args)).success, tool.name)
   }
   for (const tool of TOOLS) {
+    if (tool.operation.startsWith('business.')) continue
     const args = {}
     for (const key of tool.inputKeys) {
       args[key] = key === 'id' || key === 'group_id' ? uuid : key === 'limit' ? 20 : key === 'offset' ? 10000 : key === 'content' ? '正常な本文' : '検索語'
@@ -85,4 +87,15 @@ test('all 14 tools match the actual application HTTP policy', (context) => {
   }
   const draftsList = TOOLS.find((tool) => tool.operation === 'drafts.list')
   agrees(draftsList, { query: 'unsupported' })
+  for (const [name, args] of [
+    ['business_operations_list', {}], ['business_operations_list', { area: 'payroll' }],
+    ['business_read', { operationId: 'payroll.diff', query: { payrollMonth: '2026-09' } }],
+    ['business_write', { operationId: 'files.upload', files: [{ field: 'file', name: 'test.txt', type: 'text/plain', base64: 'YQ==' }], idempotencyKey: 'upload_test_01' }],
+  ]) {
+    const tool = TOOLS.find(tool => tool.name === name)
+    assert.equal(schemaFor(tool).safeParse(toApiRequest(tool, args)).success, true)
+    agrees(tool, args)
+    agrees(tool, { ...args, endpoint: 'https://example.invalid' })
+    agrees(tool, { ...args, pcName: 'other' })
+  }
 })

@@ -8,6 +8,7 @@ import {
 } from '@/lib/session-cookie'
 import { adminClient } from '@/lib/supabase/admin'
 import { normalizeLinePictureUrl } from '@/lib/line-picture'
+import { getBusinessContext } from '@/lib/business-api/context'
 
 export async function setUserSession(userId: string) {
   const cookieStore = await cookies()
@@ -15,6 +16,8 @@ export async function setUserSession(userId: string) {
 }
 
 export async function getUserSession() {
+  const business = getBusinessContext()
+  if (business) return business.user
   const cookieStore = await cookies()
   const session = cookieStore.get(SESSION_COOKIE_NAME)
   if (!session?.value) return null

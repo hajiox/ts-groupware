@@ -32,9 +32,9 @@ export function dataRpcFailure(error: unknown, requestId: string, operation: str
   console.warn('[data-api]', { requestId, operation, code: safeCode })
   return dataFailure(safeCode, requestId)
 }
-export async function readDataBody(request: Request) {
+export async function readDataBody(request: Request, maxBytes = 32768, onSize?: (bytes: number) => void) {
   const length = Number(request.headers.get('content-length') || 0)
-  if (length > 32768) throw new Error('VALIDATION')
+  if (length > maxBytes) throw new Error('VALIDATION')
   const reader = request.body?.getReader()
   if (!reader) throw new Error('VALIDATION')
   const chunks: Uint8Array[] = []
@@ -44,12 +44,13 @@ export async function readDataBody(request: Request) {
       const { done, value } = await reader.read()
       if (done) break
       size += value.byteLength
-      if (size > 32768) {
+      if (size > maxBytes) {
         await reader.cancel()
         throw new Error('VALIDATION')
       }
       chunks.push(value)
     }
   } finally { reader.releaseLock() }
+  onSize?.(size)
   try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))) as unknown } catch { throw new Error('VALIDATION') }
 }

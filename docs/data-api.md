@@ -1,6 +1,22 @@
 # TSG scoped business API / MCP
 
-2026-10-10。外部CodexへアプリソースやDB・既存Bridgeの鍵を配布せず、許可した業務操作だけを提供する。MCPアダプターv1.1.0は14ツールを維持し、全掲示板接続と一覧のページ送りに対応する。
+2026-10-11。MCP v1.2.0は既存14ツールと業務操作一覧・読取・更新の3ツールを提供する。
+
+## 業務フルアクセス
+
+登録PC付き接続へ `businessAccess:true` を明示すると、通常画面の54経路・98操作を利用できる。既存キー・期限・本人を維持し、登録PC、承認済み役員、接続の期限/失効と各ハンドラーの権限を毎回検証する。未許可の既存接続は拡大しない。管理APIのcreate/permissionsへ追加でき、従来権限と同一トランザクションで保存する。
+
+- `business.operations`: `input:{area?,operationId?}` で契約取得。
+- `business.read`: `input:{operationId,query?,params?}` でreadOnly:trueを実行。
+- `business.write`: `input:{operationId,query?,params?,body?,form?,files?}` とidempotencyKeyで更新。同期/既読更新を伴うGETもこちら。
+
+query値は文字列。ファイルは `{field,name,type,base64}`。業務本文3MiB、ファイル合計2MiB・5添付以内。応答は `data:{status,body}` または `data:{status,file:{name,type,base64}}`。詳細は [対象・契約](tsg-mcp-coverage.md)。
+
+更新前にDBで永続予約し、同じキー・入力は保存済み結果を返す。異なる入力は409、5xx/タイムアウト/保存不明はWRITE_PENDINGで重複停止。新キーで再実行せず対象を確認する。既存version/CASを維持する。
+
+認可は実本人、投稿・DMはTSG君＋登録PC。新規添付は同じ接続のuploadのみ、MCP削除はDrive実体を保持する。認証・キー管理・Cron・機器認証・コード変更・任意SQL/URLは対象外。労務士提出は同じリクエスト内で既存出力を呼びCookieを作らない。
+
+以下は既存14操作の限定接続契約。業務フルアクセスは別の明示許可であり旧scopeの意味は変わらない。
 
 ## 利用開始
 

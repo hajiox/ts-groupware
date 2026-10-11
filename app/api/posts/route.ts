@@ -6,6 +6,8 @@ import { markGroupRead } from '@/lib/read-status'
 import { normalizeMentionContent } from '@/lib/mention-names'
 import { isManagementUser } from '@/lib/user-roles'
 import { CODEX_MTG_BOT_USER_ID, isCodexMtgGroup } from '@/lib/codex-mtg-policy'
+import { businessPostAuthor, businessPostContent, isOwnBusinessPost, validateBusinessAttachments, canDeleteBusinessDriveFiles } from '@/lib/business-api/posting'
+import { getBusinessContext } from '@/lib/business-api/context'
 
 /**
  * GET /api/posts?group_id=xxx — 投稿一覧取得
@@ -489,6 +491,8 @@ export async function POST(request: NextRequest) {
   const parentPostId = typeof parent_id === 'string' ? parent_id.trim() : ''
   const replyToId = typeof reply_to_id === 'string' ? reply_to_id.trim() : ''
   const taskRequest = normalizeTaskRequest(body.task)
+  const postAttachments = normalizeAttachments(attachments)
+  const author = businessPostAuthor(user)
 
   if (!group_id) {
     return NextResponse.json({ error: 'group_id が必要です' }, { status: 400 })
@@ -504,7 +508,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 })
   }
   if (postingPolicy.postingDisabled) return postingDisabledResponse(postingPolicy)
-  if (!trimmedContent && (!attachments || attachments.length === 0)) {
+  if (getBusinessContext() && isCodexMtgGroup(group_id)) {
+    return NextResponse.json({ error: 'CodexMTGへの投稿は専用 codex_mtg_report / codex_mtg_request を使用してください' }, { status: 403 })
+  }
+  const attachmentError = await validateBusinessAttachments(postAttachments)
+  if (attachmentError) return NextResponse.json({ error: attachmentError.error }, { status: attachmentError.status })
+  if (!trimmedContent && (getBusinessContext() ? postAttachments.length === 0 : !attachments || attachments.length === 0)) {
     return NextResponse.json({ error: '内容が必要です' }, { status: 400 })
   }
   if (taskRequest) {
@@ -578,9 +587,9 @@ export async function POST(request: NextRequest) {
     .from('gw_posts')
     .insert({
       group_id,
-      user_id: user.id,
-      content: trimmedContent || null,
-      attachments: attachments || [],
+      user_id: author.id,
+      content: businessPostContent(trimmedContent) || null,
+      attachments: getBusinessContext() ? postAttachments : attachments || [],
       parent_id: parentPost?.id || null,
       reply_to_id: replyTarget?.id || null,
     })
@@ -650,8 +659,9 @@ export async function POST(request: NextRequest) {
       import('@/lib/web-push'),
       import('@/lib/mentions'),
     ])
-    const authorName = user.display_name || '\u30e1\u30f3\u30d0\u30fc'
-    const messageBody = trimmedContent ? trimmedContent.substring(0, 50) : '\u30d5\u30a1\u30a4\u30eb\u3092\u9001\u4fe1\u3057\u307e\u3057\u305f'
+    const authorName = author.display_name || '\u30e1\u30f3\u30d0\u30fc'
+    const notificationContent = businessPostContent(trimmedContent || '\u30d5\u30a1\u30a4\u30eb\u3092\u9001\u4fe1\u3057\u307e\u3057\u305f')
+    const messageBody = notificationContent.substring(0, 50)
     const mutePostId = post.parent_id || post.id
     const isComment = Boolean(post.parent_id)
     const mentionedUsers = await findMentionedUsersInGroup(group_id, trimmedContent, user.id)
@@ -691,13 +701,13 @@ export async function POST(request: NextRequest) {
 
     if (mentionedUsers.length > 0) {
       notificationJobs.push(sendMentionNotifications(mentionedUsers, {
-        senderId: user.id,
+        senderId: author.id,
         senderName: authorName,
         groupId: group_id,
         groupName: group?.name || null,
         contextType: 'board',
         contextLabel: '掲示板',
-        content: trimmedContent || messageBody,
+        content: notificationContent,
         url,
         postId: post.id,
         mutePostId,
@@ -713,9 +723,7 @@ export async function POST(request: NextRequest) {
     post: {
       ...post,
       author: {
-        id: user.id,
-        display_name: user.display_name,
-        picture_url: user.picture_url,
+        ...author,
       },
       reactions: {},
       commentCount: 0,
@@ -772,6 +780,10 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 })
   }
 
+  if (getBusinessContext() && isCodexMtgGroup(existing.group_id)) {
+    return NextResponse.json({ error: 'CodexMTGの編集は通常画面を使用してください。Codex投稿は専用MCP codex_mtg_report / codex_mtg_request を使用してください' }, { status: 403 })
+  }
+
   if (action === 'pin') {
     if (existing.parent_id) {
       return NextResponse.json({ error: 'コメントは固定できません' }, { status: 400 })
@@ -811,7 +823,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'attachments is required' }, { status: 400 })
     }
 
-    const canUpdateAttachments = existing.user_id === user.id || isManagementUser(user)
+    const canUpdateAttachments = existing.user_id === user.id || isOwnBusinessPost(existing) || isManagementUser(user)
     if (!canUpdateAttachments) {
       return NextResponse.json({ error: 'Attachment update is not allowed' }, { status: 403 })
     }
@@ -819,11 +831,14 @@ export async function PATCH(request: NextRequest) {
     if (!existing.content && (!requestedAttachments || requestedAttachments.length === 0)) {
       return NextResponse.json({ error: 'Content or attachment is required' }, { status: 400 })
     }
+    const attachmentError = await validateBusinessAttachments(requestedAttachments || [], normalizeAttachments(existing.attachments))
+    if (attachmentError) return NextResponse.json({ error: attachmentError.error }, { status: attachmentError.status })
 
     const { data: post, error } = await adminClient
       .from('gw_posts')
       .update({
         attachments: requestedAttachments || [],
+        ...(getBusinessContext() ? { user_id: businessPostAuthor(user).id, content: businessPostContent(existing.content || '') } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq('id', post_id)
@@ -854,7 +869,7 @@ export async function PATCH(request: NextRequest) {
 
   const existingTaskRows = (existingTasks || []) as TaskRow[]
   const isTaskPost = existingTaskRows.length > 0
-  const canEdit = existing.user_id === user.id || (isManagementUser(user) && isTaskPost)
+  const canEdit = existing.user_id === user.id || isOwnBusinessPost(existing) || (isManagementUser(user) && isTaskPost)
 
   if (!canEdit) {
     return NextResponse.json({ error: '自分の投稿のみ編集できます' }, { status: 403 })
@@ -887,7 +902,8 @@ export async function PATCH(request: NextRequest) {
   const { data: post, error } = await adminClient
     .from('gw_posts')
     .update({
-      content: trimmedContent || null,
+      content: businessPostContent(trimmedContent) || null,
+      ...(getBusinessContext() ? { user_id: businessPostAuthor(user).id } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq('id', post_id)
@@ -1027,7 +1043,7 @@ export async function DELETE(request: NextRequest) {
     return postingDisabledResponse(postingPolicy)
   }
 
-  if (post.user_id !== user.id && !isManagementUser(user)) {
+  if (post.user_id !== user.id && !isOwnBusinessPost(post) && !isManagementUser(user)) {
     return NextResponse.json({ error: '削除権限がありません' }, { status: 403 })
   }
 
@@ -1037,7 +1053,7 @@ export async function DELETE(request: NextRequest) {
     .eq('parent_id', postId)
 
   const postIds = [postId, ...(comments || []).map(comment => comment.id)]
-  const attachmentDriveIds = getAttachmentDriveIds([post, ...(comments || [])])
+  const attachmentDriveIds = canDeleteBusinessDriveFiles() ? getAttachmentDriveIds([post, ...(comments || [])]) : []
   const attachmentDeleteResults = await Promise.allSettled(
     attachmentDriveIds.map(fileId => deleteFileFromDrive(fileId))
   )

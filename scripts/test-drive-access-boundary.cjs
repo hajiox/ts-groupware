@@ -62,12 +62,15 @@ async function main() {
   const cookie = load('lib/session-cookie.ts')
   const roles = load('lib/user-roles.ts')
   const anonymousSession = load('lib/session.ts', {
+    '@/lib/business-api/context': { getBusinessContext: () => undefined },
     'next/headers': { cookies: async () => ({ get() {}, set: forbidden, delete() {} }) },
     '@/lib/session-cookie': cookie,
     '@/lib/supabase/admin': { adminClient: blockedService },
     '@/lib/line-picture': { normalizeLinePictureUrl: forbidden },
   })
   const common = {
+    '@/lib/business-api/context': { getBusinessContext: () => undefined },
+    '@/lib/business-api/posting': { isOwnBusinessPost: () => false, canDeleteBusinessDriveFiles: () => true },
     'next/server': { NextResponse: FakeNextResponse },
     '@/lib/session': anonymousSession,
     '@/lib/supabase/admin': { adminClient: blockedService },

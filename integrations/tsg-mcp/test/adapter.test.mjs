@@ -34,7 +34,7 @@ test('configuration pins the production origin and never prints credentials', ()
 })
 
 test('fixed tool schemas reject unknown fields and unsafe writes', () => {
-  assert.equal(TOOLS.length, 14)
+  assert.equal(TOOLS.length, 17)
   assert.equal(TOOLS_BY_NAME.has('sql_execute'), false)
   assert.equal(TOOLS_BY_NAME.get('posts_search').schema.safeParse({ query: 'a'.repeat(257) }).success, false)
   assert.equal(TOOLS_BY_NAME.get('posts_search').schema.safeParse({ query: 'bad\0query' }).success, false)
@@ -72,9 +72,9 @@ test('actual spawned STDIO MCP initializes, lists fixed tools, and calls mocked 
   const client = new Client({ name: 'tsg-adapter-test', version: '1.0.0' }, { capabilities: {} })
   try {
     await client.connect(transport)
-    assert.equal(client.getServerVersion().version, '1.1.0')
+    assert.equal(client.getServerVersion().version, '1.2.0')
     const listed = await client.listTools()
-    assert.equal(listed.tools.length, 14)
+    assert.equal(listed.tools.length, 17)
     assert.deepEqual(new Set(listed.tools.map((tool) => tool.name)), new Set(TOOLS.map((tool) => tool.name)))
     for (const tool of listed.tools) assert.equal(tool.inputSchema.additionalProperties, false)
     const first = resultBody(await client.callTool({ name: 'boards_list', arguments: { limit: 2, offset: 20 } }))
@@ -118,6 +118,11 @@ test('actual spawned STDIO MCP initializes, lists fixed tools, and calls mocked 
       ['tasks_complete', { id, idempotencyKey: 'test_complete_01', expectedVersion: '2026-10-07T01:00:00.123456Z' }, 'tasks.complete'],
       ['post_publish_prepare', { id, idempotencyKey: 'test_prepare_01', expectedVersion: '2' }, 'posts.publish.prepare'],
       ['post_publish_commit', { id, idempotencyKey: 'test_commit_01', expectedVersion: '2', confirmationId: confirmation }, 'posts.publish.commit'],
+      ['business_operations_list', { area: 'hr' }, 'business.operations'],
+      ['business_operations_list', { operationId: 'hr.employees.update' }, 'business.operations'],
+      ['business_read', { operationId: 'hr.employees.list' }, 'business.read'],
+      ['business_write', { operationId: 'hr.employees.update', body: { id, kana: 'テスト' }, idempotencyKey: 'test_business_01' }, 'business.write'],
+      ['business_write', { operationId: 'files.upload', files: [{ field: 'file', name: 'test.txt', type: 'text/plain', base64: 'aGVsbG8=' }], idempotencyKey: 'test_business_file_01' }, 'business.write'],
     ]
     for (const [name, args, operation] of cases) {
       const result = resultBody(await client.callTool({ name, arguments: args }))

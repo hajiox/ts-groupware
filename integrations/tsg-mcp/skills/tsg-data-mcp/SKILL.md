@@ -1,9 +1,17 @@
 ---
 name: tsg-data-mcp
-description: TSG Data MCP を使い、許可された掲示板・ピン留めナレッジ・下書き・タスクを検索、取得、依頼された範囲で更新する。DB鍵や既存Bridge認証は使わない。
+description: TSG Data MCPで掲示板・Chat・人事・勤怠・給与・シフト・査定・誓約・休暇・添付を操作する。許可された業務接続の固定カタログを使う。DB鍵・コード・キー管理は扱わない。
 ---
 
 # TSG Data MCP
+
+v1.2.0は17ツール。業務フルアクセス接続は `business_operations_list` でareaを絞り、operationIdの契約を取得してから `business_read` / `business_write` を呼ぶ。本人の既存役割/担当/所属制限を保持する。同期や既読更新を持つGETはreadOnly:falseなのでwriteを使う。
+
+業務更新は操作ID・対象・全入力とidempotencyKeyを固定する。WRITE_PENDINGや応答不明を新キーでやり直さず対象を確認する。既存versionを省略しない。追加承認は不要。送信・署名・登録・更新は利用者の依頼範囲に限る。
+
+ファイルはformとfiles [{field,name,type,base64}]で合計2MiB・5件以内。出力はdata.file、JSONはdata.body。任意URLやローカルパスを渡さない。新規添付は同じ接続のuploadだけ。MCP投稿削除はDrive実体を保持する。本人の誓約署名は実際の本人意思と依頼がある場合だけ行う。キー/認証/コード/Cron/機器認証は対象外。
+
+以下は従来14ツールの限定接続契約。DM/Chat等は上記の明示許可がある業務接続で利用できる。
 
 利用側に提供された `boards_list` などの固定 MCP ツールを使う。権限は接続専用キーと TSG 側の現在の権限で制限される。接続キーをツール引数、チャット、ログ、ファイルへ取り出さない。認証が不足・失効していたら管理者へ接続の設定を依頼する。
 

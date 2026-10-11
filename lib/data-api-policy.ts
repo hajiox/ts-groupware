@@ -52,6 +52,7 @@ const connectionPermissions = {
   scopes: z.array(z.enum(DATA_OPERATIONS)).min(1).max(DATA_OPERATIONS.length),
   allowedGroupIds: z.array(id).max(20),
   allBoards: z.boolean().default(false),
+  businessAccess: z.boolean().optional(),
   pcName: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/).nullable().optional(),
 }
 export const dataAdminSchema = z.discriminatedUnion('action', [
@@ -70,4 +71,33 @@ export const dataAdminSchema = z.discriminatedUnion('action', [
       ctx.addIssue({ code: 'custom', path: ['allowedGroupIds'], message: '全掲示板なら対象IDは空、限定接続なら掲示板を選択してください' })
     }
   }
+})
+
+// Business operations resolve to a server-side catalogue, never a caller URL,
+// method, SQL statement, or session. Legacy scopes retain their original meaning.
+export const BUSINESS_OPERATIONS = ['business.operations', 'business.read', 'business.write'] as const
+const businessId = z.string().min(1).max(120).regex(/^[a-zA-Z0-9_.-]+$/)
+const strings = z.record(z.string().max(4000).refine(value => !value.includes('\0')))
+const file = z.object({
+  field: z.string().min(1).max(80), name: z.string().min(1).max(180),
+  type: z.string().min(1).max(120),
+  base64: z.string().max(2796204).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+}).strict()
+export const businessExecuteSchema = z.object({
+  operation: z.enum(BUSINESS_OPERATIONS),
+  input: z.object({
+    operationId: businessId.optional(), area: businessId.optional(),
+    query: strings.optional(), params: strings.optional(), body: z.record(z.unknown()).optional(),
+    form: strings.optional(), files: z.array(file).max(5).optional(),
+  }).strict().default({}),
+  idempotencyKey: z.string().min(8).max(128).regex(/^[A-Za-z0-9:_-]+$/).optional(),
+}).strict().superRefine((body, ctx) => {
+  const keys = Object.keys(body.input)
+  if (body.operation === 'business.operations') {
+    if (keys.some(key => !['area', 'operationId'].includes(key))) ctx.addIssue({ code: 'custom', path: ['input'], message: '一覧の入力が不正です' })
+  } else {
+    if (!body.input.operationId || body.input.area) ctx.addIssue({ code: 'custom', path: ['input'], message: '操作IDが必要です' })
+    if (body.operation === 'business.read' && keys.some(key => ['body', 'form', 'files'].includes(key))) ctx.addIssue({ code: 'custom', path: ['input'], message: '読取に本文は指定できません' })
+  }
+  if ((body.operation === 'business.write') !== Boolean(body.idempotencyKey)) ctx.addIssue({ code: 'custom', path: ['idempotencyKey'], message: '更新には冪等キーが必要です' })
 })

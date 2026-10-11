@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { GET as exportAttendance } from '@/app/api/admin/attendance/export/route'
 import { USER_DEPARTMENTS, normalizeUserDepartment, type UserDepartment } from '@/lib/departments'
 import { getManagementPermissions } from '@/lib/management-permissions'
 import { getUserSession } from '@/lib/session'
@@ -353,12 +354,9 @@ async function buildDepartmentFile(request: NextRequest, month: string, departme
   url.searchParams.set('month', month)
   url.searchParams.set('department', department)
 
-  const response = await fetch(url, {
-    headers: {
-      cookie: request.headers.get('cookie') || '',
-    },
-    cache: 'no-store',
-  })
+  // Reuse the export's authorization and calculation in this request context.
+  // This also supports dedicated MCP sessions without creating browser cookies.
+  const response = await exportAttendance(new NextRequest(url))
 
   if (!response.ok) {
     const body = await response.text().catch(() => '')

@@ -1,4 +1,16 @@
-# TSG Data MCP v1.1.0
+# TSG Data MCP v1.2.0
+
+業務フルアクセスが明示された登録PC接続では、下記の旧14ツールに加えて3ツールで54経路・98業務操作を使えます。対象は人事・退職・履歴書、勤怠・個人メモ・労務士提出、給与比較/取込、シフト、査定、誓約、休暇、Chat/DM、グループ、予定、通知、SOS、添付です。既存の本人権限・担当制限を維持します。
+
+`business_operations_list` でarea（hr/payroll/attendance/shifts/appraisals/pledges/chat等）を絞り、operationIdで契約を確認します。readOnly:trueは `business_read`、その他は `business_write`。同期/既読更新を持つGETも更新扱いです。例: `{"operationId":"hr.employees.list"}`。
+
+更新入力はoperationId、必要なquery/params/bodyまたはform/filesとidempotencyKey。queryは文字列。filesは `{field,name,type,base64}`、合計2MiB・5件以内。出力はdata.file（name,type,base64）、JSONはdata.body。本文上限3MiB。通常画面のファイル上限とは別の転送制約です。
+
+同じキー・同じ入力の更新は保存済み結果を返します。WRITE_PENDING/応答不明を新キーでやり直さず対象の保存状況を確認してください。既存versionも指定します。追加承認は不要ですが、メール・DM・誓約・全員配信・シフト通知等を疎通試験として送らないでください。
+
+投稿/DMはTSG君＋登録PC、新規添付は同じ接続のuploadのみ。MCPの投稿削除ではDrive実体を残します。認証・接続キー管理・コード・任意SQL/URL/メソッド/ローカルパスは対象外。キー再発行は不要、既存ランチャーと保護キーを維持してアダプターを更新します。
+
+以下は従来14ツールの限定接続契約。旧版のDM/Chat対象外等の制約は、業務フルアクセスの98操作には適用しません。
 
 TSG の限定データ API を MCP ツールとして使う、独立した STDIO アダプターです。このフォルダーだけを配布できます。TSG 本体のソース、Supabase/DB の鍵、既存 Bridge の認証情報は不要です。待受ポートは開きません。
 

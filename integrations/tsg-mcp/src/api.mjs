@@ -1,5 +1,5 @@
 export const PRODUCTION_ORIGIN = 'https://v0-line-blush.vercel.app'
-const MAX_RESPONSE_BYTES = 1_048_576
+const MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 const SENSITIVE_KEYS = /^(authorization|cookie|set-cookie|token|token_hash|access_token|refresh_token|api_key|secret|service_role_key|TSG_DATA_API_TOKEN)$/i
 const TOKEN_PATTERN = /\btsg_data_[A-Za-z0-9_-]{32,248}\b/g
 
@@ -63,7 +63,8 @@ export async function execute(config, envelope, fetchImpl = globalThis.fetch) {
       return apiError('SENSITIVE_INPUT', 'Credentials must not appear in tool arguments.')
     }
     TOKEN_PATTERN.lastIndex = 0
-    if (Buffer.byteLength(body, 'utf8') > 32_768) return apiError('INPUT_TOO_LARGE', 'The request exceeds the allowed size.')
+    const maxBytes = envelope.operation?.startsWith('business.') ? 3 * 1024 * 1024 : 32_768
+    if (Buffer.byteLength(body, 'utf8') > maxBytes) return apiError('INPUT_TOO_LARGE', 'The request exceeds the allowed size.')
     const response = await fetchImpl(config.endpoint, {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -71,7 +72,7 @@ export async function execute(config, envelope, fetchImpl = globalThis.fetch) {
       redirect: 'error',
       credentials: 'omit',
       cache: 'no-store',
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(envelope.operation?.startsWith('business.') ? 120_000 : 30_000),
     })
     const parsed = await readJson(response)
     if (!parsed || typeof parsed !== 'object' || ![true, false].includes(parsed.ok)

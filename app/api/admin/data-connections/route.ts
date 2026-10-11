@@ -49,8 +49,10 @@ export async function POST(request: NextRequest) {
     } else {
       args = { id: body.id, ...(body.action === 'approve_confirmation' ? { digest: body.digest } : {}) }
     }
-    const { data, error } = await adminClient.rpc('gw_data_connection_admin', {
+    const businessChange = (body.action === 'create' || body.action === 'permissions') && body.businessAccess !== undefined
+    const { data, error } = await adminClient.rpc(businessChange ? 'gw_data_connection_business_admin' : 'gw_data_connection_admin', {
       p_actor_id: user.id, p_action: body.action, p_args: args,
+      ...(businessChange ? { p_business_access: body.businessAccess } : {}),
     })
     if (error) return dataRpcFailure(error, requestId, body.action)
     if (!data || data.ok !== true) return dataFailure('INTERNAL', requestId)

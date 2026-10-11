@@ -15,6 +15,7 @@
     "test:reaction-access": "node scripts/test-reaction-access.cjs",
     "test:user-role-security": "node scripts/test-user-role-security.cjs",
     "test:data-api-http": "node scripts/test-data-api-http.cjs",
+    "test:business-api": "node scripts/test-business-api-gateway.cjs && node scripts/test-business-api-posting.cjs && node scripts/test-payroll-mail-jobs-api.cjs && node --test scripts/test-business-api-dispatch.cjs",
     "test:oem-consultation-notification": "node scripts/test-oem-consultation-notification.cjs",
     "test:codex-mtg-http": "node scripts/test-codex-mtg-http.cjs",
     "test:codex-mtg-access": "node scripts/test-codex-mtg-access.cjs",

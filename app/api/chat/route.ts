@@ -6,6 +6,8 @@ import { deleteFileFromDrive } from '@/lib/drive'
 import { normalizeMentionContent } from '@/lib/mention-names'
 import { isManagementRole } from '@/lib/user-roles'
 import { CODEX_MTG_BOT_USER_ID, isCodexMtgGroup } from '@/lib/codex-mtg-policy'
+import { businessPostAuthor, businessPostContent, isOwnBusinessPost, validateBusinessAttachments, canDeleteBusinessDriveFiles } from '@/lib/business-api/posting'
+import { getBusinessContext } from '@/lib/business-api/context'
 
 type Attachment = {
   url?: string
@@ -279,6 +281,7 @@ export async function POST(request: NextRequest) {
   const groupId = body.group_id
   const content = typeof body.content === 'string' ? normalizeMentionContent(body.content.trim()) : ''
   const attachments = normalizeAttachments(body.attachments)
+  const author = businessPostAuthor(user)
 
   if (!groupId) {
     return NextResponse.json({ error: 'group_id が必要です' }, { status: 400 })
@@ -292,12 +295,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
+  if (getBusinessContext() && isCodexMtgGroup(groupId)) {
+    return NextResponse.json({ error: 'CodexMTGへの投稿は専用 codex_mtg_report / codex_mtg_request を使用してください' }, { status: 403 })
+  }
+  const attachmentError = await validateBusinessAttachments(attachments)
+  if (attachmentError) return NextResponse.json({ error: attachmentError.error }, { status: attachmentError.status })
+
   const { data: message, error } = await adminClient
     .from('gw_posts')
     .insert({
       group_id: groupId,
-      user_id: user.id,
-      content: content || null,
+      user_id: author.id,
+      content: businessPostContent(content) || null,
       attachments,
       parent_id: null,
     })
@@ -322,7 +331,7 @@ export async function POST(request: NextRequest) {
       import('@/lib/web-push'),
       import('@/lib/mentions'),
     ])
-    const bodyText = content || (attachments.length > 0 ? '\u30d5\u30a1\u30a4\u30eb\u3092\u9001\u4fe1\u3057\u307e\u3057\u305f' : '\u65b0\u3057\u3044\u30e1\u30c3\u30bb\u30fc\u30b8')
+    const bodyText = businessPostContent(content || (attachments.length > 0 ? '\u30d5\u30a1\u30a4\u30eb\u3092\u9001\u4fe1\u3057\u307e\u3057\u305f' : '\u65b0\u3057\u3044\u30e1\u30c3\u30bb\u30fc\u30b8'))
     const mentionedUsers = await findMentionedUsersInGroup(groupId, content, user.id)
     const mentionedUserIds = new Set(mentionedUsers.map(mentionedUser => mentionedUser.id))
 
@@ -337,7 +346,7 @@ export async function POST(request: NextRequest) {
         for (const m of dmMembers) {
           if (mentionedUserIds.has(m.user_id)) continue
           await sendPushNotificationToUser(m.user_id, {
-            title: `${user.display_name || '\u30e1\u30f3\u30d0\u30fc'}`,
+            title: `${author.display_name || '\u30e1\u30f3\u30d0\u30fc'}`,
             body: bodyText.substring(0, 80),
             url: `/chat/${groupId}`,
             tag: `tsg-dm-${groupId}`,
@@ -346,7 +355,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       await sendPushNotificationToGroup(groupId, user.id, {
-        title: `${access.group?.name || 'Chat'} - ${user.display_name || '\u30e1\u30f3\u30d0\u30fc'}`,
+        title: `${access.group?.name || 'Chat'} - ${author.display_name || '\u30e1\u30f3\u30d0\u30fc'}`,
         body: bodyText.substring(0, 80),
         url: `/chat/${groupId}`,
         tag: `tsg-chat-${groupId}`,
@@ -355,8 +364,8 @@ export async function POST(request: NextRequest) {
 
     if (mentionedUsers.length > 0) {
       await sendMentionNotifications(mentionedUsers, {
-        senderId: user.id,
-        senderName: user.display_name || '\u30e1\u30f3\u30d0\u30fc',
+        senderId: author.id,
+        senderName: author.display_name || '\u30e1\u30f3\u30d0\u30fc',
         groupId,
         groupName: access.group?.name || null,
         contextType: isDirect ? 'dm' : 'chat',
@@ -371,7 +380,7 @@ export async function POST(request: NextRequest) {
   }
 
   // TSG君 AI応答（DMの場合のみ、awaitで実行 — Serverless打ち切り防止）
-  if (isDirect) {
+  if (isDirect && !getBusinessContext()) {
     try {
       const { isTsgDirectChat, handleTsgAiResponse } = await import('@/lib/tsg-ai')
       const isTsg = await isTsgDirectChat(groupId)
@@ -395,9 +404,7 @@ export async function POST(request: NextRequest) {
     message: {
       ...message,
       author: {
-        id: user.id,
-        display_name: user.display_name,
-        picture_url: user.picture_url,
+        ...author,
       },
       isOwn: true,
       reactions: {},
@@ -444,7 +451,11 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  if (!canManageMessage(existing.user_id, user.id, user.role, access.membership?.role)) {
+  if (getBusinessContext() && isCodexMtgGroup(existing.group_id)) {
+    return NextResponse.json({ error: 'CodexMTGの編集は通常画面を使用してください。Codex投稿は専用MCP codex_mtg_report / codex_mtg_request を使用してください' }, { status: 403 })
+  }
+
+  if (!isOwnBusinessPost(existing) && !canManageMessage(existing.user_id, user.id, user.role, access.membership?.role)) {
     return NextResponse.json({ error: '編集権限がありません' }, { status: 403 })
   }
 
@@ -453,11 +464,16 @@ export async function PATCH(request: NextRequest) {
   if (!content && attachments.length === 0) {
     return NextResponse.json({ error: '本文が必要です' }, { status: 400 })
   }
+  if (attachmentsEditRequested) {
+    const attachmentError = await validateBusinessAttachments(attachments, normalizeAttachments(existing.attachments))
+    if (attachmentError) return NextResponse.json({ error: attachmentError.error }, { status: attachmentError.status })
+  }
 
   const { data: message, error } = await adminClient
     .from('gw_posts')
     .update({
-      content: content || null,
+      content: businessPostContent(content) || null,
+      ...(getBusinessContext() ? { user_id: businessPostAuthor(user).id } : {}),
       updated_at: new Date().toISOString(),
       ...(attachmentsEditRequested ? { attachments } : {}),
     })
@@ -485,7 +501,7 @@ export async function DELETE(request: NextRequest) {
 
   const { data: existing, error: fetchError } = await adminClient
     .from('gw_posts')
-    .select('id, group_id, user_id, attachments, parent_id')
+    .select('id, group_id, user_id, content, attachments, parent_id')
     .eq('id', messageId)
     .single()
 
@@ -506,15 +522,15 @@ export async function DELETE(request: NextRequest) {
   }
 
   const isDirect = typeof access.group?.description === 'string' && access.group.description.startsWith('direct:')
-  if (isDirect && existing.user_id !== user.id) {
+  if (isDirect && existing.user_id !== user.id && !isOwnBusinessPost(existing)) {
     return NextResponse.json({ error: 'DMでは自分のメッセージのみ削除できます' }, { status: 403 })
   }
 
-  if (!canManageMessage(existing.user_id, user.id, user.role, access.membership?.role)) {
+  if (!isOwnBusinessPost(existing) && !canManageMessage(existing.user_id, user.id, user.role, access.membership?.role)) {
     return NextResponse.json({ error: '削除権限がありません' }, { status: 403 })
   }
 
-  const driveIds = getAttachmentDriveIds(existing.attachments as Attachment[] | null)
+  const driveIds = canDeleteBusinessDriveFiles() ? getAttachmentDriveIds(existing.attachments as Attachment[] | null) : []
   const deleteResults = await Promise.allSettled(driveIds.map(fileId => deleteFileFromDrive(fileId)))
   const failedDriveIds = deleteResults
     .map((result, index) => ({ result, fileId: driveIds[index] }))

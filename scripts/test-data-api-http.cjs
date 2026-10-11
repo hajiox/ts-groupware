@@ -37,6 +37,7 @@ let rpcResult = { data: { ok: true, data: { items: [] } }, error: null }
 let rpcError = null
 const rpcCalls = []
 const dependencies = {
+  '@/lib/business-api/gateway': { executeBusinessOperation: async (_hash, body, requestId) => http.dataSuccess({ received: body }, requestId) },
   'next/server': { NextResponse: FakeNextResponse },
   '@/lib/data-api-policy': policy,
   '@/lib/data-api-http': http,
@@ -326,6 +327,16 @@ async function main() {
   assert.ok(!JSON.stringify(warnings).includes(token))
   assert.ok(!JSON.stringify(warnings).includes(issuedToken))
   console.log('Data API bearer, validation, approval, errors, and connection administration tests passed')
+  const business = await execute.POST(request({ operation: 'business.read', input: { operationId: 'hr.employees.list' } }))
+  assert.equal(business.status, 200)
+  assert.equal((await business.json()).data.received.input.operationId, 'hr.employees.list')
+  await failure(await execute.POST(request({ operation: 'business.write', input: { operationId: 'hr.employees.update' } })), 400, 'VALIDATION')
+  await failure(await execute.POST(request({ operation: 'business.read', input: { operationId: 'hr.employees.list', body: {} } })), 400, 'VALIDATION')
+  rpcResult = { data: { ok: true, data: { id: itemId } }, error: null }
+  const businessGrant = await admin.POST(adminRequest({ action: 'permissions', id: itemId, scopes: ['boards.list'], allowedGroupIds: [], allBoards: true, pcName: 'CEO_S', businessAccess: true }))
+  assert.equal(businessGrant.status, 200)
+  assert.equal(rpcCalls.at(-1).name, 'gw_data_connection_business_admin')
+  assert.equal(rpcCalls.at(-1).args.p_business_access, true)
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 }).finally(() => {

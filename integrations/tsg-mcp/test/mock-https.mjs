@@ -11,7 +11,7 @@ globalThis.fetch = async (url, options) => {
   const request = JSON.parse(options.body)
   if (request.input.query === 'network-failure') throw new Error(`Synthetic credential-bearing exception: ${token}`)
   if (request.input.query === 'non-json') return new Response(`<html>${token}</html>`, { headers: { 'content-type': 'text/html' } })
-  if (request.input.query === 'oversized') return Response.json({ ok: true, data: { text: 'a'.repeat(1_048_576) } })
+  if (request.input.query === 'oversized') return Response.json({ ok: true, data: { text: 'a'.repeat(10 * 1024 * 1024) } })
   if (request.input.query === 'denied') return Response.json({ ok: false, error: { code: 'FORBIDDEN', message: 'Permission denied.' }, requestId: 'synthetic-request' }, { status: 403 })
   if (request.input.query === 'redact-test') return Response.json({
     ok: true,
