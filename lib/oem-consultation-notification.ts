@@ -13,8 +13,7 @@ const receivedAt = z.string().max(40)
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/)
   .refine(value => Number.isFinite(Date.parse(value)))
 
-const inputSchema = z.object({
-  schemaVersion: z.literal(1),
+const inputFields = {
   event: z.literal('consultation_received'),
   sourceKey: z.string().min(1).max(200),
   leadId: z.string().uuid().transform(value => value.toLowerCase()),
@@ -22,8 +21,14 @@ const inputSchema = z.object({
   companyName: label,
   productName: label,
   quantityLabel: label,
-  estimatedTotalPrice: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-}).strict()
+}
+
+const inputSchema = z.discriminatedUnion('schemaVersion', [
+  z.object({ schemaVersion: z.literal(1), ...inputFields,
+    estimatedTotalPrice: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }).strict(),
+  z.object({ schemaVersion: z.literal(2), ...inputFields,
+    estimatedTotalPrice: z.null() }).strict(),
+])
 
 export function oemConsultationNotification(raw: unknown) {
   const parsed = inputSchema.safeParse(raw)
@@ -44,7 +49,8 @@ export function oemConsultationNotification(raw: unknown) {
     `会社：${input.companyName}`,
     `商品：${input.productName}`,
     `数量：${input.quantityLabel}`,
-    `概算合計：${input.estimatedTotalPrice.toLocaleString('ja-JP')}円（税別・試作費別）`,
+    input.schemaVersion === 2 ? '見積：未算定（相談のみ）'
+      : `概算合計：${input.estimatedTotalPrice.toLocaleString('ja-JP')}円（税別・試作費別）`,
     '',
     'OEM相談管理画面',
     OEM_CONSULTATION_DASHBOARD_URL,

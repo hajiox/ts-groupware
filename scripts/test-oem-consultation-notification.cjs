@@ -19,6 +19,13 @@ const valid = {
 const board = { id: logic.OEM_CONSULTATION_BOARD_ID, name: 'NEWブランド館（フロア）', type: 'board' }
 const botId = 'f78baef5-d40c-4886-b51d-a02efbf794fe'
 const expectedContent = '【OEM見積もり相談・受付】\n新しい相談を受け付けました。受注確定ではありません。\n受付日時：2026/10/11 00:10:11（日本時間）\n会社：サンプル株式会社\n商品：タイソース\n数量：400個\n概算合計：140,000円（税別・試作費別）\n\nOEM相談管理画面\nhttps://oem.aizubrandhall.com/admin/dashboard'
+const unestimated = { ...valid, schemaVersion: 2, estimatedTotalPrice: null,
+  productName: '商品未定', quantityLabel: '未定（相談のみ）' }
+const expectedUnestimatedContent = expectedContent.replace('商品：タイソース', '商品：商品未定')
+  .replace('数量：400個', '数量：未定（相談のみ）')
+  .replace('概算合計：140,000円（税別・試作費別）', '見積：未算定（相談のみ）')
+assert.equal(logic.oemConsultationNotification(unestimated).content, expectedUnestimatedContent)
+assert.doesNotMatch(logic.oemConsultationNotification(unestimated).content, /概算合計|0円/)
 assert.equal(logic.oemConsultationNotification(valid).content, expectedContent)
 assert.equal(logic.oemConsultationNotification({ ...valid, receivedAt: '2026-10-11T00:10:11+09:00' }).content, expectedContent)
 assert.equal(logic.oemConsultationNotification({ ...valid, leadId: valid.leadId.toUpperCase() }).sourceKey, valid.sourceKey)
@@ -48,6 +55,15 @@ for (const patch of [
   assert.throws(() => logic.oemConsultationNotification({ ...valid, ...patch }), /is invalid/)
 }
 for (const raw of [null, [], {}, 1, 'body']) assert.throws(() => logic.oemConsultationNotification(raw), /is invalid/)
+assert.throws(() => logic.oemConsultationNotification({ ...valid, estimatedTotalPrice: null }), /is invalid/)
+for (const patch of [{ estimatedTotalPrice: 0 }, { estimatedTotalPrice: 140000 },
+  { estimatedTotalPrice: Number.MAX_SAFE_INTEGER }, { estimatedTotalPrice: 'null' },
+  { estimatedTotalPrice: undefined }, { schemaVersion: '2' }, { schemaVersion: 3 },
+  { sourceKey: unestimated.sourceKey.replace(':received:v1', ':received:v2') },
+  { leadId: 'bad' }, { receivedAt: '2026-10-11' }, { companyName: ' ' },
+  { productName: 'x'.repeat(201) }, { quantityLabel: 'A\nB' }, { boardId: board.id }]) {
+  assert.throws(() => logic.oemConsultationNotification({ ...unestimated, ...patch }), /is invalid/)
+}
 assert.notEqual(logic.oemConsultationNotificationPostId('a'), logic.oemConsultationNotificationPostId('b'))
 assert.notEqual(logic.oemConsultationNotificationPostId('a'), load('lib/integration-board-post.ts').boardPostId('a'))
 
@@ -129,6 +145,7 @@ async function main() {
     { 'x-tsg-integration-secret': 'oem-test-only-secret' }, { authorization: 'Bearer shared-test-only-secret' },
     { authorization: 'Bearer meeting-test-only-secret' }, { cookie: 'session=not-a-service-secret' }]) {
     assert.equal((await route.POST(request(valid, auth))).status, 401)
+    assert.equal((await route.POST(request(unestimated, auth))).status, 401)
     assert.equal((await route.GET(get('', auth))).status, 401)
   }
   assert.equal(calls, 0)
@@ -137,7 +154,9 @@ async function main() {
   assert.equal((await route.GET(get())).status, 503)
   assert.equal(calls, 0)
   process.env.OEM_CONSULTATION_INTEGRATION_SECRET = 'oem-test-only-secret'
-  for (const raw of ['{', [], { ...valid, boardId: board.id }, new Uint8Array([0xff]), { ...valid, estimatedTotalPrice: -1 }]) {
+  for (const raw of ['{', [], { ...valid, boardId: board.id }, new Uint8Array([0xff]),
+    { ...valid, estimatedTotalPrice: -1 }, { ...valid, estimatedTotalPrice: null },
+    { ...unestimated, estimatedTotalPrice: 0 }, { ...unestimated, content: '自由記載' }]) {
     assert.equal((await route.POST(request(raw))).status, 400)
   }
   assert.equal((await route.POST(request('x'.repeat(4097)))).status, 413)
@@ -172,6 +191,31 @@ async function main() {
   reset()
   const results = await Promise.all([route.POST(request()), route.POST(request())])
   assert.deepEqual(results.map(result => result.status).sort(), [200, 201]); assert.equal(pushes, 1); assert.equal(posts.size, 1)
+  reset()
+  const unestimatedFirst = await route.POST(request(unestimated))
+  assert.equal(unestimatedFirst.status, 201)
+  assert.equal(unestimatedFirst.body.postId, first.body.postId)
+  const unestimatedSaved = posts.get(unestimatedFirst.body.postId)
+  assert.equal(unestimatedSaved.group_id, board.id); assert.equal(unestimatedSaved.user_id, botId)
+  assert.equal(unestimatedSaved.content, expectedUnestimatedContent)
+  assert.equal((await route.POST(request(unestimated))).status, 200)
+  assert.equal(posts.size, 1); assert.equal(pushes, 1)
+  const unestimatedWrites = writes
+  assert.equal((await route.POST(request(valid))).status, 409)
+  assert.equal(writes, unestimatedWrites); assert.equal(posts.size, 1); assert.equal(pushes, 1)
+  reset()
+  await route.POST(request(valid))
+  const estimatedWrites = writes
+  assert.equal((await route.POST(request(unestimated))).status, 409)
+  assert.equal(writes, estimatedWrites); assert.equal(posts.size, 1); assert.equal(pushes, 1)
+  reset()
+  const unestimatedResults = await Promise.all([route.POST(request(unestimated)), route.POST(request(unestimated))])
+  assert.deepEqual(unestimatedResults.map(result => result.status).sort(), [200, 201])
+  assert.equal(pushes, 1); assert.equal(posts.size, 1)
+  reset()
+  const mixedResults = await Promise.all([route.POST(request(valid)), route.POST(request(unestimated))])
+  assert.deepEqual(mixedResults.map(result => result.status).sort(), [201, 409])
+  assert.equal(pushes, 1); assert.equal(posts.size, 1)
   const originalError = console.error, logs = []
   console.error = (...args) => logs.push(args.join(' '))
   try {
@@ -191,6 +235,6 @@ async function main() {
     assert.equal((await route.POST(request())).status, 200); assert.equal(pushes, 1)
     assert.doesNotMatch(logs.join('\n'), /secret-sensitive|oem-test-only-secret|サンプル株式会社|タイソース/)
   } finally { console.error = originalError }
-  console.log('OEM consultation auth, strict schema, JST content, locked destination, readiness, duplicate/conflict, concurrency, push failure and sanitized diagnostics passed (no live posts).')
+  console.log('OEM consultation v1/number and v2/null, auth, strict schema, JST content, locked destination, readiness, duplicate/cross-version conflict, concurrency, push failure and sanitized diagnostics passed (no live posts).')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

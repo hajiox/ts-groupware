@@ -1644,3 +1644,10 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - workerの既存origin/owner PC/code権限とsandboxを保持。現在の認証済みsnapshotの同一投稿user_idと、検証済みcodeApproverUserIdの一致だけで本人承認を毎回判定。名前/引用/job自己申告を使わず、資料欠落は本人照合不足として扱う。後続承認で旧Codexジョブのコード権限を昇格しない。
 - 周辺資料は現在依頼以前に限定し、元提案の明示ID・言及PCを優先して最大10件/12000字を維持。資料欠落/切詰めを明示し、必要な対象だけ確認する。実行用Skill・共有ルールにも同じ運用を反映。
 - worker/peer/recovery 41試験、実CLIの操作/軽微/大規模/本人採用/承認自己申告5ケースに成功。実業務データや本番依頼を試験で変更せず、業務接続キーやMCP設定の追加なし。稼働反映はidleとjournal確認後に行う。
+
+## 2026-10-11 OEM直接相談の見積未算定通知v2
+
+- CodexMTGのOEM直接相談依頼が旧humanジョブの転送不可と新peerジョブのコード権限なしで停止していたことを確認。本人の直接指示を受け、TSAで新規main cloneからTSG受信側を実装。旧ジョブを再投入・昇格せず、OEM側コード・フラグ・既存キーは変更しない。
+- 専用相談受付APIの9項目をversion別に検証し、v1は従来の非負safe integer、v2はnullだけを許容。v2の金額行は「見積：未算定（相談のみ）」、v1本文・認証・固定フロア/TSG君・sourceKey形式・決定的postIdは維持する。DB migration不要。
+- focused testでv1/v2正常・版別拒否・固定宛先・同一通知再送・両方向version変更409・並行同版/混在1投稿1Pushを確認。型チェック・lint（既存27警告/0error）・本番buildも成功。
+- 本番検証は専用GETと合成fixtureの意図的不一致sourceKeyによるDB処理前400を使い、試験投稿・メール・請求を作らずschema反映を判定する。OEM側のv2 outbox配信有効化はTSG本番確認後にCEO_Sが担当する。
