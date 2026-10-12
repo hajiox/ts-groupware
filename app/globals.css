@@ -11775,6 +11775,12 @@ body,
 }
 
 @media print {
+  /* Start the document on the same named page as its sheets. Otherwise the
+     shared portrait @page creates a blank first page before the landscape one. */
+  body:has(.shift-print-preview) {
+    page: shift-landscape;
+  }
+
   html,
   body,
   .app-shell,

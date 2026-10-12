@@ -1651,3 +1651,12 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - 専用相談受付APIの9項目をversion別に検証し、v1は従来の非負safe integer、v2はnullだけを許容。v2の金額行は「見積：未算定（相談のみ）」、v1本文・認証・固定フロア/TSG君・sourceKey形式・決定的postIdは維持する。DB migration不要。
 - focused testでv1/v2正常・版別拒否・固定宛先・同一通知再送・両方向version変更409・並行同版/混在1投稿1Pushを確認。型チェック・lint（既存27警告/0error）・本番buildも成功。
 - 本番検証は専用GETと合成fixtureの意図的不一致sourceKeyによるDB処理前400を使い、試験投稿・メール・請求を作らずschema反映を判定する。OEM側のv2 outbox配信有効化はTSG本番確認後にCEO_Sが担当する。
+
+## 2026-10-12 Chat過去ログ・シフト印刷・CodexMTGの停止を修正
+
+- 管理職が依頼した共有Chatの過去表示とシフト印刷を、本人の「両方お願い」に続く直接指示で実装。終了済みの旧needs_operatorジョブは書き換え・再投入せず、今回の対応結果を元依頼に紐付けて報告する。
+- Chatは最新80件だけを取得していた。created_atとidの複合cursorによる前後ページ取得、画面の「以前のメッセージを読み込む」、読込時の表示位置保持、取得済み履歴を消さない新着追従を追加。MCPのchat.messages.listにもbefore/afterを公開。本文検索は読み込み済み範囲を対象にし、案内を表示する。
+- シフト印刷は共通A4縦とシフト用A4横のnamed pageが競合し、先頭に縦の白紙が入っていた。印刷時のbodyにもシフト用named pageを指定する6行の修正で解消。実コンポーネントのChrome PDFで旧症状と修正後のフロア16日/31日・製造31日・道の駅15日を検証した。
+- workerは信頼済みホストが固定TSG共有同期を一度実行し、成功とfreshclone・HEAD一致・cleanの証跡をAIへ渡す。isolated CLIに初期同期/cloneを重複させない。環境不足を承認不足と区別し、限定した既存動作の復旧を共通部品という理由だけで大規模変更と判断しない。
+- humanコードジョブはapprove-for-meとnetwork_access指定を使用し、競合するsandboxフラグを併用しない。Windows隔離環境のSchannel失敗を実CLIで確認し、OpenSSL・証明書検証を保つプロセス限定Git設定で通信成功を確認。peerのread-only、既存モデル、elevated sandbox、自動承認review、秘密保存先を維持する。
+- API試験で250件の全履歴・削除済み基準行・同時刻205新着・認証/会員境界を確認。実ChatPageをスマホ/PCで履歴読込・再試行・表示位置・検索・送信中の新着追従まで検証。worker/peer/recovery49試験、実CLIの通常GitHub読取とworkspace書込、型検査、lint、buildに成功。DB migrationと業務データの試験投稿は不要。

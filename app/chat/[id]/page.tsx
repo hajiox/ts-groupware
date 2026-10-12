@@ -15,6 +15,7 @@ import { USER_DEPARTMENTS, type UserDepartment } from "@/lib/departments";
 import { formatMentionName, mentionDisplayName } from "@/lib/mention-names";
 import { REACTION_EMOJIS } from "@/lib/reactions";
 import { getEffectiveUserRole, getUserRoleLabel, isManagementRole } from "@/lib/user-roles";
+import { compareChatMessages } from "@/lib/chat-pagination";
 
 type ChatUser = {
   id: string;
@@ -130,6 +131,12 @@ export default function ChatPage() {
   const messageIdsRef = useRef<Set<string>>(new Set());
   const initialLoadHandledRef = useRef(false);
   const pendingScrollToBottomRef = useRef(false);
+  const pendingHistoryScrollRef = useRef<{ id: string | null; top: number; height: number; scrollTop: number } | null>(null);
+  const afterCursorRef = useRef<string | null>(null);
+  const historyLoadingRef = useRef(false);
+  const pollInFlightRef = useRef(false);
+  const activeGroupIdRef = useRef(id);
+  activeGroupIdRef.current = id;
 
   const [group, setGroup] = useState<ChatGroup | null>(null);
   const [members, setMembers] = useState<ChatUser[]>([]);
@@ -152,10 +159,9 @@ export default function ChatPage() {
   const [editingText, setEditingText] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const [dropActive, setDropActive] = useState(false);
-
-  const latestMessageAt = useMemo(() => {
-    return messages.length > 0 ? messages[messages.length - 1].created_at : "";
-  }, [messages]);
+  const [olderCursor, setOlderCursor] = useState<string | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState("");
 
   const filteredMessages = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -184,43 +190,46 @@ export default function ChatPage() {
   const isDirectChat = group?.description?.startsWith("direct:") || false;
   const canModerateChat = isManagementRole(currentUser?.role) || currentUser?.group_role === "admin";
 
-  const mergeMessages = useCallback((incoming: Message[]) => {
+  const mergeMessages = useCallback((incoming: Message[], followNew = true) => {
     if (incoming.length === 0) return;
     const hasNewMessage = incoming.some((message) => !messageIdsRef.current.has(message.id));
-    if (hasNewMessage && isNearChatBottom(messagesRef.current)) {
+    if (followNew && hasNewMessage && isNearChatBottom(messagesRef.current)) {
       pendingScrollToBottomRef.current = true;
     }
 
     setMessages(prev => {
       let changed = false;
       const next = [...prev];
+      const indices = new Map(next.map((message, index) => [message.id, index]));
       for (const message of incoming) {
-        if (messageIdsRef.current.has(message.id)) {
-          const index = next.findIndex(item => item.id === message.id);
-          if (index >= 0 && !areMessagesEquivalent(next[index], message)) {
+        const index = indices.get(message.id);
+        if (index !== undefined) {
+          if (!areMessagesEquivalent(next[index], message)) {
             next[index] = { ...next[index], ...message };
             changed = true;
           }
           continue;
         }
-        messageIdsRef.current.add(message.id);
+        indices.set(message.id, next.length);
         next.push(message);
         changed = true;
       }
       if (!changed) return prev;
-      return next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      return next.sort(compareChatMessages);
     });
+    for (const message of incoming) messageIdsRef.current.add(message.id);
   }, []);
 
-  const loadChat = useCallback(async (since?: string) => {
+  const loadChat = useCallback(async (mode: "initial" | "latest" | "before" | "after" = "latest", cursor?: string) => {
     const params = new URLSearchParams({ group_id: id });
-    if (since) params.set("since", since);
+    if (cursor && (mode === "before" || mode === "after")) params.set(mode, cursor);
 
     const res = await fetch(`/api/chat?${params.toString()}`, {
       cache: "no-store",
       headers: getDeviceHeaders(),
     });
     const data = await res.json().catch(() => ({}));
+    if (activeGroupIdRef.current !== id) return null;
 
     if (!res.ok) {
       if (isCodexMtgGroup(id) && (res.status === 401 || res.status === 403)) {
@@ -238,22 +247,66 @@ export default function ChatPage() {
     setCurrentUser(data.currentUser || null);
     if (data.readReceipts) setReadReceipts(data.readReceipts);
 
-    if (since) {
-      mergeMessages(data.messages || []);
-    } else {
+    if (mode === "initial") {
       messageIdsRef.current = new Set((data.messages || []).map((message: Message) => message.id));
       setMessages(data.messages || []);
+    } else {
+      if (mode === "before" && data.messages?.length && messagesRef.current) {
+        const element = messagesRef.current;
+        const containerTop = element.getBoundingClientRect().top;
+        const anchor = Array.from(element.querySelectorAll<HTMLElement>("[data-message-id]"))
+          .find(item => item.getBoundingClientRect().bottom > containerTop);
+        pendingHistoryScrollRef.current = {
+          id: anchor?.dataset.messageId || null,
+          top: anchor ? anchor.getBoundingClientRect().top - containerTop : 0,
+          height: element.scrollHeight,
+          scrollTop: element.scrollTop,
+        };
+      }
+      mergeMessages(data.messages || [], mode !== "before");
     }
+    if (mode === "initial" || mode === "before" || !afterCursorRef.current) {
+      setOlderCursor(data.pagination?.hasMore ? data.pagination.oldestCursor : null);
+    }
+    // Keep the polling cursor separate from locally sent messages, so sending
+    // while catching up cannot skip intervening posts from other people.
+    if (mode !== "before" && data.pagination?.newestCursor) afterCursorRef.current = data.pagination.newestCursor;
+    return data.pagination as { hasMore: boolean; nextCursor: string | null } | undefined;
   }, [id, mergeMessages]);
+
+  async function loadOlderMessages() {
+    if (!olderCursor || historyLoadingRef.current) return;
+    historyLoadingRef.current = true;
+    setLoadingHistory(true);
+    setHistoryError("");
+    try {
+      await loadChat("before", olderCursor);
+    } catch (err) {
+      if (activeGroupIdRef.current === id) setHistoryError(err instanceof Error ? err.message : "過去のメッセージの取得に失敗しました");
+    } finally {
+      if (activeGroupIdRef.current === id) {
+        historyLoadingRef.current = false;
+        setLoadingHistory(false);
+      }
+    }
+  }
 
   useEffect(() => {
     let active = true;
     initialLoadHandledRef.current = false;
     pendingScrollToBottomRef.current = false;
+    pendingHistoryScrollRef.current = null;
+    afterCursorRef.current = null;
+    historyLoadingRef.current = false;
+    messageIdsRef.current.clear();
+    setMessages([]);
+    setOlderCursor(null);
+    setHistoryError("");
+    setLoadingHistory(false);
     setLoading(true);
     setError("");
 
-    loadChat()
+    loadChat("initial")
       .catch(err => {
         if (active) setError(err instanceof Error ? err.message : "チャットの取得に失敗しました");
       })
@@ -272,16 +325,25 @@ export default function ChatPage() {
   }, [loadChat, id]);
 
   useEffect(() => {
-    if (!latestMessageAt) return;
+    if (loading) return;
 
     const timer = window.setInterval(() => {
-      loadChat(latestMessageAt).catch(err => {
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
+      void (async () => {
+        // Bound each catch-up run while allowing more than one page per poll.
+        for (let page = 0; page < 5 && activeGroupIdRef.current === id; page++) {
+          const cursor = afterCursorRef.current;
+          const pagination = await loadChat(cursor ? "after" : "latest", cursor || undefined);
+          if (!pagination?.hasMore || !cursor) break;
+        }
+      })().catch(err => {
         console.error("[Chat polling error]", err);
-      });
+      }).finally(() => { pollInFlightRef.current = false; });
     }, 4000);
 
     return () => window.clearInterval(timer);
-  }, [latestMessageAt, loadChat]);
+  }, [id, loading, loadChat]);
 
   useLayoutEffect(() => {
     if (loading) return;
@@ -290,6 +352,20 @@ export default function ChatPage() {
       initialLoadHandledRef.current = true;
       pendingScrollToBottomRef.current = false;
       scrollChatToBottom(messagesRef.current, "auto");
+      return;
+    }
+
+    if (pendingHistoryScrollRef.current && messagesRef.current) {
+      const saved = pendingHistoryScrollRef.current;
+      pendingHistoryScrollRef.current = null;
+      const element = messagesRef.current;
+      const anchor = saved.id ? element.querySelector<HTMLElement>(`[data-message-id="${saved.id}"]`) : null;
+      if (anchor) {
+        element.scrollTop += anchor.getBoundingClientRect().top - element.getBoundingClientRect().top - saved.top;
+      } else {
+        element.scrollTop = saved.scrollTop + element.scrollHeight - saved.height;
+      }
+      pendingScrollToBottomRef.current = false;
       return;
     }
 
@@ -505,21 +581,30 @@ export default function ChatPage() {
   }
 
   async function handleReaction(messageId: string, emoji: string) {
+    const previousReaction = messages.find(message => message.id === messageId)?.reactions?.[emoji];
     setMessages((current) => current.map((message) => (
       message.id === messageId ? applyReaction(message, emoji) : message
     )));
 
-    const res = await fetch("/api/reactions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ post_id: messageId, emoji }),
-    });
-
-    if (!res.ok) {
-      loadChat().catch(err => {
-        console.error("[Chat reaction reload error]", err);
+    try {
+      const res = await fetch("/api/reactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ post_id: messageId, emoji }),
       });
+      if (res.ok) return;
+    } catch (err) {
+      console.error("[Chat reaction error]", err);
     }
+
+    // A failed reaction must not replace the loaded history with the latest page.
+    setMessages(current => current.map(message => {
+      if (message.id !== messageId) return message;
+      const reactions = { ...message.reactions };
+      if (previousReaction) reactions[emoji] = previousReaction;
+      else delete reactions[emoji];
+      return { ...message, reactions };
+    }));
   }
 
   function canEditMessage(message: Message) {
@@ -723,6 +808,16 @@ export default function ChatPage() {
           <p className="chat-empty">メッセージはまだありません。最初のメッセージを送りましょう。</p>
         )}
 
+        {!loading && olderCursor && (
+          <div style={{ textAlign: "center", flexShrink: 0 }}>
+            <button type="button" className="btn-secondary" onClick={loadOlderMessages} disabled={loadingHistory}>
+              {loadingHistory ? "読み込み中..." : "以前のメッセージを読み込む"}
+            </button>
+            {searchQuery && <p>検索対象を増やすには、以前のメッセージを読み込んでください。</p>}
+          </div>
+        )}
+        {historyError && <p role="alert">{historyError}</p>}
+
         {!loading && !error && messages.length > 0 && filteredMessages.length === 0 && (
           <p className="chat-empty">検索条件に一致するメッセージはありません。</p>
         )}
@@ -732,7 +827,7 @@ export default function ChatPage() {
           const isEdited = Boolean(message.updated_at && new Date(message.updated_at).getTime() > new Date(message.created_at).getTime() + 1000);
 
           return (
-          <div key={message.id} className={`msg msg--${message.isOwn ? "own" : "other"}`}>
+          <div key={message.id} data-message-id={message.id} className={`msg msg--${message.isOwn ? "own" : "other"}`}>
             <div className="msg__avatar-col">
               <Avatar user={message.author} />
             </div>

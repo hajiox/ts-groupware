@@ -8,6 +8,7 @@ import { isManagementRole } from '@/lib/user-roles'
 import { CODEX_MTG_BOT_USER_ID, isCodexMtgGroup } from '@/lib/codex-mtg-policy'
 import { businessPostAuthor, businessPostContent, isOwnBusinessPost, validateBusinessAttachments, canDeleteBusinessDriveFiles } from '@/lib/business-api/posting'
 import { getBusinessContext } from '@/lib/business-api/context'
+import { decodeChatCursor, encodeChatCursor } from '@/lib/chat-pagination'
 
 type Attachment = {
   url?: string
@@ -151,16 +152,33 @@ export async function GET(request: NextRequest) {
   }
 
   const since = request.nextUrl.searchParams.get('since')
-  const limit = Math.min(parseInt(request.nextUrl.searchParams.get('limit') || '80', 10) || 80, 100)
+  const before = request.nextUrl.searchParams.get('before')
+  const after = request.nextUrl.searchParams.get('after')
+  if ([since, before, after].filter(value => value !== null).length > 1) {
+    return NextResponse.json({ error: 'since、before、after は同時に指定できません' }, { status: 400 })
+  }
+  const cursor = before !== null || after !== null ? decodeChatCursor(before ?? after ?? '') : null
+  if ((before !== null || after !== null) && !cursor) {
+    return NextResponse.json({ error: 'チャットの取得位置が不正です' }, { status: 400 })
+  }
+  if (since !== null && !Number.isFinite(Date.parse(since))) {
+    return NextResponse.json({ error: 'since が不正です' }, { status: 400 })
+  }
+  const limit = Math.max(1, Math.min(parseInt(request.nextUrl.searchParams.get('limit') || '80', 10) || 80, 100))
+  const ascending = after !== null || since !== null
   let query = adminClient
     .from('gw_posts')
     .select('id, group_id, user_id, content, attachments, created_at, updated_at')
     .eq('group_id', groupId)
     .is('parent_id', null)
-    .order('created_at', { ascending: since ? true : false })
-    .limit(limit)
+    .order('created_at', { ascending })
+    .order('id', { ascending })
+    .limit(limit + 1)
 
-  if (since) {
+  if (cursor) {
+    const operator = before !== null ? 'lt' : 'gt'
+    query = query.or(`created_at.${operator}.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.${operator}.${cursor.id})`)
+  } else if (since) {
     query = query.gt('created_at', since)
   }
 
@@ -180,7 +198,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: messagesError.message }, { status: 500 })
   }
 
-  const messages = since ? (rawMessages || []) : [...(rawMessages || [])].reverse()
+  const hasMore = (rawMessages || []).length > limit
+  const page = (rawMessages || []).slice(0, limit)
+  const messages = ascending ? page : [...page].reverse()
+  const oldestCursor = messages.length ? encodeChatCursor(messages[0]) : null
+  const newestCursor = messages.length ? encodeChatCursor(messages[messages.length - 1]) : null
   const userIds = [...new Set([
     ...messages.map(message => message.user_id),
     ...(memberRows || []).map(member => member.user_id),
@@ -268,6 +290,7 @@ export async function GET(request: NextRequest) {
       reactions: reactionMap[message.id] || {},
     })),
     readReceipts,
+    pagination: { hasMore, nextCursor: hasMore ? (ascending ? newestCursor : oldestCursor) : null, oldestCursor, newestCursor },
   })
 }
 

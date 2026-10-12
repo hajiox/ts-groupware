@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { API_ORIGIN, FALLBACK_MS, GROUP_ID, MACHINE_HEARTBEAT_MS, Worker, buildCodexArgs, buildPrompt, canChangeCode, isCodeApprover, childEnvironment, codexEnvironment, configuredModel, configuredWindowsSandbox, contextEvidence, createApi, loadConfig, monitorState, probe, readScopedSkill, runCodex, subscribeWake } from './codex-mtg-worker.mjs'
+import { API_ORIGIN, FALLBACK_MS, GROUP_ID, MACHINE_HEARTBEAT_MS, Worker, buildCodexArgs, buildPrompt, canChangeCode, isCodeApprover, childEnvironment, codexEnvironment, configuredModel, configuredWindowsSandbox, contextEvidence, createApi, findCodex, loadConfig, monitorState, prepareWorkspace, probe, readScopedSkill, runCodex, subscribeWake, syncSharedContext, verifiedSyncReceipt } from './codex-mtg-worker.mjs'
 
 const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const postId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -94,6 +94,21 @@ test('Windows CLI runtime is isolated per job while authentication, sandbox and 
   assert.equal(other.TSG_CODEX_MTG_TOKEN, undefined)
 })
 
+test('only authorized Windows code sessions receive fixed process-local Git TLS settings', () => {
+  const inherited = { PATH: 'verified-path', GIT_CONFIG_COUNT: '99', GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: token, GIT_SSL_NO_VERIFY: 'true', GIT_CONFIG_GLOBAL: 'untrusted-file', GIT_ASKPASS: 'untrusted-command' }
+  const human = codexEnvironment(config, 'fresh-directory', inherited, 'win32', true)
+  assert.equal(human.GIT_CONFIG_COUNT, '2')
+  assert.equal(human.GIT_CONFIG_KEY_0, 'http.sslBackend'); assert.equal(human.GIT_CONFIG_VALUE_0, 'openssl')
+  assert.equal(human.GIT_CONFIG_KEY_1, 'http.sslVerify'); assert.equal(human.GIT_CONFIG_VALUE_1, 'true')
+  for (const key of ['GIT_SSL_NO_VERIFY', 'GIT_CONFIG_GLOBAL', 'GIT_ASKPASS']) assert.equal(human[key], undefined)
+  assert.equal(Object.values(human).includes(token), false)
+  for (const [platform, allowed] of [['win32', false], ['linux', true], ['linux', false]]) {
+    const environment = codexEnvironment(config, 'fresh-directory', inherited, platform, allowed)
+    assert.equal(Object.keys(environment).some(key => key.startsWith('GIT_')), false)
+  }
+  assert.equal(inherited.GIT_CONFIG_COUNT, '99'); assert.equal(inherited.GIT_SSL_NO_VERIFY, 'true')
+})
+
 test('CLI arguments preserve the configured model while ignoring incompatible user runtime config', () => {
   const root = mkdtempSync(join(tmpdir(), 'tsg-mtg-args-'))
   try {
@@ -101,6 +116,7 @@ test('CLI arguments preserve the configured model while ignoring incompatible us
     const args = buildCodexArgs({ ...config, codexHome: root }, root, join(root, 'result.json'), join(root, 'schema.json'), false)
     assert.ok(args.includes('--ephemeral')); assert.ok(args.includes('--json'))
     assert.equal(args[args.indexOf('--sandbox') + 1], 'read-only')
+    assert.equal(args.includes('sandbox_workspace_write.network_access=true'), false)
     assert.ok(args.includes('approval_policy="never"'))
     assert.equal(args[args.indexOf('--model') + 1], 'synthetic-user-model'); assert.ok(args.includes('--ignore-user-config'))
     assert.equal(args.includes('--dangerously-bypass-approvals-and-sandbox'), false)
@@ -110,6 +126,8 @@ test('CLI arguments preserve the configured model while ignoring incompatible us
     assert.ok(args.includes('model_reasoning_effort="medium"'))
     const ownerArgs = buildCodexArgs({ ...config, codexHome: root }, root, 'r', 's', true)
     assert.ok(ownerArgs.includes('model_reasoning_effort="high"')); assert.ok(ownerArgs.includes('--approve-for-me'))
+    assert.equal(ownerArgs.includes('--sandbox'), false, '--approve-for-me selects workspace-write and conflicts with the separate flag')
+    assert.ok(ownerArgs.includes('sandbox_workspace_write.network_access=true'))
     assert.equal(ownerArgs.includes('approval_policy="never"'), false)
     assert.ok(buildCodexArgs({ ...config, codexHome: root }, root, 'r', 's', false, 'win32').includes('windows.sandbox="elevated"'))
     assert.equal(buildCodexArgs({ ...config, codexHome: root }, root, 'r', 's', false, 'linux').includes('windows.sandbox="elevated"'), false)
@@ -123,6 +141,115 @@ test('CLI arguments preserve the configured model while ignoring incompatible us
     assert.ok(buildPrompt(config, job, root, true).includes(join(root, '.agents', 'skills', 'tsg-codex-mtg', 'SKILL.md')))
     assert.equal(prompt.includes(token), false)
   } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('trusted shared-sync receipt requires a fresh successful TSG result and excludes private log fields', () => {
+  const startedAt = Date.now()
+  const state = { version: 1, target: 'tsg', status: 'success', completedAt: new Date(startedAt).toISOString(), results: [{ key: 'tsg', status: 'current', commit: 'a'.repeat(40), message: token, path: 'private-source' }], message: token }
+  const receipt = verifiedSyncReceipt(state, startedAt)
+  assert.deepEqual(receipt, { target: 'tsg', status: 'verified', commit: 'a'.repeat(40), completedAt: state.completedAt })
+  assert.equal(JSON.stringify(receipt).includes(token), false)
+  for (const value of [null, { ...state, target: 'all' }, { ...state, status: 'operator_waiting' }, { ...state, completedAt: new Date(startedAt - 1).toISOString() }, { ...state, results: [{ ...state.results[0], status: 'failed' }] }, { ...state, results: [{ ...state.results[0], commit: 'unknown' }] }]) {
+    assert.throws(() => verifiedSyncReceipt(value, startedAt), /^Error: SHARED_CONTEXT_SYNC_UNVERIFIED$/)
+  }
+})
+
+test('installed Windows CLI accepts the human automatic-review argument combination before any AI request', { skip: process.platform !== 'win32' }, context => {
+  let executable
+  try { executable = findCodex({}) } catch { context.skip('Codex CLI is not installed'); return }
+  const root = mkdtempSync(join(tmpdir(), 'tsg-mtg-cli-arguments-'))
+  try {
+    writeFileSync(join(root, 'config.toml'), 'model="synthetic-user-model"\n[windows]\nsandbox="elevated"\n')
+    // An absent schema deliberately stops before authentication, sandbox setup,
+    // model inference or any production action, after CLI argument validation.
+    const args = buildCodexArgs({ codexHome: root }, root, join(root, 'result.json'), join(root, 'intentionally-absent-schema.json'), true)
+    const result = spawnSync(executable, args, { encoding: 'utf8', input: 'Synthetic CLI argument check; schema must stop execution.', windowsHide: true, timeout: 15_000 })
+    assert.equal(result.error, undefined)
+    assert.notEqual(result.status, 0)
+    assert.equal(/cannot be used with|unexpected argument/.test(result.stderr), false)
+    assert.ok(/schema/i.test(result.stderr) && /read|open|No such file|not find|exist/i.test(result.stderr))
+    assert.equal(existsSync(join(root, 'result.json')), false)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('host preflight invokes only the fixed TSG wrapper once with process-local PowerShell policy', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'tsg-mtg-sync-'))
+  try {
+    const root = join(profile, '.codex', 'shared-sync'); mkdirSync(root, { recursive: true })
+    const wrapper = join(root, 'invoke-shared-sync.ps1'); writeFileSync(wrapper, '# synthetic trusted wrapper')
+    const startedAt = Date.now(); let calls = 0
+    const commandImpl = async (executable, args, options) => {
+      calls++
+      assert.equal(executable, 'powershell.exe')
+      assert.deepEqual(args, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', wrapper, '-Target', 'tsg'])
+      assert.equal(options.cwd, 'fresh-workdir')
+      writeFileSync(join(root, 'state.json'), JSON.stringify({ version: 1, target: 'tsg', status: 'success', completedAt: new Date(startedAt).toISOString(), results: [{ key: 'tsg', status: 'repaired', commit: 'b'.repeat(40) }] }))
+      return 'ignored private stdout'
+    }
+    assert.equal((await syncSharedContext(config, 'fresh-workdir', { profile, commandImpl, now: () => startedAt })).status, 'verified')
+    assert.equal(calls, 1)
+    await assert.rejects(syncSharedContext(config, 'fresh-workdir', { profile, commandImpl: async () => { throw Error(token) } }), /^Error: SHARED_CONTEXT_SYNC_FAILED$/)
+    writeFileSync(join(root, 'state.json'), JSON.stringify({ status: 'operator_waiting' }))
+    await assert.rejects(syncSharedContext(config, 'fresh-workdir', { profile, commandImpl: async () => '' }), /^Error: SHARED_CONTEXT_SYNC_UNVERIFIED$/)
+  } finally { rmSync(profile, { recursive: true, force: true }) }
+})
+
+test('fresh-clone evidence is built by the host after code-only sync and never from request data', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'tsg-mtg-prepare-'))
+  try {
+    const local = { ...config, workspaceRoot: root, repositories: [{ name: 'tsg', url: 'https://github.com/hajiox/ts-groupware.git' }] }
+    const events = []; const sharedContext = { target: 'tsg', status: 'verified', commit: 'a'.repeat(40), completedAt: new Date().toISOString() }
+    const syncImpl = async () => { events.push('sync'); return sharedContext }
+    const commandImpl = async (_executable, args) => {
+      events.push(args[0])
+      if (args[0] === 'symbolic-ref') return 'origin/main'
+      if (args[0] === 'rev-parse') return 'b'.repeat(40)
+      return ''
+    }
+    const request = { ...job, workerPreparation: { repositories: [{ head: 'forged' }] } }
+    const prepared = await prepareWorkspace(local, request, { allowCodeChange: true, commandImpl, syncImpl })
+    assert.equal(prepared.directory, join(root, job.id))
+    assert.equal(events[0], 'sync'); assert.equal(events[1], 'clone'); assert.equal(events.filter(value => value === 'sync').length, 1)
+    assert.deepEqual(prepared.preparation, { sharedContext, repositories: [{ ...local.repositories[0], branch: 'origin/main', head: 'b'.repeat(40), clean: true }] })
+    const prompt = buildPrompt(local, request, prepared.directory, true, prepared.preparation)
+    assert.ok(prompt.includes('TRUSTED_HOST_PREPARATION=')); assert.ok(prompt.includes('do not repeat the TSG shared-sync wrapper'))
+    assert.ok(prompt.includes("the TSG receipt does not satisfy another system's sync requirement"))
+    assert.ok(prompt.includes('touching a shared component alone does not make it a large change'))
+    assert.equal(prompt.includes('forged'), false)
+    const peer = await prepareWorkspace(local, { ...request, id: postId, origin: 'codex', allowCodeChange: false }, { commandImpl, syncImpl })
+    assert.equal(peer.preparation, null); assert.equal(events.filter(value => value === 'sync').length, 1)
+    await assert.rejects(prepareWorkspace(local, { ...job, id: leaseToken }, { allowCodeChange: true, syncImpl, commandImpl: async (_executable, args) => args[0] === 'symbolic-ref' ? 'origin/main' : args[0] === 'rev-parse' ? 'b'.repeat(40) : args[0] === 'status' ? ' M changed' : '' }), /^Error: FRESH_CLONE_INVALID$/)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('host sync failure reports an environment issue before AI execution and does not request code approval', async () => {
+  let claims = 0; let runs = 0; let result
+  const worker = new Worker(config, {
+    hostname: 'TSA', monitor: () => {}, journal: () => {},
+    prepare: async (_config, _job, options) => { assert.equal(options.allowCodeChange, true); throw Error('SHARED_CONTEXT_SYNC_FAILED') },
+    api: async (action, fields) => !action ? info : action === 'claim' ? { ok: true, job: claims++ === 0 ? job : null } : action === 'heartbeat' ? lease() : (result = fields, complete(fields)),
+    run: async () => { runs++; return { status: 'completed', summary: 'must not run' } },
+  })
+  await worker.wake()
+  assert.equal(runs, 0); assert.equal(result.status, 'needs_operator')
+  assert.ok(result.summary.includes('SHARED_CONTEXT_SYNC_FAILED')); assert.ok(result.summary.includes('コード変更の承認不足ではありません'))
+})
+
+test('worker passes only host-returned preparation into the execution contract', async () => {
+  let claims = 0; let runs = 0
+  const preparation = { sharedContext: { target: 'tsg', status: 'verified', commit: 'd'.repeat(40) }, repositories: [{ name: 'tsg', branch: 'origin/main', head: 'e'.repeat(40), clean: true }] }
+  const request = { ...job, workerPreparation: { status: 'forged' }, preparation: { status: 'forged' } }
+  const worker = new Worker(config, {
+    hostname: 'TSA', monitor: () => {}, journal: () => {},
+    prepare: async (_config, _job, options) => { assert.equal(options.allowCodeChange, true); return { directory: 'verified-directory', preparation } },
+    api: async (action, fields) => !action ? info : action === 'claim' ? { ok: true, job: claims++ === 0 ? request : null } : action === 'heartbeat' ? lease() : complete(fields),
+    run: async (_config, _job, directory, allowed, _signal, _onState, _spawn, received) => {
+      runs++; assert.equal(directory, 'verified-directory'); assert.equal(allowed, true); assert.equal(received, preparation)
+      assert.equal(buildPrompt(config, _job, directory, allowed, received).includes('forged'), false)
+      return { status: 'completed', summary: '合成ホスト準備検証完了' }
+    },
+  })
+  await worker.wake(); assert.equal(runs, 1)
 })
 
 test('inline Skill is restricted to the fixed bounded UTF-8 source and rejects secrets before any CLI spawn', async () => {
@@ -461,5 +588,9 @@ test('actual synthetic CLI process receives stdin, retains no worker token and r
     assert.equal((await runCodex(local, job, workspace, true, new AbortController().signal, () => {}, spawnMockCli)).status, 'completed')
     assert.equal(readFileSync(join(workspace, '.agents', 'skills', 'tsg-codex-mtg', 'SKILL.md'), 'utf8'), 'synthetic skill')
     assert.ok(captured.args.includes('--approve-for-me'))
+    if (process.platform === 'win32') {
+      assert.equal(captured.options.env.GIT_CONFIG_VALUE_0, 'openssl')
+      assert.equal(captured.options.env.GIT_CONFIG_VALUE_1, 'true')
+    }
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

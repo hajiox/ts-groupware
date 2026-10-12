@@ -1,5 +1,13 @@
 # Codex MTG 専用worker
 
+2026-10-12: 承認済みの軽微な修正が、isolated CLI内の共有同期のPowerShell実行制約や既定のネットワーク制限で止まる問題を修正しました。コード変更可能なhumanジョブだけ、信頼済みホストが固定のTSG共有同期wrapperを一度実行して成功状態を検証し、GitHubからのfreshclone・branch・HEAD一致・clean確認と合わせて秘密なしの`TRUSTED_HOST_PREPARATION`を渡します。AIはこの初期準備を繰り返さずソース修正へ進みます。コードジョブのCLIは`--approve-for-me -c sandbox_workspace_write.network_access=true`を明示します。`--approve-for-me`自身がworkspace-writeと自動承認reviewを選ぶため、同時指定を拒否される`--sandbox`は併用しません。既存のWindows elevated sandbox・モデル・high effort・ephemeral隔離を維持します。Codex-origin等のread-onlyジョブにはこの書込/通信設定とホスト同期を追加しません。
+
+同期wrapperは`powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <固定wrapper> -Target tsg`として実行します。ExecutionPolicyはこの信頼済みホスト子プロセスだけの指定で、ユーザー共通設定・ACL・Codexのsandboxや承認reviewを変更しません。結果は固定の`state.json`の対象・完了時刻・成功状態・TSG commitだけを検証し、ログ、設定、秘密値はAIへ渡しません。wrapper欠落、実行失敗、未検証結果はそれぞれ`SHARED_CONTEXT_SYNC_UNAVAILABLE`、`SHARED_CONTEXT_SYNC_FAILED`、`SHARED_CONTEXT_SYNC_UNVERIFIED`としてAI起動前に報告し、コード承認不足と混同しません。実行権や完了状態が不明なジョブを自動再実行する仕組みは追加しません。
+
+軽微/大規模の判断は実際の影響によります。過去Chatの読み込みや既存シフト印刷の復旧など、限定した既存動作の修正は、共通部品を触るという理由だけで確認待ちにしません。広範な構造・権限・重要な業務ルール・危険な移行の変更だけ、具体的な計画と影響を示して佐藤正彦へ確認します。
+
+実Windows CLIの読取検証でSchannelがsandbox内のTLS資格情報を取得できず、GitHub接続が失敗することを確認しました。コード変更可能なhumanのWindows子プロセスだけ、Gitの固定runtime環境`GIT_CONFIG_COUNT=2`で`http.sslBackend=openssl`と`http.sslVerify=true`を渡します。OpenSSL指定で同じGitHubの読取成功を確認しています。証明書検証、sandbox、自動承認reviewは維持し、ユーザー共通Git設定・host側Git・read-only/非Windowsジョブは変更しません。継承した`GIT_SSL_NO_VERIFY`や任意の`GIT_CONFIG_*`は取り込みません。
+
 2026-10-11 依頼の運用: コード変更と通常業務を区別します。調査・通常の操作依頼は人間/Codex由来を問わず既存MCP/API権限内で実行し、コード承認待ちにはしません。管理職の軽微な機能修正は直接実施し、大規模・高影響のコード変更は具体的な変更案・影響・確認点を佐藤正彦へ示して確認します。他Codexのコード変更提案を本人が明確に許可した投稿は、新しいhuman依頼としてその仕様を採用し、同じ許可を再要求しません。元Codexジョブ自体のコード権限は昇格しません。
 
 `codeApproverUserId` は管理者が検証した佐藤正彦のTSGユーザーUUIDを設定する任意項目です。本人判定は認証済みsnapshotの同一投稿・human origin・user_idとこの設定の一致からworkerが毎回計算します。名前・本文・jobの自己申告フラグは使用しません。本人の承認は現在の具体的な依頼範囲に限り、無関係な大変更の包括許可にはしません。本人照合資料が欠ける場合は不足情報として扱います。通常業務に必要なツールが未接続の場合も、接続不足として報告し、コード変更の承認を求めません。今回、業務キーやMCPの実行設定は追加しません。
