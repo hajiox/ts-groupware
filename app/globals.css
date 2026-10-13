@@ -12663,12 +12663,69 @@ html[data-theme="light"] .board-footer .selected-file {
   color: #ffffff;
 }
 
+/* The confirmed table owns vertical scrolling on every screen size. Let the
+   actual header/alerts use their height, and reserve the fixed navigation once. */
+body:has(.shift-page .confirmed-shift-table-scroll) {
+  overflow: hidden;
+}
+
+body:has(.shift-page .confirmed-shift-table-scroll) .app-shell {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body:has(.shift-page .confirmed-shift-table-scroll) .app-shell > main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: var(--nav-height);
+}
+
+body:has(.shift-page .confirmed-shift-table-scroll) .app-shell__alerts,
+body:has(.shift-page .confirmed-shift-table-scroll) .app-shell > main > .top-header {
+  flex: 0 0 auto;
+}
+
+.shift-page:has(.confirmed-shift-table-scroll) {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 12px;
+}
+
+.shift-page:has(.confirmed-shift-table-scroll) .shift-view-tabs,
+.shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__heading,
+.shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__departments,
+.shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__period,
+.shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__legend {
+  flex: 0 0 auto;
+}
+
+.shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift,
+.shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__table-area {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift {
+  overflow: hidden;
+}
+
 .confirmed-shift-table-scroll {
+  flex: 1 1 auto;
   width: 100%;
   max-width: 100%;
-  max-height: min(62dvh, 660px);
+  min-height: 0;
+  max-height: none;
   overflow: auto;
   overscroll-behavior: contain;
+  scroll-padding-bottom: 12px;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: #0f172a;
@@ -17417,60 +17474,6 @@ html[data-theme="light"] .confirmed-shift-table td[data-shift-cell-colored="true
     max-width: min(58vw, 220px);
   }
 
-  .confirmed-shift-table-scroll {
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: none;
-    scroll-padding-bottom: 12px;
-  }
-
-  body:has(.confirmed-shift-table-scroll) {
-    overflow: hidden;
-  }
-
-  body:has(.confirmed-shift-table-scroll) .app-shell {
-    height: 100dvh;
-    min-height: 100dvh;
-    overflow: hidden;
-  }
-
-  .shift-page:has(.confirmed-shift-table-scroll) {
-    display: flex;
-    flex: 0 0 auto;
-    flex-direction: column;
-    width: min(100%, 720px);
-    height: calc(100dvh - var(--header-height) - var(--nav-height));
-    min-height: 0;
-    overflow: hidden;
-    padding-bottom: 12px;
-  }
-
-  .shift-page:has(.confirmed-shift-table-scroll) .shift-view-tabs {
-    flex: 0 0 auto;
-  }
-
-  .shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift {
-    display: flex;
-    flex: 1 1 auto;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__heading,
-  .shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__departments,
-  .shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__period,
-  .shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__legend {
-    flex: 0 0 auto;
-  }
-
-  .shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__table-area {
-    display: flex;
-    flex: 1 1 auto;
-    flex-direction: column;
-    min-height: 0;
-  }
-
   .confirmed-shift-table-scroll::after {
     display: block;
     height: 12px;
@@ -17839,14 +17842,8 @@ html[data-theme="light"] .confirmed-shift-table td[data-shift-cell-colored="true
 }
 
 @media (orientation: landscape) and (max-height: 620px) {
-  body:has(.confirmed-shift-table-scroll) {
-    overflow: hidden;
-  }
-
-  body:has(.confirmed-shift-table-scroll) .app-shell {
-    height: 100dvh;
-    min-height: 100dvh;
-    overflow: hidden;
+  body:has(.shift-page .confirmed-shift-table-scroll) .app-shell > main {
+    padding-bottom: 0;
   }
 
   body:has(.confirmed-shift-table-scroll) .top-header,
@@ -17855,12 +17852,8 @@ html[data-theme="light"] .confirmed-shift-table td[data-shift-cell-colored="true
   }
 
   .shift-page:has(.confirmed-shift-table-scroll) {
-    display: flex;
-    flex-direction: column;
     width: 100%;
     max-width: none;
-    height: 100dvh;
-    min-height: 0;
     padding:
       max(6px, env(safe-area-inset-top, 0px))
       max(6px, env(safe-area-inset-right, 0px))
@@ -17875,12 +17868,7 @@ html[data-theme="light"] .confirmed-shift-table td[data-shift-cell-colored="true
   }
 
   .shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift {
-    display: flex;
-    flex: 1 1 auto;
-    flex-direction: column;
     gap: 6px;
-    min-height: 0;
-    overflow: hidden;
   }
 
   .shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__departments {
@@ -17903,18 +17891,7 @@ html[data-theme="light"] .confirmed-shift-table td[data-shift-cell-colored="true
   }
 
   .shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift-table-scroll {
-    flex: 1 1 auto;
-    height: auto;
-    min-height: 0;
-    max-height: none;
     border-radius: 4px;
-  }
-
-  .shift-page:has(.confirmed-shift-table-scroll) .confirmed-shift__table-area {
-    display: flex;
-    flex: 1 1 auto;
-    flex-direction: column;
-    min-height: 0;
   }
 }
 

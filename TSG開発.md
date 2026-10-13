@@ -1660,3 +1660,9 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - workerは信頼済みホストが固定TSG共有同期を一度実行し、成功とfreshclone・HEAD一致・cleanの証跡をAIへ渡す。isolated CLIに初期同期/cloneを重複させない。環境不足を承認不足と区別し、限定した既存動作の復旧を共通部品という理由だけで大規模変更と判断しない。
 - humanコードジョブはapprove-for-meとnetwork_access指定を使用し、競合するsandboxフラグを併用しない。Windows隔離環境のSchannel失敗を実CLIで確認し、OpenSSL・証明書検証を保つプロセス限定Git設定で通信成功を確認。peerのread-only、既存モデル、elevated sandbox、自動承認review、秘密保存先を維持する。
 - API試験で250件の全履歴・削除済み基準行・同時刻205新着・認証/会員境界を確認。実ChatPageをスマホ/PCで履歴読込・再試行・表示位置・検索・送信中の新着追従まで検証。worker/peer/recovery49試験、実CLIの通常GitHub読取とworkspace書込、型検査、lint、buildに成功。DB migrationと業務データの試験投稿は不要。
+
+## 2026-10-13 確定シフトの縦スクロール重複を修正
+
+- PCの確定シフト画面で、表内の縦スクロールと画面全体の縦スクロールが併存していた。本番1920×855でdocument高915px、表client高528px/内容高702pxを確認。表の62dvh上限と上部UIの合計が画面高を超え、スマホ限定の残り高さ配分がPCには適用されないことが原因だった。
+- 確定表がある場合に限定してshell/main/pageをflexで画面内へ収め、ヘッダーとSOSの実高を除いた残りを表へ配分する。固定下ナビの余白は一度だけ予約し、短い横向きでは解除。PCの全幅表示、横スクロール、名前・日付の固定を維持する。希望提出・読込中・確定表なしは通常スクロールへ戻す。
+- 変更はglobals.cssの表示制御のみ。DB/API、シフト内容、休暇区分、worker設定は変更しない。実ConfirmedShiftView/AppShellの合成ブラウザ検証で旧PCの2スクロールを再現し、新PC・タブレット・スマホ・safe-area・短い縦横画面が表のみ1スクロールになることを確認。最終行、見出し/日付固定、横スクロール、SOS、希望提出・空画面への切替も成功。型検査・build成功、lintは既存27警告/0error。
