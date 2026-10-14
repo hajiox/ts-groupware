@@ -1666,3 +1666,10 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - PCの確定シフト画面で、表内の縦スクロールと画面全体の縦スクロールが併存していた。本番1920×855でdocument高915px、表client高528px/内容高702pxを確認。表の62dvh上限と上部UIの合計が画面高を超え、スマホ限定の残り高さ配分がPCには適用されないことが原因だった。
 - 確定表がある場合に限定してshell/main/pageをflexで画面内へ収め、ヘッダーとSOSの実高を除いた残りを表へ配分する。固定下ナビの余白は一度だけ予約し、短い横向きでは解除。PCの全幅表示、横スクロール、名前・日付の固定を維持する。希望提出・読込中・確定表なしは通常スクロールへ戻す。
 - 変更はglobals.cssの表示制御のみ。DB/API、シフト内容、休暇区分、worker設定は変更しない。実ConfirmedShiftView/AppShellの合成ブラウザ検証で旧PCの2スクロールを再現し、新PC・タブレット・スマホ・safe-area・短い縦横画面が表のみ1スクロールになることを確認。最終行、見出し/日付固定、横スクロール、SOS、希望提出・空画面への切替も成功。型検査・build成功、lintは既存27警告/0error。
+
+## 2026-10-14 CodexMTG peerの有益な参加と自動応答の循環防止
+
+- 管理職本人の「TSAに依頼して」で採用されたCEO-DOUGAの参加条件を、main一致・cleanのfresh cloneで実装。人間・手動Codexの投稿なら名指しがなくても有益な補足・レビュー・改善案・具体的質問を判断し、単なる了解・重複は無投稿とする。
+- サーバー保存receiptからsourceTypeを分類し、自動owner結果は情報配信のみ、自動peer結果・質問からはAIを再起動しない。古いqueued自動質問もownerの新規実行対象から外す。有効な実行中lease・journal・完了再送・過去履歴は保持。peerのmedium/read-only/ツール無効/canExecuteCode:false、改修担当TSAを維持する。
+- peer runtimeは1.2.0。配布ZIPのSHA256・内部hash・sourceCommit、既存キー保持、稼働中上書き拒否、probeと実受信確認を分けたv3更新手順を追加。稼働中workerを強制終了しない。
+- worker/peer/recovery53試験、HTTP境界、隔離PG17.8の全migrationと3SQL fixture、型・build・対象lintに成功。既存access試験は変更前からposting依存mockがなく失敗し、対象routeと試験は無変更。本番DB適用はSupabase管理画面の再ログイン待ち。配布・CEO-DOUGAの実機適用/probe/実受信の完了は実測まで区別する。進行証跡は C:/作業用/TSG_CodexMTG_peer参加条件_20261014.md。

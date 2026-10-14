@@ -109,6 +109,10 @@ async function main() {
     { action: 'post', sourceKey: 'job-complete:fake', content: 'x', kind: 'report' },
     { action: 'post', sourceKey: 'key', content: 'x', kind: 'execute' },
     { action: 'claim', canExecuteCode: true },
+    { action: 'peerClaim', sourceType: 'human' },
+    { action: 'peerClaim', mayReply: true },
+    { action: 'peerComplete', jobId: uuid, leaseToken: uuid, decision: 'report', summary: 'x', sourceType: 'human' },
+    { action: 'peerComplete', jobId: uuid, leaseToken: uuid, decision: 'report', summary: 'x', mayReply: true },
     { action: 'complete', jobId: uuid, leaseToken: uuid, status: 'pending', summary: 'x' },
   ]) {
     const before = calls.length
@@ -229,6 +233,14 @@ async function main() {
   rpcResult = { data: { ok: true, data: { job: null } }, error: null }
   assert.equal((await machine.POST(request({ action: 'peerClaim' }))).status, 200)
   assert.equal(calls.at(-1).name, 'gw_codex_mtg_peer')
+  for (const [sourceType, mayReply] of [['human', true], ['manual_codex', true], ['owner_result', false], ['peer_result', false], ['unknown', false]]) {
+    rpcResult = { data: { ok: true, data: { job: { id: uuid, postId: uuid, origin: sourceType === 'human' ? 'human' : 'codex',
+      allowCodeChange: false, sourceType, mayReply, leaseToken: uuid } } }, error: null }
+    const result = await machine.POST(request({ action: 'peerClaim' }))
+    assert.equal(result.status, 200)
+    assert.deepEqual((await result.json()).job, rpcResult.data.data.job, 'Server provenance and reply gate must reach the worker unchanged')
+    assert.deepEqual(calls.at(-1).args.p_args, {}, 'Peer cannot supply provenance or reply permissions')
+  }
   await failure(await machine.POST(request({ action: 'peerClaim', machineId: uuid })), 400, 'VALIDATION')
   await failure(await machine.POST(request({ action: 'peerComplete', jobId: uuid, leaseToken: uuid, decision: 'execute', summary: 'invalid' })), 400, 'VALIDATION')
   for (const decision of ['silent', 'report', 'question', 'needs_operator']) {

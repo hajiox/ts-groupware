@@ -11,9 +11,10 @@ BEGIN
   r:=public.gw_codex_mtg_admin(actor,'register',jsonb_build_object('pcName','CEO-DOUGA','tokenHash',token2)); second_peer:=(r#>>'{data,machine,id}')::uuid;
   INSERT INTO public.gw_posts(id,group_id,user_id,content) VALUES(source,'a8081dbe-15db-4d41-a18b-b22bb55d2b39',actor,'fixture question');
   IF (SELECT count(*) FROM public.gw_codex_mtg_peer_jobs)<>2 THEN RAISE EXCEPTION 'Fanout incorrect'; END IF;
+  IF EXISTS(SELECT 1 FROM public.gw_codex_mtg_peer_jobs WHERE NOT may_reply) THEN RAISE EXCEPTION 'Unaddressed human participation blocked'; END IF;
   BEGIN PERFORM public.gw_codex_mtg_peer(owner_token,'peerClaim','{}'); RAISE EXCEPTION 'Owner accepted'; EXCEPTION WHEN SQLSTATE 'P0001' THEN IF SQLERRM<>'FORBIDDEN' THEN RAISE; END IF; END;
   r:=public.gw_codex_mtg_peer(token,'peerClaim','{}'); j:=r#>'{data,job}';
-  IF j->>'postId'<>source::text OR (j->>'allowCodeChange')::boolean THEN RAISE EXCEPTION 'Claim invalid'; END IF;
+  IF j->>'postId'<>source::text OR (j->>'allowCodeChange')::boolean OR (j->>'sourceType') IS DISTINCT FROM 'human' OR (j->>'mayReply')::boolean IS DISTINCT FROM true THEN RAISE EXCEPTION 'Claim invalid'; END IF;
   r:=public.gw_codex_mtg_peer(token,'peerClaim','{}'); IF r#>'{data,job}'<>'null'::jsonb THEN RAISE EXCEPTION 'Concurrent claim'; END IF;
   args:=jsonb_build_object('jobId',j->>'id','leaseToken',j->>'leaseToken');
   BEGIN PERFORM public.gw_codex_mtg_peer(token2,'peerHeartbeat',args); RAISE EXCEPTION 'Other machine lease accepted'; EXCEPTION WHEN SQLSTATE 'P0001' THEN IF SQLERRM<>'FORBIDDEN' THEN RAISE; END IF; END;
@@ -22,24 +23,28 @@ BEGIN
   r:=public.gw_codex_mtg_peer(token,'peerComplete',args); output_post:=(r#>>'{data,postId}')::uuid;
   IF NOT (r->>'ok')::boolean OR output_post IS NULL THEN RAISE EXCEPTION 'Completion failed'; END IF;
   IF EXISTS(SELECT 1 FROM public.gw_codex_mtg_peer_jobs WHERE post_id=output_post) THEN RAISE EXCEPTION 'Automatic response loop'; END IF;
-  IF NOT EXISTS(SELECT 1 FROM public.gw_codex_mtg_jobs WHERE post_id=output_post AND origin='codex' AND NOT allow_code_change) THEN RAISE EXCEPTION 'Owner question scope'; END IF;
+  IF EXISTS(SELECT 1 FROM public.gw_codex_mtg_jobs WHERE post_id=output_post) THEN RAISE EXCEPTION 'Automatic question restarted owner AI'; END IF;
+  IF (SELECT public.gw_codex_mtg_post_source_type(p) FROM public.gw_posts p WHERE p.id=output_post)<>'peer_result' THEN RAISE EXCEPTION 'Automatic peer provenance'; END IF;
   r:=public.gw_codex_mtg_peer(token,'peerComplete',args); IF NOT (r#>>'{data,duplicate}')::boolean THEN RAISE EXCEPTION 'Duplicate reply'; END IF;
   BEGIN PERFORM public.gw_codex_mtg_peer(token,'peerComplete',args||'{"summary":"changed"}'); RAISE EXCEPTION 'Changed duplicate accepted'; EXCEPTION WHEN SQLSTATE 'P0001' THEN IF SQLERRM<>'IDEMPOTENCY_CONFLICT' THEN RAISE; END IF; END;
   -- Completing the owner response must enqueue informational delivery only.
-  UPDATE public.gw_codex_mtg_jobs SET status='completed' WHERE post_id=source;
   r:=public.gw_codex_mtg_machine(owner_token,'claim','{}'); j:=r#>'{data,job}';
+  IF j->>'postId'<>source::text OR j->>'origin'<>'human' OR NOT (j->>'allowCodeChange')::boolean THEN RAISE EXCEPTION 'Human owner job scope changed'; END IF;
   r:=public.gw_codex_mtg_machine(owner_token,'complete',jsonb_build_object('jobId',j->>'id','leaseToken',j->>'leaseToken','status','completed','summary','fixture answer'));
   IF EXISTS(SELECT 1 FROM public.gw_codex_mtg_peer_jobs WHERE post_id=(r#>>'{data,postId}')::uuid AND may_reply) THEN RAISE EXCEPTION 'Owner reply amplification'; END IF;
   IF (SELECT count(*) FROM public.gw_codex_mtg_peer_jobs WHERE post_id=(r#>>'{data,postId}')::uuid)<>2 THEN RAISE EXCEPTION 'Owner answer not delivered'; END IF;
+  -- now() is fixed throughout this fixture transaction; make queue order explicit.
+  UPDATE public.gw_codex_mtg_peer_jobs SET created_at=clock_timestamp() WHERE post_id=(r#>>'{data,postId}')::uuid;
   -- Edited requests invalidate old leases and create a new revision for both PCs.
   r:=public.gw_codex_mtg_peer(token2,'peerClaim','{}'); j:=r#>'{data,job}';
   UPDATE public.gw_posts SET content='edited fixture question',updated_at=clock_timestamp() WHERE id=source;
+  UPDATE public.gw_codex_mtg_peer_jobs SET created_at=clock_timestamp() WHERE post_id=source AND status='queued';
   r:=public.gw_codex_mtg_peer(token2,'peerComplete',jsonb_build_object('jobId',j->>'id','leaseToken',j->>'leaseToken','decision','report','summary','stale'));
   IF r->>'code'<>'CONFLICT' THEN RAISE EXCEPTION 'Edited source allowed'; END IF;
   IF (SELECT count(*) FROM public.gw_codex_mtg_peer_jobs WHERE post_id=source AND status='queued')<>2 THEN RAISE EXCEPTION 'Edited revision not queued'; END IF;
   -- Drain informational jobs silently; expire then reclaim the next analysis with a new lease.
   r:=public.gw_codex_mtg_peer(token,'peerClaim','{}'); j:=r#>'{data,job}';
-  IF (j->>'mayReply')::boolean THEN RAISE EXCEPTION 'Expected informational answer'; END IF;
+  IF (j->>'mayReply')::boolean IS DISTINCT FROM false OR (j->>'sourceType') IS DISTINCT FROM 'owner_result' THEN RAISE EXCEPTION 'Expected informational answer'; END IF;
   args:=jsonb_build_object('jobId',j->>'id','leaseToken',j->>'leaseToken','decision','report','summary','loop');
   BEGIN PERFORM public.gw_codex_mtg_peer(token,'peerComplete',args); RAISE EXCEPTION 'Informational reply accepted'; EXCEPTION WHEN SQLSTATE 'P0001' THEN IF SQLERRM<>'FORBIDDEN' THEN RAISE; END IF; END;
   PERFORM public.gw_codex_mtg_peer(token,'peerComplete',args||'{"decision":"silent","summary":""}');

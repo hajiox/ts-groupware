@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { PeerWorker, validatePeerResult, validatePeerCompletion } from './codex-mtg-peer.mjs'
+import { PeerWorker, canAnalyzePeerJob, runPeer, validatePeerResult, validatePeerCompletion } from './codex-mtg-peer.mjs'
 import { GROUP_ID, validateInfo, canChangeCode } from './codex-mtg-worker.mjs'
 const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const postId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -36,6 +36,53 @@ test('concurrent wake serializes one analysis and exactly one reply', async () =
 test('informational auto responses are acknowledged without AI or another post', async () => {
   const f = fixture({ job: { mayReply: false } }); await f.worker.wake()
   assert.equal(f.runs(), 0); assert.equal(f.calls.find(c => c.action === 'peerComplete').body.decision, 'silent')
+})
+
+test('human and explicitly manual Codex sources can add a supported report without being named', async () => {
+  for (const source of [{ origin: 'human', sourceType: 'human' }, { origin: 'codex', sourceType: 'manual_codex' }]) {
+    const result = { decision: 'report', summary: '提供された比較値では別PCの提案にこの補足が必要です。' }
+    const f = fixture({ job: { ...source, content: 'TSAへ: この比較を確認してください' }, result })
+    await f.worker.wake()
+    assert.equal(f.runs(), 1)
+    const completion = f.calls.find(c => c.action === 'peerComplete').body
+    assert.equal(completion.decision, 'report'); assert.equal(completion.summary, result.summary)
+  }
+  assert.equal(canAnalyzePeerJob(job), true) // Legacy human job remains compatible.
+})
+
+test('automatic, legacy Codex, unknown or contradictory sources stay silent even with mayReply true', async () => {
+  for (const source of [
+    { origin: 'codex', sourceType: 'owner_result' },
+    { origin: 'codex', sourceType: 'peer_result' },
+    { origin: 'codex' },
+    { origin: 'human', sourceType: 'unknown' },
+    { origin: 'human', sourceType: null },
+    { origin: 'human', sourceType: 'manual_codex' },
+    { origin: 'codex', sourceType: 'human' },
+  ]) {
+    const current = { ...job, ...source, mayReply: true }
+    const f = fixture({ job: current }); await f.worker.wake()
+    assert.equal(f.runs(), 0)
+    assert.equal(f.calls.filter(c => c.action === 'peerComplete').length, 1)
+    assert.deepEqual(f.calls.find(c => c.action === 'peerComplete').body, { jobId: id, leaseToken: id, decision: 'silent', summary: '' })
+    assert.throws(() => validatePeerResult({ decision: 'report', summary: '再返信' }, config, current), /RESULT_INVALID/)
+    assert.throws(() => validatePeerResult({ decision: 'question', summary: '自動再質問' }, config, current), /RESULT_INVALID/)
+    assert.deepEqual(await runPeer({}, current), { decision: 'silent', summary: '' }) // No local files or CLI needed.
+  }
+})
+
+test('eligible source can stay silent or leave one question for human review', async () => {
+  for (const result of [{ decision: 'silent', summary: '' }, { decision: 'question', summary: 'TSAでこの一つの比較値を確認できますか。' }]) {
+    const f = fixture({ job: { sourceType: 'human' }, result }); await f.worker.wake()
+    assert.equal(f.runs(), 1)
+    assert.equal(f.calls.find(c => c.action === 'peerComplete').body.decision, result.decision)
+    assert.equal(f.calls.some(c => c.action === 'post' || c.action === 'claim'), false)
+  }
+})
+
+test('informational manual sources and code-change requests cannot run peer AI', () => {
+  assert.equal(canAnalyzePeerJob({ ...job, sourceType: 'human', mayReply: false }), false)
+  assert.equal(canAnalyzePeerJob({ ...job, sourceType: 'human', allowCodeChange: true }), false)
 })
 test('uncertain publication retries only identical completion, never AI', async () => {
   const f = fixture({ completeError: true }); await f.worker.wake(); assert.equal(f.worker.saved.phase, 'completion_pending')
