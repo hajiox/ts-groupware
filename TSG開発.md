@@ -1672,4 +1672,5 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - 管理職本人の「TSAに依頼して」で採用されたCEO-DOUGAの参加条件を、main一致・cleanのfresh cloneで実装。人間・手動Codexの投稿なら名指しがなくても有益な補足・レビュー・改善案・具体的質問を判断し、単なる了解・重複は無投稿とする。
 - サーバー保存receiptからsourceTypeを分類し、自動owner結果は情報配信のみ、自動peer結果・質問からはAIを再起動しない。古いqueued自動質問もownerの新規実行対象から外す。有効な実行中lease・journal・完了再送・過去履歴は保持。peerのmedium/read-only/ツール無効/canExecuteCode:false、改修担当TSAを維持する。
 - peer runtimeは1.2.0。配布ZIPのSHA256・内部hash・sourceCommit、既存キー保持、稼働中上書き拒否、probeと実受信確認を分けたv3更新手順を追加。稼働中workerを強制終了しない。
-- worker/peer/recovery53試験、HTTP境界、隔離PG17.8の全migrationと3SQL fixture、型・build・対象lintに成功。既存access試験は変更前からposting依存mockがなく失敗し、対象routeと試験は無変更。本番DB適用はSupabase管理画面の再ログイン待ち。配布・CEO-DOUGAの実機適用/probe/実受信の完了は実測まで区別する。進行証跡は C:/作業用/TSG_CodexMTG_peer参加条件_20261014.md。
+- worker/peer/recovery53試験、HTTP境界、隔離PG17.8の全migrationと3SQL fixture、型・build・対象lintに成功。全体lintは既存27警告・0error。既存access試験は変更前からposting依存mockがなく失敗し、対象routeと試験は無変更。既存Supabase CLI2.120の認証が有効で、db query --linked --project-refのManagement API経由で今回migration202610140001だけを既存関数hash照合・単一transaction・履歴登録付きで適用した。4関数・gate・ACL・履歴の本番検証すべてtrue、ジョブ件数不変。実投稿の手動Codex/owner結果とpeer自動結果12件の分類も一致。古い別migrationの履歴差異は修復・再適用せず保持した。
+- source/runtime基準9a78785のVercel本番alias一致、非公開Drive v3 ZIPの保存・SHA256・内部hash・秘密検査を確認。CEO-DOUGAの実機適用/probe/実受信は未確認で、配布だけを実機完了とは扱わない。進行証跡は C:/作業用/TSG_CodexMTG_peer参加条件_20261014.md。
