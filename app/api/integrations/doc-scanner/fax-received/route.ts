@@ -9,7 +9,12 @@ import {
   preserveResolvedFaxSummary,
   updateFaxSummaryInContent,
 } from '@/lib/doc-scanner-fax-post'
-import sharp from 'sharp'
+import {
+  FaxImageInputError,
+  normalizeFaxImageBuffer,
+  parseFaxOrientationReceipt,
+  type FaxOrientationReceipt,
+} from '@/lib/doc-scanner-fax-image'
 
 type GroupRow = {
   id: string
@@ -33,6 +38,9 @@ type Attachment = {
   sourcePageCount?: number
   rotationCorrected?: boolean
   rotationReason?: string
+  orientation?: FaxOrientationReceipt
+  receivedSha256?: string
+  storedSha256?: string
 }
 
 function getStringValue(item: Record<string, unknown>, keys: string[]) {
@@ -74,6 +82,7 @@ type PostRow = {
   user_id: string
   content: string | null
   created_at: string
+  attachments?: unknown
 }
 
 const DEFAULT_GROUP_NAMES = [
@@ -152,6 +161,13 @@ function normalizeAttachments(value: unknown): Attachment[] {
         (isDataImageUrl(url) ? url : undefined) ||
         (isDataImageUrl(viewUrl) ? viewUrl : undefined)
 
+      const sourcePage = getNumberValue(item, ['sourcePage', 'source_page'])
+      const sourcePageCount = getNumberValue(item, ['sourcePageCount', 'source_page_count'])
+      if (item.orientation !== undefined && sourcePageCount === undefined
+        && ['sourcePageCount', 'source_page_count'].some(key => Object.prototype.hasOwnProperty.call(item, key))) {
+        throw new FaxImageInputError('FAX orientation receipt is invalid')
+      }
+      const orientation = parseFaxOrientationReceipt(item.orientation, sourcePage, sourcePageCount)
       return {
         name: getStringValue(item, ['name', 'fileName', 'filename']) || 'FAX受信.jpg',
         type: getStringValue(item, ['type', 'mimeType', 'mime_type', 'contentType', 'content_type']) || 'image/jpeg',
@@ -164,18 +180,15 @@ function normalizeAttachments(value: unknown): Attachment[] {
         dataBase64,
         encoding: getStringValue(item, ['encoding']),
         sourceFileName: getStringValue(item, ['sourceFileName', 'source_file_name']),
-        sourcePage: getNumberValue(item, ['sourcePage', 'source_page']),
-        sourcePageCount: getNumberValue(item, ['sourcePageCount', 'source_page_count']),
+        sourcePage,
+        sourcePageCount,
+        orientation,
       }
     })
     .filter(item => item.url || item.viewUrl || item.webViewLink || item.dataBase64)
 }
 
 const MAX_INCOMING_IMAGE_BYTES = 6 * 1024 * 1024
-const NORMALIZED_FAX_IMAGE_TYPE = 'image/jpeg'
-const FAX_IMAGE_MAX_WIDTH = 1600
-const FAX_IMAGE_QUALITY = 82
-const UPSIDE_DOWN_CONFIDENCE_THRESHOLD = 0.9
 
 function normalizeBase64Payload(value: string) {
   const trimmed = value.trim()
@@ -189,37 +202,6 @@ function normalizeBase64Payload(value: string) {
 function getJpegAttachmentName(name: string | undefined, fallback: string) {
   const rawName = (name || fallback).trim() || fallback
   return rawName.replace(/\.[^.]+$/, '') + '.jpg'
-}
-
-async function normalizeFaxImageBuffer(buffer: Buffer) {
-  const jpegBuffer = await sharp(buffer)
-    .rotate()
-    .flatten({ background: '#fff' })
-    .resize({ width: FAX_IMAGE_MAX_WIDTH, withoutEnlargement: true })
-    .jpeg({ quality: FAX_IMAGE_QUALITY, mozjpeg: true })
-    .toBuffer()
-
-  const orientation = await detectUpsideDownByInkBalance(jpegBuffer)
-  if (orientation.rotationDegrees === 180 && orientation.confidence >= UPSIDE_DOWN_CONFIDENCE_THRESHOLD) {
-    const rotatedBuffer = await sharp(jpegBuffer)
-      .rotate(180)
-      .jpeg({ quality: FAX_IMAGE_QUALITY, mozjpeg: true })
-      .toBuffer()
-
-    return {
-      buffer: rotatedBuffer,
-      type: NORMALIZED_FAX_IMAGE_TYPE,
-      rotationCorrected: true,
-      rotationReason: orientation.reason,
-    }
-  }
-
-  return {
-    buffer: jpegBuffer,
-    type: NORMALIZED_FAX_IMAGE_TYPE,
-    rotationCorrected: false,
-    rotationReason: orientation.reason,
-  }
 }
 
 async function fetchIncomingImageAttachment(attachment: Attachment) {
@@ -239,78 +221,17 @@ async function fetchIncomingImageAttachment(attachment: Attachment) {
   return Buffer.from(await response.arrayBuffer())
 }
 
-async function detectUpsideDownByInkBalance(imageBuffer: Buffer) {
-  const { data, info } = await sharp(imageBuffer)
-    .grayscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true })
-
-  let totalInk = 0
-  let topInk = 0
-  let bottomInk = 0
-  let yWeightedInk = 0
-
-  const headerCut = Math.floor(info.height * 0.08)
-  const lowerCut = Math.floor(info.height * 0.98)
-  const topLimit = info.height * 0.42
-  const bottomStart = info.height * 0.58
-
-  for (let y = headerCut; y < lowerCut; y += 1) {
-    for (let x = 0; x < info.width; x += 1) {
-      const value = data[y * info.width + x]
-      const ink = Math.max(0, 245 - value)
-      if (ink < 20) continue
-
-      totalInk += ink
-      yWeightedInk += ink * y
-
-      if (y < topLimit) {
-        topInk += ink
-      } else if (y >= bottomStart) {
-        bottomInk += ink
-      }
-    }
-  }
-
-  if (totalInk <= 0) {
-    return {
-      rotationDegrees: 0,
-      confidence: 0,
-      reason: 'no visible ink',
-    }
-  }
-
-  const centerY = yWeightedInk / totalInk / info.height
-  const topRatio = topInk / totalInk
-  const bottomRatio = bottomInk / totalInk
-  const bottomToTop = bottomInk / Math.max(1, topInk)
-
-  if (centerY > 0.68 && topRatio < 0.04 && bottomRatio > 0.55 && bottomToTop > 8) {
-    return {
-      rotationDegrees: 180,
-      confidence: 0.96,
-      reason: `main ink is concentrated at the bottom (center=${centerY.toFixed(2)}, top=${topRatio.toFixed(2)}, bottom=${bottomRatio.toFixed(2)})`,
-    }
-  }
-
-  return {
-    rotationDegrees: 0,
-    confidence: 0.5,
-    reason: `ink balance did not require rotation (center=${centerY.toFixed(2)}, top=${topRatio.toFixed(2)}, bottom=${bottomRatio.toFixed(2)})`,
-  }
-}
-
-async function storeIncomingImageAttachments(attachments: Attachment[]): Promise<Attachment[]> {
-  const stored: Attachment[] = []
-
+async function storeIncomingImageAttachments(attachments: Attachment[], requireImageBytes = false): Promise<Attachment[]> {
+  const prepared: { attachment: Attachment; image?: Awaited<ReturnType<typeof normalizeFaxImageBuffer>> }[] = []
+  // Validate every receipt and image before creating any Drive file.
   for (const attachment of attachments) {
-    if (!attachment.dataBase64 && attachment.driveId) {
-      stored.push(attachment)
+    if (!attachment.dataBase64 && attachment.driveId && !attachment.orientation && !requireImageBytes) {
+      prepared.push({ attachment })
       continue
     }
 
     if (!attachment.type?.startsWith('image/')) {
-      throw new Error('FAX attachment must be an image')
+      throw new FaxImageInputError('FAX attachment must be an image')
     }
 
     const buffer = attachment.dataBase64
@@ -318,15 +239,26 @@ async function storeIncomingImageAttachments(attachments: Attachment[]): Promise
       : await fetchIncomingImageAttachment(attachment)
 
     if (!buffer) {
+      if (attachment.orientation || requireImageBytes) throw new FaxImageInputError('FAX image bytes are required')
       continue
     }
 
-    if (buffer.length === 0) continue
-    if (buffer.length > MAX_INCOMING_IMAGE_BYTES) {
-      throw new Error(`FAX image is too large: ${attachment.name || 'image'}`)
+    if (buffer.length === 0) {
+      if (attachment.orientation || requireImageBytes) throw new FaxImageInputError('FAX image bytes are required')
+      continue
     }
-
-    const normalizedImage = await normalizeFaxImageBuffer(buffer)
+    if (buffer.length > MAX_INCOMING_IMAGE_BYTES) {
+      throw new FaxImageInputError('FAX image is too large')
+    }
+    const image = await normalizeFaxImageBuffer(buffer, attachment.orientation)
+    prepared.push({ attachment, image })
+  }
+  const stored: Attachment[] = []
+  for (const { attachment, image: normalizedImage } of prepared) {
+    if (!normalizedImage) {
+      stored.push(attachment)
+      continue
+    }
     const uploadName = getJpegAttachmentName(attachment.name, `FAX受信_${stored.length + 1}.jpg`)
     const driveFile = await uploadFileToDrive(normalizedImage.buffer, uploadName, normalizedImage.type)
     const fileUrl = driveFile.id
@@ -348,6 +280,9 @@ async function storeIncomingImageAttachments(attachments: Attachment[]): Promise
       sourceFileName: attachment.sourceFileName,
       sourcePage: attachment.sourcePage,
       sourcePageCount: attachment.sourcePageCount,
+      orientation: attachment.orientation,
+      receivedSha256: normalizedImage.receivedSha256,
+      storedSha256: normalizedImage.storedSha256,
       rotationCorrected: normalizedImage.rotationCorrected || undefined,
       rotationReason: normalizedImage.rotationReason,
     })
@@ -391,6 +326,61 @@ async function getExistingPost(groupId: string, userId: string, sourceKey: strin
   return ((data || []) as PostRow[])[0] || null
 }
 
+async function repairFaxAttachments(
+  body: Record<string, unknown>, attachments: Attachment[], group: GroupRow, tsgUserId: string,
+) {
+  const postId = getBodyString(body, 'postId')
+  const sourceKey = getBodyString(body, 'sourceKey')
+  const expectedDriveIds = body.expectedDriveIds
+  if (!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(postId)
+    || !sourceKey || /[\r\n\0]/.test(sourceKey)
+    || !Array.isArray(expectedDriveIds)
+    || !expectedDriveIds.every(value => typeof value === 'string' && value.length > 0 && value.trim() === value)) {
+    return NextResponse.json({ error: 'Repair postId, sourceKey, and expectedDriveIds are required' }, { status: 400 })
+  }
+  const { data, error } = await adminClient.from('gw_posts')
+    .select('id, group_id, user_id, content, attachments, created_at')
+    .eq('id', postId).eq('group_id', group.id).eq('user_id', tsgUserId).is('parent_id', null).maybeSingle()
+  if (error) throw new Error('Failed to read FAX repair target')
+  const post = data as PostRow | null
+  if (!post) return NextResponse.json({ error: 'FAX repair target was not found' }, { status: 404 })
+  const sourceLines = (post.content || '').replace(/\r\n?/g, '\n').split('\n')
+    .filter(line => line.startsWith('受信ID:'))
+  if (sourceLines.length !== 1 || sourceLines[0] !== `受信ID: ${sourceKey}`) {
+    return NextResponse.json({ error: 'FAX repair sourceKey conflict' }, { status: 409 })
+  }
+  const currentAttachments = post.attachments
+  if (!Array.isArray(currentAttachments) || currentAttachments.length !== expectedDriveIds.length
+    || attachments.length !== currentAttachments.length
+    || currentAttachments.some((item, index) => !item || typeof item !== 'object'
+      || item.driveId !== expectedDriveIds[index]
+      || (item.sourcePage !== undefined && item.sourcePage !== attachments[index].sourcePage)
+      || (item.sourcePageCount !== undefined && item.sourcePageCount !== attachments[index].sourcePageCount)
+      || (item.docScannerFileHash !== undefined && item.docScannerFileHash !== attachments[index].docScannerFileHash))) {
+    return NextResponse.json({ error: 'FAX repair attachments conflict' }, { status: 409 })
+  }
+  const storedAttachments = await storeIncomingImageAttachments(attachments, true)
+  if (storedAttachments.length !== attachments.length) {
+    return NextResponse.json({ error: 'FAX repair images could not be stored' }, { status: 400 })
+  }
+  const { data: updatedPost, error: updateError } = await adminClient.from('gw_posts')
+    .update({ attachments: storedAttachments })
+    .eq('id', post.id).eq('group_id', group.id).eq('user_id', tsgUserId).is('parent_id', null)
+    // Compare the complete JSONb snapshot, including ordering and metadata. A
+    // concurrent attachment edit must not be overwritten after Drive uploads.
+    .eq('attachments', JSON.stringify(currentAttachments))
+    .select('id, group_id, user_id, content, attachments, created_at').maybeSingle()
+  if (updateError) throw new Error('Failed to repair FAX attachments')
+  if (!updatedPost) return NextResponse.json({ error: 'FAX repair attachments conflict' }, { status: 409 })
+  await adminClient.from('gw_groups').update({ updated_at: new Date().toISOString() }).eq('id', group.id)
+  return NextResponse.json({
+    ok: true, duplicate: true, repaired: true,
+    group: { id: group.id, name: group.name },
+    poster: { id: tsgUserId, displayName: 'TSG君' },
+    post: updatedPost, url: `/board/${group.id}#post-${updatedPost.id}`,
+  })
+}
+
 export async function GET(request: NextRequest) {
   const authError = assertIntegrationSecret(request)
   if (authError) return authError
@@ -412,6 +402,7 @@ export async function GET(request: NextRequest) {
         id: tsgUserId,
         displayName: 'TSG君',
       },
+      capabilities: { orientationReceiptVersion: 2, semanticRotation: false, repairAttachments: true },
     })
   } catch (error) {
     return NextResponse.json(
@@ -439,6 +430,10 @@ export async function POST(request: NextRequest) {
 
     if (!tsgUserId) {
       return NextResponse.json({ error: 'TSG君 user was not found' }, { status: 500 })
+    }
+
+    if (bodyObject.action === 'repair-attachments') {
+      return await repairFaxAttachments(bodyObject, attachments, group, tsgUserId)
     }
 
     const sourceKey = getBodyString(bodyObject, 'sourceKey')
@@ -565,7 +560,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to create FAX received post' },
-      { status: 500 }
+      { status: error instanceof FaxImageInputError ? 400 : 500 }
     )
   }
 }

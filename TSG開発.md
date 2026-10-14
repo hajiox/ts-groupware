@@ -1674,3 +1674,10 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - peer runtimeは1.2.0。配布ZIPのSHA256・内部hash・sourceCommit、既存キー保持、稼働中上書き拒否、probeと実受信確認を分けたv3更新手順を追加。稼働中workerを強制終了しない。
 - worker/peer/recovery53試験、HTTP境界、隔離PG17.8の全migrationと3SQL fixture、型・build・対象lintに成功。全体lintは既存27警告・0error。既存access試験は変更前からposting依存mockがなく失敗し、対象routeと試験は無変更。既存Supabase CLI2.120の認証が有効で、db query --linked --project-refのManagement API経由で今回migration202610140001だけを既存関数hash照合・単一transaction・履歴登録付きで適用した。4関数・gate・ACL・履歴の本番検証すべてtrue、ジョブ件数不変。実投稿の手動Codex/owner結果とpeer自動結果12件の分類も一致。古い別migrationの履歴差異は修復・再適用せず保持した。
 - source/runtime基準9a78785のVercel本番alias一致、非公開Drive v3 ZIPの保存・SHA256・内部hash・秘密検査を確認。CEO-DOUGAの実機適用/probe/実受信は未確認で、配布だけを実機完了とは扱わない。進行証跡は C:/作業用/TSG_CodexMTG_peer参加条件_20261014.md。
+
+## 2026-10-14 DocScanner FAXの向きと既存添付の安全な修復
+
+- DocScanner担当との協力依頼を受け、固定FAX掲示板の対象投稿とDrive原本JPEGを照合。保存画像自体が上下逆でEXIFはなく、この対象ではTSGの180度推測補正は動いていなかった。DocScannerの投稿時画像と後続OCRで正立した共有PDFの時間差を調査し、今回をTSGの二重回転とは扱わない。
+- TSG受信側のインク位置による180度推測を廃止し、EXIF・JPEG・サイズの正規化のみ維持。DocScannerが最終ページ画像の向きを決め、8項目orientation receiptと実送bytesのSHA256をTSGが検証する。全添付をupload前に検証し、receivedSha256と保存JPEGのstoredSha256を区別する。旧receiptなしpayloadも受け付ける。
+- 同じ専用POSTへrepair-attachmentsを追加。固定掲示板/TSG君/親投稿、postIdと受信IDの完全一致、旧Drive ID順序、新旧ページ枚数と既存page/count/logical hashを確認し、全attachments JSONbのCASで添付だけを交換する。本文・要約・返信・作成日時を維持し、insertとPushは行わない。競合409時などに新規孤立Driveファイルが残り得るが、既存投稿/添付は削除しない。
+- GET capabilitiesで新契約の反映を確認できる。新規の画像・修復回帰、既存FAX要約試験、型、lint（既存27警告/0error）、build、独立reviewに成功。DocScanner側の正立画像を目視確認し、TSG先deploy後に同担当が既存投稿を一度だけ修復、TSG側がDB不変条件と新Drive原本/Chrome表示を照合する。API契約と検証手順はdocs/doc-scanner-fax-orientation.md。
