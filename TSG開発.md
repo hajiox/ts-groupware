@@ -1681,3 +1681,11 @@ TSGは、社内掲示板、グループChat、DM、PWA通知を担当する社�
 - TSG受信側のインク位置による180度推測を廃止し、EXIF・JPEG・サイズの正規化のみ維持。DocScannerが最終ページ画像の向きを決め、8項目orientation receiptと実送bytesのSHA256をTSGが検証する。全添付をupload前に検証し、receivedSha256と保存JPEGのstoredSha256を区別する。旧receiptなしpayloadも受け付ける。
 - 同じ専用POSTへrepair-attachmentsを追加。固定掲示板/TSG君/親投稿、postIdと受信IDの完全一致、旧Drive ID順序、新旧ページ枚数と既存page/count/logical hashを確認し、全attachments JSONbのCASで添付だけを交換する。本文・要約・返信・作成日時を維持し、insertとPushは行わない。競合409時などに新規孤立Driveファイルが残り得るが、既存投稿/添付は削除しない。
 - GET capabilitiesで新契約の反映を確認できる。新規の画像・修復回帰、既存FAX要約試験、型、lint（既存27警告/0error）、build、独立reviewに成功。DocScanner側の正立画像を目視確認し、TSG先deploy後に同担当が既存投稿を一度だけ修復、TSG側がDB不変条件と新Drive原本/Chrome表示を照合する。API契約と検証手順はdocs/doc-scanner-fax-orientation.md。
+
+## 2026-10-15 開いた掲示板の添付差替えへ追随
+
+- 10/14に修復したFAXを再確認。現在DBとDrive原本/thumbnailは正立画像と一致し、本文・日時・投稿数と本番sourceも不変。実Chromeの既存掲示板だけが修復前Drive URLを保持しており、下書きなしを確認したreloadで正立画像へ切り替わった。画像生成の再発ではなく、初期/自操作時しか読み直さないReact stateの残留だった。
+- 本人の恒久対策依頼をDocScanner担当と分担し、fresh main cloneから軽微な表示更新を実装。専用GET attachment-snapshotsは通常session・同group会員・CodexMTG管理職境界を維持し、UUID最大100入力の指定ID/添付だけをno-storeで返す。DB変更と既読副作用はなく、API一覧や認証の既存仕様は変更しない。
+- 初期読込後・focus/表示復帰・表示中2分間隔で、追加読込済みの古い親投稿とコメントもIDごとに100件ずつ確認。添付のみ差分mergeし、新着追加/削除/並替・過去履歴/コメント展開reset・下書き/検索/強制reloadを行わない。拡大画像は新URLへ追随、注釈canvas/draftは保持する。既知の別画像への更新後は旧注釈の保存をupload前に止め、保存中のepoch/署名照合で遅い応答による巻戻りを防ぐ。
+- focus/visibilityの重複を抑制し、非表示・group変更・離脱でabort/解除。batchは20秒でtimeout、失敗時は現在表示を保持して次の通常確認へ戻る。API否定系とmerge試験、実Boardの隔離スマホ/PC合成試験（150投稿/80コメント、下書き/検索/scroll、部分失敗、preview/注釈/保存競合、非表示/権限/timeout/離脱）成功。型・lint（既存27警告/0error）・build成功。
+- 本番検証では既存の修復済み投稿を認証読取し、添付確認の自動GETだけを確認する。実データの再repair・試験投稿・DB migrationは不要。手順と制約はdocs/board-attachment-refresh.md。

@@ -40,7 +40,9 @@
     "test:shift-request-exclusions": "node --experimental-strip-types scripts/test-shift-request-exclusions.mjs",
     "test:task-assignee-mentions": "node --experimental-strip-types scripts/test-task-assignee-mentions.mjs",
     "test:doc-scanner-fax-post": "node --experimental-strip-types scripts/test-doc-scanner-fax-post.mjs",
-    "test:doc-scanner-fax-image": "node scripts/test-doc-scanner-fax-image.cjs"
+    "test:doc-scanner-fax-image": "node scripts/test-doc-scanner-fax-image.cjs",
+    "test:board-attachments": "node scripts/test-board-attachment-snapshots.cjs && node scripts/test-board-attachment-refresh.cjs",
+    "test:board-attachments:ui": "node scripts/test-board-attachment-refresh.cjs --ui"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

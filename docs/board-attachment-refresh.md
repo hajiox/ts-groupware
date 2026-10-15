@@ -1,0 +1,13 @@
+# Refresh attachments on an open board
+
+The board formerly retained its initial attachment URLs until navigation or a local operation reloaded the timeline. After an integration repaired an existing FAX attachment, an already open board could continue displaying the old Drive image even though the database and new original were correct.
+
+The client now checks attachments after the initial load, on focus or return to a visible tab, and every two minutes while visible. It requests all loaded root-post and comment IDs in batches of at most 100, including older posts loaded through pagination. It merges only changed attachments by ID. It does not insert new timeline items, delete missing posts, reorder the list, mark messages read, replace full comments with previews, reset pagination, or change draft text, search, expanded comments, or annotation canvas state. An open image preview follows its post and attachment index to the replacement URL.
+
+`GET /api/posts/attachment-snapshots?group_id=<uuid>&post_ids=<comma-separated uuids>` requires the ordinary session and membership in the requested group; CodexMTG also requires a management role. UUID validation and a 100-ID input bound precede database access. The query scopes both group and IDs, returns only `{posts:[{id,attachments}]}`, and uses `private, no-store`. It performs no database writes or read-status updates. Missing IDs are not deletion instructions.
+
+Requests stop when hidden or unmounted or when the group changes. Focus and visibility events are debounced and requests do not overlap. Errors retain the current view. Request-start attachment signatures and local annotation-save epochs prevent a late snapshot from undoing a local save. If an image changed after annotation editing began, saving the old image is blocked while retaining the draft; this is not a new server-wide concurrency guarantee for annotation writes.
+
+Tests must cover group and role isolation, invalid and excessive IDs, normalization, old parent/comment batches, no-op reference preservation, preview replacement, local save races, failure and cancellation, and preservation of drafts and timeline state. Production verification uses authenticated reads of an existing post and creates no test posts or repairs.
+
+Run `pnpm test:board-attachments` for the API and merge checks. The optional `pnpm test:board-attachments:ui` runs the real Board component with synthetic API responses in an isolated browser, with all external requests blocked. It requires Playwright and Chromium; `PLAYWRIGHT_MODULE_PATH` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE` may point to an existing test runtime. No live account or production writes are used.

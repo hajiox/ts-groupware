@@ -13,6 +13,7 @@ import { USER_DEPARTMENTS, type UserDepartment } from "@/lib/departments";
 import { appendMentionIfMissing, formatMentionName, mentionDisplayName } from "@/lib/mention-names";
 import { REACTION_EMOJIS } from "@/lib/reactions";
 import { getEffectiveUserRole, getUserRoleLabel, isManagementRole } from "@/lib/user-roles";
+import { attachmentIdBatches, attachmentSignature, loadedAttachmentSignatures, mergeAttachmentSnapshots, type AttachmentSnapshot } from "@/lib/board-attachment-refresh";
 
 const POSTS_PAGE_LIMIT = 50;
 const COMMENT_PREVIEW_LIMIT = 5;
@@ -203,7 +204,7 @@ export default function BoardPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadOriginal, setUploadOriginal] = useState(false);
-  const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; name: string; postId: string; attachmentIndex: number } | null>(null);
   const [annotatingImage, setAnnotatingImage] = useState<{ post: Post; attachment: Attachment; attachmentIndex: number } | null>(null);
   const [annotationSaving, setAnnotationSaving] = useState(false);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
@@ -234,6 +235,106 @@ export default function BoardPage() {
   const commentInputRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const commentSectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const commentFileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const loadedPostsRef = useRef({ posts, commentsByPost });
+  loadedPostsRef.current = { posts, commentsByPost };
+  const attachmentMutationEpochsRef = useRef(new Map<string, number>());
+  const attachmentSavingIdsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (loading) return;
+    let active = true;
+    let pendingTimer: number | undefined;
+    let activeRequest: AbortController | null = null;
+
+    const refreshAttachments = async () => {
+      if (!active || activeRequest || document.visibilityState !== "visible") return;
+      const current = loadedPostsRef.current;
+      const expected = loadedAttachmentSignatures(current.posts, current.commentsByPost);
+      if (expected.size === 0) return;
+      const epochs = new Map(attachmentMutationEpochsRef.current);
+      const controller = new AbortController();
+      activeRequest = controller;
+      try {
+        for (const ids of attachmentIdBatches(expected.keys())) {
+          if (!active || controller.signal.aborted || document.visibilityState !== "visible") break;
+          const params = new URLSearchParams({ group_id: id, post_ids: ids.join(",") });
+          let response: Response;
+          let data: { posts?: unknown } | null = null;
+          const requestTimeout = window.setTimeout(() => controller.abort(), 20000);
+          try {
+            response = await fetch(`/api/posts/attachment-snapshots?${params}`, {
+              cache: "no-store", headers: getDeviceHeaders(), signal: controller.signal,
+            });
+            if (response.ok) data = await response.json().catch(() => null);
+          } catch {
+            break;
+          } finally {
+            window.clearTimeout(requestTimeout);
+          }
+          if (!active || controller.signal.aborted) break;
+          if (response.status === 401 || response.status === 403) break;
+          if (!response.ok) continue;
+          const snapshots = new Map<string, AttachmentSnapshot>();
+          for (const row of Array.isArray(data?.posts) ? data.posts : []) {
+            if (!row || typeof row.id !== "string" || !ids.includes(row.id)
+              || !(row.attachments === null || Array.isArray(row.attachments))
+              || attachmentSavingIdsRef.current.has(row.id)
+              || epochs.get(row.id) !== attachmentMutationEpochsRef.current.get(row.id)) continue;
+            snapshots.set(row.id, { id: row.id, attachments: row.attachments });
+          }
+          if (snapshots.size === 0) continue;
+          setPosts(posts => mergeAttachmentSnapshots(posts, snapshots, expected));
+          setCommentsByPost(comments => {
+            let changed = false;
+            const next = Object.fromEntries(Object.entries(comments).map(([postId, rows]) => {
+              const merged = mergeAttachmentSnapshots(rows, snapshots, expected);
+              if (merged !== rows) changed = true;
+              return [postId, merged];
+            }));
+            return changed ? next : comments;
+          });
+        }
+      } finally {
+        if (activeRequest === controller) activeRequest = null;
+      }
+    };
+    const scheduleRefresh = () => {
+      if (!active || document.visibilityState !== "visible") return;
+      window.clearTimeout(pendingTimer);
+      pendingTimer = window.setTimeout(() => { void refreshAttachments(); }, 150);
+    };
+    const visibilityChanged = () => {
+      if (document.visibilityState === "visible") scheduleRefresh();
+      else {
+        window.clearTimeout(pendingTimer);
+        activeRequest?.abort();
+      }
+    };
+    scheduleRefresh();
+    const timer = window.setInterval(scheduleRefresh, 120000);
+    window.addEventListener("focus", scheduleRefresh);
+    document.addEventListener("visibilitychange", visibilityChanged);
+    return () => {
+      active = false;
+      activeRequest?.abort();
+      window.clearTimeout(pendingTimer);
+      window.clearInterval(timer);
+      window.removeEventListener("focus", scheduleRefresh);
+      document.removeEventListener("visibilitychange", visibilityChanged);
+    };
+  }, [id, loading]);
+
+  useEffect(() => {
+    setPreviewImage(current => {
+      if (!current) return current;
+      const post = [...posts, ...Object.values(commentsByPost).flat()].find(post => post.id === current.postId);
+      const attachment = post?.attachments[current.attachmentIndex];
+      if (!attachment || !attachment.type?.startsWith("image")) return null;
+      const url = getAttachmentImageUrl(attachment);
+      return url === current.url && attachment.name === current.name
+        ? current : { ...current, url, name: attachment.name };
+    });
+  }, [posts, commentsByPost]);
 
   useEffect(() => {
     // 初期データを並列取得（/api/groups全件取得を廃止し高速化）
@@ -923,6 +1024,15 @@ export default function BoardPage() {
     if (!annotatingImage || annotationSaving) return;
 
     const target = annotatingImage;
+    const current = loadedPostsRef.current;
+    const currentPost = [...current.posts, ...Object.values(current.commentsByPost).flat()]
+      .find(post => post.id === target.post.id);
+    if (!currentPost || attachmentSignature(currentPost.attachments) !== attachmentSignature(target.post.attachments)) {
+      alert("この画像は別の操作で更新されました。編集を閉じて最新画像を開き直してください。");
+      return;
+    }
+    attachmentMutationEpochsRef.current.set(target.post.id, (attachmentMutationEpochsRef.current.get(target.post.id) || 0) + 1);
+    attachmentSavingIdsRef.current.add(target.post.id);
     setAnnotationSaving(true);
     try {
       const [uploadedAttachment] = await uploadFile(file, "compress-if-needed");
@@ -962,6 +1072,7 @@ export default function BoardPage() {
     } catch (error) {
       alert(error instanceof Error ? error.message : "画像の保存に失敗しました");
     } finally {
+      attachmentSavingIdsRef.current.delete(target.post.id);
       setAnnotationSaving(false);
     }
   }
@@ -1185,7 +1296,7 @@ export default function BoardPage() {
                 <button
                   type="button"
                 className="post-card__image-button"
-                onClick={() => setPreviewImage({ url: imageUrl, name: attachment.name })}
+                onClick={() => setPreviewImage({ url: imageUrl, name: attachment.name, postId: post.id, attachmentIndex: index })}
                 aria-label={`${attachment.name}を拡大表示`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
