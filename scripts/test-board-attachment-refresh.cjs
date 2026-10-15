@@ -48,6 +48,7 @@ function bundle() {
         if(parsed.pathname==='/api/auth/me')return {ok:true,json:async()=>({user:{id:'actor',role:'admin'}})};
         if(parsed.pathname==='/api/posts/attachment-snapshots'){
           const ids=parsed.searchParams.get('post_ids').split(',');window.__requests.push({ids,group:parsed.searchParams.get('group_id')});
+          if(window.__loginRedirect){if(options.redirect==='error')throw new TypeError('Redirect blocked');return {ok:true,status:200,json:async()=>{throw new SyntaxError('Login HTML')}};}
           const rows=[...window.__posts,...window.__comments].filter(row=>ids.includes(row.id)).map(({id,attachments})=>({id,attachments:JSON.parse(JSON.stringify(attachments))}));
           if(window.__failChunk && ids.includes(uuid(1))){window.__failChunk=false;return {ok:false,status:500,json:async()=>({error:'fixture failure'})};}
           if(window.__authFailure)return {ok:false,status:403,json:async()=>({error:'fixture forbidden'})};
@@ -87,6 +88,7 @@ function bundle() {
 }
 async function settle(page){await page.waitForTimeout(240)}
 async function focus(page){await page.evaluate(()=>{window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'))});await settle(page)}
+async function waitForImage(page, selector, version){await page.waitForFunction(({selector,version})=>document.querySelector(selector)?.getAttribute('src')?.includes(version),{selector,version})}
 const postSelector=n=>`#post-00000000-0000-4000-8000-${n.toString(16).padStart(12,'0')}`
 async function mount(browser,viewport){
   const page=await browser.newPage({viewport}),errors=[]
@@ -131,7 +133,7 @@ async function uiTests(){
       assert.ok((await page.locator(postSelector(1)).locator('.post-card__image').getAttribute('src')).includes('old-1'))
       assert.ok((await page.locator('#comment-00000000-0000-4000-8000-000000000244').locator('.post-card__image').getAttribute('src')).includes('new-old-comment'))
       await focus(page)
-      assert.ok((await page.locator(postSelector(1)).locator('.post-card__image').getAttribute('src')).includes('new-oldest'))
+      await waitForImage(page,postSelector(1)+' .post-card__image','new-oldest')
       assert.equal(await page.getByRole('textbox',{name:'投稿テキスト',exact:true}).inputValue(),'preserved draft')
       assert.equal(await page.getByRole('textbox',{name:'コメントを入力',exact:true}).inputValue(),'preserved comment draft')
       assert.equal(await page.getByRole('searchbox',{name:'掲示板を検索'}).inputValue(),'fixture')
@@ -140,7 +142,7 @@ async function uiTests(){
       assert.ok(Math.abs(await page.locator('.post-list').evaluate(element=>element.scrollTop)-scrollBefore)<2)
       await page.locator(postSelector(1)).getByRole('button',{name:'fixture-1.pngを拡大表示',exact:true}).click()
       await page.evaluate(()=>window.__changeAttachment(1,'new-preview'));await focus(page)
-      assert.ok((await page.locator('.image-preview-img').getAttribute('src')).includes('new-preview'))
+      await waitForImage(page,'.image-preview-img','new-preview')
       await page.evaluate(()=>{window.__posts.find(row=>row.id===window.__uuid(1)).attachments=null});await focus(page)
       await page.locator('.image-preview-img').waitFor({state:'detached'})
       assert.equal(await page.locator('.image-preview-img').count(),0,'Removing the expanded attachment must close its stale preview')
@@ -174,6 +176,10 @@ async function uiTests(){
       await page.evaluate(()=>{window.__authFailure=true;window.__requests=[]});await focus(page)
       assert.equal(await page.evaluate(()=>window.__requests.length),1,'403 does not retry remaining chunks')
       assert.equal(await page.locator('.post-list>.post-card').count(),150)
+      await page.evaluate(()=>{window.__authFailure=false;window.__loginRedirect=true;window.__requests=[]});await focus(page)
+      assert.equal(await page.evaluate(()=>window.__requests.length),1,'An expired session redirect stops the batch run without following the login page')
+      assert.equal(await page.locator('.post-list>.post-card').count(),150)
+      await page.evaluate(()=>{window.__loginRedirect=false})
       await page.evaluate(()=>{window.__authFailure=false;window.__holdSnapshot=true});await focus(page)
       const beforeTimeout=await page.evaluate(()=>window.__aborted)
       await page.evaluate(()=>window.__expireRequest());await settle(page)

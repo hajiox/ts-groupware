@@ -263,7 +263,7 @@ export default function BoardPage() {
           const requestTimeout = window.setTimeout(() => controller.abort(), 20000);
           try {
             response = await fetch(`/api/posts/attachment-snapshots?${params}`, {
-              cache: "no-store", headers: getDeviceHeaders(), signal: controller.signal,
+              cache: "no-store", redirect: "error", headers: getDeviceHeaders(), signal: controller.signal,
             });
             if (response.ok) data = await response.json().catch(() => null);
           } catch {
